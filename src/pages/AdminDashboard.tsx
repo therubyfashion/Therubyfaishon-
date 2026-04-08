@@ -870,14 +870,33 @@ export default function AdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: settings.supportEmail,
-          subject: 'Test Email from The Ruby',
+          subject: 'Test Email from The Ruby ✨',
           html: `
-            <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-              <h2 style="color: #E11D48;">The Ruby Test</h2>
-              <p>This is a test email to verify your Resend API configuration.</p>
-              <p>If you received this, your email integration is working perfectly!</p>
-              <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
-              <p style="font-size: 12px; color: #666;">The Ruby Admin Panel</p>
+            <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #FAFAFA; padding: 40px 20px; color: #1A2C54;">
+              <div style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 40px; padding: 60px; box-shadow: 0 20px 50px -20px rgba(0,0,0,0.08); border: 1px solid #F0F0F0;">
+                <div style="text-align: center; margin-bottom: 50px;">
+                  ${settings.storeLogo ? `<img src="${settings.storeLogo}" alt="${settings.storeName}" style="max-height: 60px; margin-bottom: 10px;">` : `<h1 style="font-size: 32px; font-weight: bold; letter-spacing: -1px; margin: 0; color: #E11D48;">${settings.storeName?.toUpperCase() || 'THE RUBY'}</h1>`}
+                </div>
+                
+                <div style="text-align: center; margin-bottom: 40px;">
+                  <div style="display: inline-block; background-color: #FDF2F8; color: #E11D48; padding: 12px 24px; border-radius: 100px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 24px;">Connection Test</div>
+                  <h2 style="font-size: 28px; font-weight: bold; margin: 0 0 16px 0; color: #1A2C54;">Email Integration Successful! 🚀</h2>
+                  <p style="font-size: 16px; color: #666666; line-height: 1.6; margin: 0;">This is a test email to verify your Resend API configuration. If you're reading this, your store is ready to send professional notifications to your customers.</p>
+                </div>
+
+                <div style="background-color: #F9FAFB; border-radius: 24px; padding: 32px; margin-bottom: 40px; border: 1px solid #F3F4F6;">
+                  <p style="font-size: 14px; color: #666666; margin: 0; text-align: center;">Your API Key is correctly configured and the server is ready to handle email requests.</p>
+                </div>
+
+                <div style="text-align: center; border-top: 1px solid #F0F0F0; pt-40px;">
+                  <p style="font-size: 16px; font-weight: bold; color: #1A2C54; margin: 0;">The Ruby Admin Panel</p>
+                  <p style="font-size: 14px; color: #E11D48; font-weight: bold; margin: 4px 0 0 0;">System Notification</p>
+                </div>
+              </div>
+              
+              <div style="text-align: center; margin-top: 40px;">
+                <p style="font-size: 12px; color: #9CA3AF;">&copy; ${new Date().getFullYear()} ${settings.storeName || 'The Ruby'}. All rights reserved.</p>
+              </div>
             </div>
           `
         })

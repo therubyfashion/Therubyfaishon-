@@ -87,18 +87,36 @@ export default function Signup() {
 
       // Send Verification Email
       const emailHtml = `
-        <div style="font-family: sans-serif; background-color: #FAFAFA; padding: 40px 20px; color: #1A2C54;">
+        <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #FAFAFA; padding: 40px 20px; color: #1A2C54;">
           <div style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 40px; padding: 60px; box-shadow: 0 20px 50px -20px rgba(0,0,0,0.08); border: 1px solid #F0F0F0;">
-            <div style="text-align: center; margin-bottom: 40px;">
-              <h1 style="font-size: 32px; font-weight: bold; letter-spacing: -1px; margin: 0; color: #E11D48;">The Ruby</h1>
+            <div style="text-align: center; margin-bottom: 50px;">
+              ${storeSettings?.storeLogo ? `<img src="${storeSettings.storeLogo}" alt="${storeSettings.storeName}" style="max-height: 60px; margin-bottom: 10px;">` : `<h1 style="font-size: 32px; font-weight: bold; letter-spacing: -1px; margin: 0; color: #E11D48;">${storeSettings?.storeName?.toUpperCase() || 'THE RUBY'}</h1>`}
             </div>
+            
             <div style="text-align: center; margin-bottom: 40px;">
-              <h2 style="font-size: 24px; font-weight: bold; margin-bottom: 20px;">Welcome, ${formData.firstName}!</h2>
-              <p style="font-size: 16px; color: #666666; line-height: 1.6;">To start your shopping experience, please verify your email address.</p>
+              <div style="display: inline-block; background-color: #FDF2F8; color: #E11D48; padding: 12px 24px; border-radius: 100px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 24px;">Welcome to the Family</div>
+              <h2 style="font-size: 28px; font-weight: bold; margin: 0 0 16px 0; color: #1A2C54;">Welcome, ${formData.firstName}! ✨</h2>
+              <p style="font-size: 16px; color: #666666; line-height: 1.6; margin: 0;">We're thrilled to have you with us. To start your premium shopping experience, please verify your email address by clicking the button below.</p>
             </div>
-            <div style="text-align: center; margin-bottom: 40px;">
-              <a href="${verificationLink}" style="display: inline-block; background-color: #1A2C54; color: #FFFFFF; padding: 18px 36px; border-radius: 16px; text-decoration: none; font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px;">Verify My Account</a>
+
+            <div style="text-align: center; margin-bottom: 50px;">
+              <a href="${verificationLink}" style="display: inline-block; background-color: #1A2C54; color: #FFFFFF; padding: 20px 40px; border-radius: 16px; text-decoration: none; font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; box-shadow: 0 10px 20px -5px rgba(26,44,84,0.3);">Verify My Account</a>
             </div>
+
+            <div style="background-color: #F9FAFB; border-radius: 24px; padding: 32px; margin-bottom: 40px; border: 1px solid #F3F4F6; text-align: center;">
+              <p style="font-size: 14px; color: #666666; margin: 0;">If the button doesn't work, you can also copy and paste this link into your browser:</p>
+              <p style="font-size: 12px; color: #9CA3AF; margin: 12px 0 0 0; word-break: break-all;">${verificationLink}</p>
+            </div>
+
+            <div style="text-align: center; border-top: 1px solid #F0F0F0; pt-40px;">
+              <p style="font-size: 14px; color: #9CA3AF; margin-bottom: 24px;">This link will expire in 24 hours. If you didn't create an account, you can safely ignore this email.</p>
+              <p style="font-size: 16px; font-weight: bold; color: #1A2C54; margin: 0;">Happy Shopping!</p>
+              <p style="font-size: 14px; color: #E11D48; font-weight: bold; margin: 4px 0 0 0;">Team ${storeSettings?.storeName || 'The Ruby'}</p>
+            </div>
+          </div>
+          
+          <div style="text-align: center; margin-top: 40px;">
+            <p style="font-size: 12px; color: #9CA3AF;">&copy; ${new Date().getFullYear()} ${storeSettings?.storeName || 'The Ruby'}. All rights reserved.</p>
           </div>
         </div>
       `;
