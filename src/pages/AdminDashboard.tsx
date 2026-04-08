@@ -4118,6 +4118,19 @@ export default function AdminDashboard() {
                                   className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
                                 />
                               </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">WhatsApp Number (with country code)</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="919876543210"
+                                  value={settings.footerSocials?.whatsapp || ''}
+                                  onChange={(e) => setSettings({
+                                    ...settings, 
+                                    footerSocials: { ...settings.footerSocials, whatsapp: e.target.value }
+                                  })}
+                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                />
+                              </div>
                             </div>
                           </div>
                         </div>
