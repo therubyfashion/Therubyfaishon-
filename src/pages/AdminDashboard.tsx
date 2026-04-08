@@ -4369,9 +4369,10 @@ export default function AdminDashboard() {
                               <p className="text-[10px] text-amber-600 font-bold uppercase tracking-widest">Steps to fix:</p>
                               <ol className="text-[10px] text-amber-700 space-y-1 list-decimal ml-4 font-medium">
                                 <li>Go to <a href="https://console.firebase.google.com/" target="_blank" className="underline font-bold">Firebase Console</a></li>
-                                <li>Select your project &gt; <b>Authentication</b> &gt; <b>Settings</b></li>
-                                <li>Click on <b>Authorized Domains</b></li>
-                                <li>Add <b>rubyfashion.shop</b> to the list</li>
+                                <li>Select your project &gt; <b>Authentication</b> &gt; <b>Settings</b> tab</li>
+                                <li>If you see a back arrow (←) next to "User account linking", click it to see the main settings list</li>
+                                <li>Scroll down and click on <b>Authorized domains</b></li>
+                                <li>Click <b>Add domain</b> and add <b>rubyfashion.shop</b></li>
                               </ol>
                             </div>
                           </div>
