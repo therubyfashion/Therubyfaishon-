@@ -40,7 +40,7 @@ export default function Login() {
       if (error.code === 'auth/account-exists-with-different-credential') {
         toast.error("You already have an account with this email using a different login method (e.g., Google or Email). Please use your original method to sign in.");
       } else {
-        toast.error("Failed to login. Please try again.");
+        toast.error(error.message || "Failed to login. Please try again.");
       }
     } finally {
       setLoading(false);
@@ -59,7 +59,10 @@ export default function Login() {
 
       if (userData && !userData.isVerified) {
         toast.error("Please verify your email before logging in.");
+        const userEmail = user.email;
+        const userUid = user.uid;
         await auth.signOut();
+        navigate(`/verify-prompt?email=${encodeURIComponent(userEmail || '')}&uid=${userUid}`);
         return;
       }
 
@@ -70,7 +73,7 @@ export default function Login() {
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         toast.error("Invalid email or password.");
       } else {
-        toast.error("Failed to sign in. Please try again.");
+        toast.error(error.message || "Failed to sign in. Please try again.");
       }
     } finally {
       setLoading(false);

@@ -15,7 +15,7 @@ let resend = new Resend(currentResendApiKey);
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT || 3000;
+  const PORT = 3000;
 
   app.use(express.json());
 
@@ -31,29 +31,40 @@ async function startServer() {
   });
 
   app.post("/api/send-email", async (req, res) => {
-    const { to, subject, html } = req.body;
+    const { to, subject, html, from } = req.body;
     
+    if (!to || !subject || !html) {
+      console.error("Missing required fields for email:", { to, subject, hasHtml: !!html });
+      return res.status(400).json({ error: "Missing required fields: to, subject, or html" });
+    }
+
     if (!currentResendApiKey) {
       console.warn("RESEND_API_KEY is missing. Email will not be sent.");
       return res.status(200).json({ message: "Email simulation: API key missing" });
     }
 
     try {
-      const data = await resend.emails.send({
-        from: 'The Ruby <onboarding@resend.dev>',
-        to: [to],
+      const emailPayload = {
+        from: from || 'The Ruby <onboarding@resend.dev>',
+        to: Array.isArray(to) ? to : [to],
         subject: subject,
         html: html,
-      });
+      };
+
+      const data = await resend.emails.send(emailPayload);
       
       if (data.error) {
-        console.error("Resend API error:", data.error);
-        return res.status(400).json({ error: data.error.message });
+        console.error("Resend API error details:", JSON.stringify(data.error, null, 2));
+        return res.status(400).json({ 
+          error: data.error.message || "Validation error", 
+          name: data.error.name,
+          details: data.error
+        });
       }
       
       res.json(data);
     } catch (error: any) {
-      console.error("Email error:", error);
+      console.error("Email execution error:", error);
       res.status(500).json({ error: error.message || "Failed to send email" });
     }
   });

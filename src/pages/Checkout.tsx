@@ -275,7 +275,7 @@ export default function Checkout() {
                         ${finalOrderData.items.map((item: any) => `
                           <div style="display: flex; align-items: center; margin-bottom: 16px;">
                             <div style="width: 50px; height: 60px; background-color: #FFFFFF; border-radius: 8px; overflow: hidden; margin-right: 16px; border: 1px solid #E5E7EB;">
-                              ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 100%; height: 100%; object-cover: cover;">` : ''}
+                              ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 100%; height: 100%; object-fit: cover;">` : ''}
                             </div>
                             <div style="flex: 1;">
                               <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${item.name}</p>
@@ -340,6 +340,7 @@ export default function Checkout() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   to: finalOrderData.address.email,
+                  from: settingsData.fromEmail || 'The Ruby <onboarding@resend.dev>',
                   subject: `Order Confirmed! #${finalOrderData.orderId} ✨`,
                   html: emailHtml
                 })

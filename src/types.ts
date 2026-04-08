@@ -47,6 +47,7 @@ export interface Order {
   items: CartItem[];
   total: number;
   status: 'pending' | 'processing' | 'shipped' | 'delivered';
+  shippingMethod: string;
   shippingAddress: {
     fullName: string;
     phoneNumber: string;

@@ -133,7 +133,7 @@ export default function Signup() {
 
       await signOut(auth);
       toast.success("Verification email sent! Please check your inbox.");
-      navigate('/login');
+      navigate(`/verify-prompt?email=${encodeURIComponent(formData.email)}&uid=${user.uid}`);
     } catch (error: any) {
       console.error("Signup error:", error);
       if (error.code === 'auth/email-already-in-use') {

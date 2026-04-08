@@ -9,7 +9,7 @@ import {
   TrendingUp, ShoppingCart, UserPlus, AlertTriangle, ChevronRight, ChevronLeft,
   MoreVertical, Edit2, Trash2, Plus, Image as ImageIcon, Database, BarChart3,
   Home, ArrowLeft, Camera, ChevronDown, ChevronUp, Bold, Heading, Globe, Truck,
-  TrendingDown, Shield, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star
+  TrendingDown, Shield, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -744,6 +744,7 @@ export default function AdminDashboard() {
     siteTitle: 'The Ruby | Premium Clothing',
     metaDescription: 'Discover the latest trends in fashion at The Ruby.',
     resendApiKey: '',
+    fromEmail: 'The Ruby <onboarding@resend.dev>',
     footerSocials: {
       instagram: '',
       x: '',
@@ -870,6 +871,7 @@ export default function AdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: settings.supportEmail,
+          from: settings.fromEmail || 'The Ruby <onboarding@resend.dev>',
           subject: 'Test Email from The Ruby ✨',
           html: `
             <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #FAFAFA; padding: 40px 20px; color: #1A2C54;">
@@ -906,7 +908,11 @@ export default function AdminDashboard() {
         toast.success(`Test email sent to ${settings.supportEmail}`);
       } else {
         const data = await response.json();
-        toast.error(data.error || 'Failed to send test email');
+        if (data.name === 'validation_error') {
+          toast.error('Resend Validation Error: Check if your "From Email" is verified or if you are sending to an unauthorized email.');
+        } else {
+          toast.error(data.error || 'Failed to send test email');
+        }
       }
     } catch (error) {
       console.error('Error testing email:', error);
@@ -2120,7 +2126,7 @@ export default function AdminDashboard() {
                               className="flex items-center justify-between p-4 bg-gray-50/50 rounded-2xl border border-gray-100 transition-all cursor-pointer group"
                             >
                               <div className="flex items-center space-x-4">
-                                <img src={product.image} alt={product.name} className="w-12 h-12 rounded-xl object-cover shadow-sm group-hover:scale-110 transition-transform" />
+                                {product.image && <img src={product.image} alt={product.name} className="w-12 h-12 rounded-xl object-cover shadow-sm group-hover:scale-110 transition-transform" />}
                                 <div>
                                   <p className="text-sm font-bold text-[#1A2C54]">{product.name}</p>
                                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Product</p>
@@ -2166,7 +2172,7 @@ export default function AdminDashboard() {
                             >
                               <div className="flex items-center space-x-3">
                                 <div className="w-12 h-12 rounded-xl overflow-hidden bg-white border border-red-100 shadow-inner">
-                                  <img src={product.images?.[0]} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                  {product.images?.[0] && <img src={product.images[0]} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />}
                                 </div>
                                 <div>
                                   <p className="text-sm font-bold text-[#1A2C54]">{product.name}</p>
@@ -2524,6 +2530,7 @@ export default function AdminDashboard() {
                         <th className="py-4 px-6">#Order ID</th>
                         <th className="py-4 px-6">Customer</th>
                         <th className="py-4 px-6">Status</th>
+                        <th className="py-4 px-6">Shipping</th>
                         <th className="py-4 px-6">Total</th>
                         <th className="py-4 px-6">Date</th>
                         <th className="py-4 px-6 text-right">Actions</th>
@@ -2561,6 +2568,11 @@ export default function AdminDashboard() {
                           <td className="py-4 px-6">
                             <span className={`px-3 py-1 rounded-md text-[11px] font-bold ${statusColors[order.status || 'Pending']}`}>
                               {order.status || 'Pending'}
+                            </span>
+                          </td>
+                          <td className="py-4 px-6">
+                            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                              {order.shippingMethod || 'Standard'}
                             </span>
                           </td>
                           <td className="py-4 px-6 font-black text-[#1A2C54]">
@@ -3098,7 +3110,7 @@ export default function AdminDashboard() {
                 {banners.map(banner => (
                   <div key={banner.id} className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden group hover:border-ruby/30 transition-all">
                     <div className="aspect-video relative overflow-hidden">
-                      <img src={banner.image} alt={banner.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                      {banner.image && <img src={banner.image} alt={banner.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex flex-col justify-end p-8">
                         <h3 className="text-2xl font-black text-white">{banner.title}</h3>
                         <p className="text-white/80 text-sm font-medium">{banner.subtitle}</p>
@@ -3369,7 +3381,7 @@ export default function AdminDashboard() {
                                 ? 'bg-[#1A2C54] text-white rounded-tr-none' 
                                 : 'bg-white text-[#1A2C54] border border-gray-100 rounded-tl-none'
                             }`}>
-                              {msg.type === 'image' ? (
+                              {msg.type === 'image' && msg.image ? (
                                 <div className="relative group">
                                   <img 
                                     src={msg.image} 
@@ -3662,7 +3674,7 @@ export default function AdminDashboard() {
                       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
                         {cart.items?.map((item: any, i: number) => (
                           <div key={i} className="w-12 h-12 rounded-xl overflow-hidden bg-gray-50 border border-gray-100 flex-shrink-0">
-                            <img src={item.image} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            {item.image && <img src={item.image} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />}
                           </div>
                         ))}
                       </div>
@@ -3720,7 +3732,7 @@ export default function AdminDashboard() {
                               <div className="flex -space-x-2">
                                 {cart.items?.slice(0, 3).map((item: any, i: number) => (
                                   <div key={i} className="w-8 h-8 rounded-lg border-2 border-white overflow-hidden bg-gray-100 shadow-sm">
-                                    <img src={item.image} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                    {item.image && <img src={item.image} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />}
                                   </div>
                                 ))}
                                 {cart.items?.length > 3 && (
@@ -3836,7 +3848,7 @@ export default function AdminDashboard() {
                         <div key={idx} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl group hover:bg-ruby/5 transition-all">
                           <div className="flex items-center gap-4">
                             <div className="w-12 h-12 rounded-xl overflow-hidden bg-white border border-gray-100">
-                              <img src={p.images[0]} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              {p.images[0] && <img src={p.images[0]} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />}
                             </div>
                             <div>
                               <p className="text-sm font-bold text-[#1A2C54]">{p.name}</p>
@@ -4166,15 +4178,40 @@ export default function AdminDashboard() {
                           <Mail size={20} className="mr-2 text-ruby" /> Email Service (Resend)
                         </h3>
                         <div className="space-y-4">
-                          <div>
-                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Resend API Key</label>
-                            <input 
-                              type="password" 
-                              placeholder="re_..."
-                              value={settings.resendApiKey}
-                              onChange={(e) => setSettings({...settings, resendApiKey: e.target.value})}
-                              className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
-                            />
+                          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 space-y-2">
+                            <h4 className="text-[11px] font-bold text-blue-700 uppercase tracking-widest flex items-center">
+                              <Info size={14} className="mr-2" /> Important Instructions
+                            </h4>
+                            <ul className="text-[10px] text-blue-600 space-y-1 font-medium leading-relaxed">
+                              <li>• By default, emails are sent using <b>onboarding@resend.dev</b>.</li>
+                              <li>• <b>Note:</b> Resend only allows sending to your own account email when using the default sender.</li>
+                              <li>• To send emails to customers, you <b>must</b> verify your domain on <a href="https://resend.com/domains" target="_blank" className="underline font-bold">Resend.com</a>.</li>
+                              <li>• <a href="https://resend.com/docs/dashboard/domains/introduction" target="_blank" className="text-blue-800 underline font-bold">Click here for Step-by-Step Domain Setup Guide</a></li>
+                              <li>• Once verified, update the "From Email" below with your verified address.</li>
+                            </ul>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Resend API Key</label>
+                              <input 
+                                type="password" 
+                                placeholder="re_..."
+                                value={settings.resendApiKey}
+                                onChange={(e) => setSettings({...settings, resendApiKey: e.target.value})}
+                                className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">From Email (Verified Domain)</label>
+                              <input 
+                                type="text" 
+                                placeholder="The Ruby <onboarding@resend.dev>"
+                                value={settings.fromEmail}
+                                onChange={(e) => setSettings({...settings, fromEmail: e.target.value})}
+                                className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                              />
+                            </div>
                           </div>
                           <div className="pt-4">
                             <button 
@@ -4251,20 +4288,44 @@ export default function AdminDashboard() {
                         </h3>
                         <div className="space-y-4">
                           <div>
-                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Store Favicon URL</label>
+                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Store Favicon</label>
                             <div className="flex items-center space-x-4">
-                              <input 
-                                type="url" 
-                                placeholder="https://example.com/favicon.ico"
-                                value={settings.favicon}
-                                onChange={(e) => setSettings({...settings, favicon: e.target.value})}
-                                className="flex-grow bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
-                              />
-                              {settings.favicon && (
-                                <div className="w-10 h-10 bg-gray-50 rounded-xl flex items-center justify-center border border-gray-100 overflow-hidden">
-                                  <img src={settings.favicon} alt="Favicon Preview" className="w-6 h-6 object-contain" referrerPolicy="no-referrer" />
-                                </div>
-                              )}
+                              <div className="flex-grow flex flex-col items-center justify-center border-2 border-dashed border-gray-100 rounded-xl p-4 hover:border-ruby/30 transition-all cursor-pointer relative group">
+                                {settings.favicon ? (
+                                  <div className="relative w-full h-16 rounded-lg overflow-hidden flex items-center justify-center">
+                                    <img src={settings.favicon} alt="Favicon Preview" className="h-full object-contain" referrerPolicy="no-referrer" />
+                                    <button 
+                                      type="button"
+                                      onClick={() => setSettings({...settings, favicon: ''})}
+                                      className="absolute top-1 right-1 p-1 bg-white/80 backdrop-blur-sm rounded-lg text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="p-2 bg-gray-50 rounded-lg text-gray-400 mb-1">
+                                      <ImageIcon size={20} />
+                                    </div>
+                                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Upload Favicon</p>
+                                  </>
+                                )}
+                                <input 
+                                  type="file" 
+                                  accept="image/*"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      const reader = new FileReader();
+                                      reader.onloadend = () => {
+                                        setSettings({...settings, favicon: reader.result as string});
+                                      };
+                                      reader.readAsDataURL(file);
+                                    }
+                                  }}
+                                  className="absolute inset-0 opacity-0 cursor-pointer"
+                                />
+                              </div>
                             </div>
                             <p className="text-[10px] text-gray-400 mt-2 leading-relaxed">
                               This icon will appear in the browser tab. Use a square image (32x32 or 64x64).
@@ -4295,6 +4356,24 @@ export default function AdminDashboard() {
                             <p className="text-[10px] text-gray-400 mt-2 leading-relaxed">
                               A brief summary of your store. Google often shows this in search results.
                             </p>
+                          </div>
+
+                          <div className="mt-8 p-6 bg-amber-50 border border-amber-100 rounded-2xl space-y-4">
+                            <h4 className="text-sm font-bold text-amber-800 flex items-center">
+                              <AlertTriangle size={18} className="mr-2" /> Custom Domain Login Issue?
+                            </h4>
+                            <p className="text-[11px] text-amber-700 leading-relaxed font-medium">
+                              If you are using a custom domain (like <b>rubyfashion.shop</b>) and login is failing, you must add your domain to the <b>Authorized Domains</b> list in your Firebase Console.
+                            </p>
+                            <div className="space-y-2">
+                              <p className="text-[10px] text-amber-600 font-bold uppercase tracking-widest">Steps to fix:</p>
+                              <ol className="text-[10px] text-amber-700 space-y-1 list-decimal ml-4 font-medium">
+                                <li>Go to <a href="https://console.firebase.google.com/" target="_blank" className="underline font-bold">Firebase Console</a></li>
+                                <li>Select your project &gt; <b>Authentication</b> &gt; <b>Settings</b></li>
+                                <li>Click on <b>Authorized Domains</b></li>
+                                <li>Add <b>rubyfashion.shop</b> to the list</li>
+                              </ol>
+                            </div>
                           </div>
                         </div>
                       </motion.div>

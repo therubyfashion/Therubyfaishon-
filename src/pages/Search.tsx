@@ -108,12 +108,14 @@ export default function Search() {
                       className="flex items-center gap-4 p-4 bg-white border border-gray-100 rounded-2xl hover:border-ruby/20 hover:shadow-lg hover:shadow-ruby/5 transition-all group"
                     >
                       <div className="w-20 h-20 rounded-xl overflow-hidden bg-gray-50 flex-shrink-0">
-                        <img 
-                          src={product.images[0]} 
-                          alt={product.name} 
-                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                          referrerPolicy="no-referrer"
-                        />
+                        {product.images[0] && (
+                          <img 
+                            src={product.images[0]} 
+                            alt={product.name} 
+                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                            referrerPolicy="no-referrer"
+                          />
+                        )}
                       </div>
                       <div className="flex-grow min-w-0">
                         <h3 className="text-sm font-bold text-[#1A2C54] truncate">{product.name}</h3>

@@ -340,16 +340,18 @@ export default function ProductDetail() {
         {/* Detail Images */}
         <div className="detail-images">
           <div className="w-full aspect-[3/4] bg-gradient-to-br from-[#fef5f7] to-[#fde8ed] rounded-[20px] flex items-center justify-center relative overflow-hidden group">
-            <motion.img 
-              key={activeImage}
-              initial={{ opacity: 0, scale: 1.05 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.4 }}
-              src={product.images[activeImage]} 
-              alt={product.name} 
-              className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-            />
+            {product.images[activeImage] && (
+              <motion.img 
+                key={activeImage}
+                initial={{ opacity: 0, scale: 1.05 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.4 }}
+                src={product.images[activeImage]} 
+                alt={product.name} 
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            )}
             <div className="absolute top-4 right-4 flex flex-col gap-3 z-10">
               <button 
                 onClick={() => toggleWishlist(product)}
@@ -374,7 +376,7 @@ export default function ProductDetail() {
                   onClick={() => setActiveImage(idx)}
                   className={`w-[72px] h-[72px] rounded-[10px] bg-white border-2 flex items-center justify-center overflow-hidden flex-shrink-0 transition-all ${activeImage === idx ? 'border-ruby' : 'border-gray-100 hover:border-ruby/30'}`}
                 >
-                  <img src={img} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  {img && <img src={img} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />}
                 </button>
               ))}
             </div>

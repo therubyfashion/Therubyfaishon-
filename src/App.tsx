@@ -28,6 +28,7 @@ const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
 const Search = React.lazy(() => import('./pages/Search'));
 const Profile = React.lazy(() => import('./pages/Profile'));
 const VerifyEmail = React.lazy(() => import('./pages/VerifyEmail'));
+const VerifyPrompt = React.lazy(() => import('./pages/VerifyPrompt'));
 const InfoPage = React.lazy(() => import('./pages/InfoPage'));
 
 const ScrollToTop = () => {
@@ -88,13 +89,14 @@ function AppContent() {
           
           // Apply Favicon
           if (settings.favicon) {
-            let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
-            if (!link) {
-              link = document.createElement('link');
-              link.setAttribute('rel', 'icon');
-              document.head.appendChild(link);
-            }
+            const links = document.querySelectorAll("link[rel*='icon']");
+            links.forEach(link => link.parentNode?.removeChild(link));
+            
+            const link = document.createElement('link');
+            link.type = 'image/x-icon';
+            link.rel = 'shortcut icon';
             link.href = settings.favicon;
+            document.getElementsByTagName('head')[0].appendChild(link);
           }
         }
       } catch (error) {
@@ -127,6 +129,7 @@ function AppContent() {
             <Route path="/search" element={<Search />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
+            <Route path="/verify-prompt" element={<VerifyPrompt />} />
             <Route path="/:slug" element={<InfoPage />} />
             <Route 
               path="/admin/*" 

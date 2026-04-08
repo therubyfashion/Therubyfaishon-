@@ -131,12 +131,14 @@ export default function Home() {
                 >
                   <Link to={`/product/${product.id}`} className="block space-y-6">
                     <div className="relative aspect-[3/4] overflow-hidden rounded-3xl bg-gray-100">
-                      <img 
-                        src={product.images[0]} 
-                        alt={product.name} 
-                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                        referrerPolicy="no-referrer"
-                      />
+                      {product.images[0] && (
+                        <img 
+                          src={product.images[0]} 
+                          alt={product.name} 
+                          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                          referrerPolicy="no-referrer"
+                        />
+                      )}
                       {product.comparePrice > product.price && (
                         <div className="absolute top-4 left-4 bg-white px-3 py-1 rounded-full text-[10px] font-bold text-ruby uppercase tracking-widest shadow-sm">
                           Sale
