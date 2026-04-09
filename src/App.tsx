@@ -59,9 +59,14 @@ export default function App() {
   );
 }
 
+import { useVisitorTracking } from './hooks/useVisitorTracking';
+
 function AppContent() {
   const location = useLocation();
   const isAdminPath = location.pathname.startsWith('/admin');
+  
+  // Track live visitors
+  useVisitorTracking();
 
   // Apply SEO settings globally
   React.useEffect(() => {

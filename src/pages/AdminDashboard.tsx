@@ -24,6 +24,7 @@ import { GoogleGenAI } from "@google/genai";
 
 import { generateInvoice } from '../utils/invoiceGenerator';
 import { generateShippingLabel } from '../utils/shippingLabelGenerator';
+import ReactGlobe from 'react-globe.gl';
 
 enum OperationType {
   CREATE = 'create',
@@ -80,7 +81,7 @@ const chartDataSample = [];
 const recentOrdersSample = [];
 const topProductsSample = [];
 
-type Tab = 'home' | 'dashboard' | 'products' | 'category' | 'orders' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights';
+type Tab = 'home' | 'dashboard' | 'products' | 'category' | 'orders' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights' | 'live';
 
 function Accordion({ title, icon: Icon, children }: { title: string, icon: any, children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -697,6 +698,7 @@ export default function AdminDashboard() {
   const [colors, setColors] = useState<any[]>([]);
   const [sizes, setSizes] = useState<any[]>([]);
   const [coupons, setCoupons] = useState<any[]>([]);
+  const [liveSessions, setLiveSessions] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
@@ -783,9 +785,15 @@ export default function AdminDashboard() {
       setChats(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
+    // Real-time active sessions listener
+    const unsubscribeSessions = onSnapshot(collection(db, 'active_sessions'), (snapshot) => {
+      setLiveSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
     return () => {
       unsubscribeOrders();
       unsubscribeChats();
+      unsubscribeSessions();
     };
   }, [settings.notificationSound]);
 
@@ -1849,6 +1857,13 @@ export default function AdminDashboard() {
           </div>
 
           <div className="flex items-center space-x-3 md:space-x-6">
+            <button 
+              onClick={() => setActiveTab('live')}
+              className="flex items-center space-x-2 px-3 py-1.5 bg-green-50 text-green-600 rounded-full hover:bg-green-100 transition-all group"
+            >
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+              <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest">{liveSessions.length} Live</span>
+            </button>
             <div className="hidden sm:flex items-center bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 w-72">
               <Search size={18} className="text-gray-400 mr-2" />
               <input type="text" placeholder="Search..." className="bg-transparent border-none focus:outline-none text-sm w-full font-medium" />
@@ -2956,6 +2971,72 @@ export default function AdminDashboard() {
                 </div>
               </div>
             </motion.div>
+          )}
+
+          {activeTab === 'live' && (
+            <div className="h-[calc(100vh-180px)] w-full bg-[#050505] rounded-3xl overflow-hidden relative border border-gray-800 shadow-2xl">
+              <div className="absolute top-8 left-8 z-10 space-y-2">
+                <h2 className="text-3xl font-black text-white tracking-tight">Global Presence</h2>
+                <div className="flex items-center gap-3">
+                  <div className="px-3 py-1 bg-green-500/20 text-green-400 rounded-lg text-[10px] font-black uppercase tracking-widest border border-green-500/30 flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
+                    {liveSessions.length} Active Visitors
+                  </div>
+                  <div className="px-3 py-1 bg-white/5 text-white/60 rounded-lg text-[10px] font-black uppercase tracking-widest border border-white/10">
+                    Real-time Tracking
+                  </div>
+                </div>
+              </div>
+
+              <div className="absolute bottom-8 left-8 z-10 max-w-xs space-y-4">
+                <div className="p-4 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10 space-y-3">
+                  <h3 className="text-[10px] font-black text-white/40 uppercase tracking-widest">Recent Activity</h3>
+                  <div className="space-y-2">
+                    {liveSessions.slice(0, 3).map((session, i) => (
+                      <div key={i} className="flex items-center gap-3">
+                        <div className="w-2 h-2 bg-ruby rounded-full" />
+                        <div className="flex-1">
+                          <p className="text-xs font-bold text-white/90">{session.city}, {session.country}</p>
+                          <p className="text-[9px] font-medium text-white/40">{session.path}</p>
+                        </div>
+                      </div>
+                    ))}
+                    {liveSessions.length === 0 && (
+                      <p className="text-xs font-medium text-white/40 italic">Waiting for visitors...</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="w-full h-full flex items-center justify-center">
+                <ReactGlobe
+                  globeImageUrl="//unpkg.com/three-globe/example/img/earth-dark.jpg"
+                  bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
+                  backgroundImageUrl="//unpkg.com/three-globe/example/img/night-sky.png"
+                  pointsData={liveSessions.filter(s => s.lat && s.lng).map(s => ({
+                    lat: s.lat,
+                    lng: s.lng,
+                    size: 0.1,
+                    color: '#E11D48',
+                    label: `${s.city}, ${s.country}`
+                  }))}
+                  pointAltitude={0.1}
+                  pointColor="color"
+                  pointRadius={0.5}
+                  pointsMerge={true}
+                  pointLabel="label"
+                  atmosphereColor="#E11D48"
+                  atmosphereAltitude={0.15}
+                />
+              </div>
+              
+              <button 
+                onClick={() => setActiveTab('home')}
+                className="absolute top-8 right-8 z-10 p-3 bg-white/5 hover:bg-white/10 text-white rounded-2xl border border-white/10 transition-all backdrop-blur-md"
+              >
+                <X size={20} />
+              </button>
+            </div>
           )}
 
           {activeTab === 'category' && (
