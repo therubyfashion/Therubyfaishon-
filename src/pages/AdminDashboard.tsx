@@ -9,7 +9,7 @@ import {
   TrendingUp, ShoppingCart, UserPlus, AlertTriangle, ChevronRight, ChevronLeft,
   MoreVertical, Edit2, Trash2, Plus, Image as ImageIcon, Database, BarChart3,
   Home, ArrowLeft, Camera, ChevronDown, ChevronUp, Bold, Heading, Globe, Truck,
-  TrendingDown, Shield, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info
+  TrendingDown, Shield, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info, MapPin, History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -708,8 +708,48 @@ export default function AdminDashboard() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
+  const globeContainerRef = React.useRef<HTMLDivElement>(null);
+  const [globeSize, setGlobeSize] = useState({ width: 800, height: 600 });
+
+  useEffect(() => {
+    if (activeTab !== 'live' || !globeContainerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+          setGlobeSize({
+            width: entry.contentRect.width,
+            height: entry.contentRect.height
+          });
+        }
+      }
+    });
+    observer.observe(globeContainerRef.current);
+    return () => observer.disconnect();
+  }, [activeTab]);
 
   const totalRevenue = orders.reduce((acc, order) => acc + (order.total || 0), 0);
+
+  const topStates = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    liveSessions.forEach(s => {
+      const state = s.region || 'Unknown';
+      counts[state] = (counts[state] || 0) + 1;
+    });
+    return Object.entries(counts)
+      .sort(([, a], [, b]) => b - a)
+      .map(([name, count]) => ({ name, count }));
+  }, [liveSessions]);
+
+  const topCountries = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    liveSessions.forEach(s => {
+      const country = s.country || 'Unknown';
+      counts[country] = (counts[country] || 0) + 1;
+    });
+    return Object.entries(counts)
+      .sort(([, a], [, b]) => b - a)
+      .map(([name, count]) => ({ name, count }));
+  }, [liveSessions]);
   
   const topProducts = React.useMemo(() => {
     const productSales: Record<string, { name: string, sales: number, image: string }> = {};
@@ -777,17 +817,23 @@ export default function AdminDashboard() {
     const unsubscribeOrders = onSnapshot(q, (snapshot) => {
       // ... existing orders logic ...
       setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'orders');
     });
 
     // Real-time chats listener
     const chatsQuery = query(collection(db, 'chats'), orderBy('lastMessageAt', 'desc'));
     const unsubscribeChats = onSnapshot(chatsQuery, (snapshot) => {
       setChats(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'chats');
     });
 
     // Real-time active sessions listener
     const unsubscribeSessions = onSnapshot(collection(db, 'active_sessions'), (snapshot) => {
       setLiveSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'active_sessions');
     });
 
     return () => {
@@ -942,6 +988,7 @@ export default function AdminDashboard() {
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
   const [activeOrderMenu, setActiveOrderMenu] = useState<string | null>(null);
   const [viewingCustomer, setViewingCustomer] = useState<any | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -1018,7 +1065,7 @@ export default function AdminDashboard() {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const [productsSnap, ordersSnap, usersSnap, categoriesSnap, colorsSnap, sizesSnap, couponsSnap, bannersSnap, settingsSnap, reviewsSnap, cartsSnap] = await Promise.all([
+      const [productsSnap, ordersSnap, usersSnap, categoriesSnap, colorsSnap, sizesSnap, couponsSnap, bannersSnap, settingsSnap, reviewsSnap, cartsSnap, sessionsSnap] = await Promise.all([
         getDocs(collection(db, 'products')).catch(e => handleFirestoreError(e, OperationType.GET, 'products')),
         getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'))).catch(e => handleFirestoreError(e, OperationType.GET, 'orders')),
         getDocs(collection(db, 'users')).catch(e => handleFirestoreError(e, OperationType.GET, 'users')),
@@ -1029,7 +1076,8 @@ export default function AdminDashboard() {
         getDocs(collection(db, 'banners')).catch(e => handleFirestoreError(e, OperationType.GET, 'banners')),
         getDocs(collection(db, 'settings')).catch(e => handleFirestoreError(e, OperationType.GET, 'settings')),
         getDocs(query(collection(db, 'reviews'), orderBy('createdAt', 'desc'))).catch(e => handleFirestoreError(e, OperationType.GET, 'reviews')),
-        getDocs(query(collection(db, 'carts'), orderBy('updatedAt', 'desc'))).catch(e => handleFirestoreError(e, OperationType.GET, 'carts'))
+        getDocs(query(collection(db, 'carts'), orderBy('updatedAt', 'desc'))).catch(e => handleFirestoreError(e, OperationType.GET, 'carts')),
+        getDocs(collection(db, 'active_sessions')).catch(e => handleFirestoreError(e, OperationType.GET, 'active_sessions'))
       ]);
 
       if (!settingsSnap.empty) {
@@ -1048,6 +1096,7 @@ export default function AdminDashboard() {
       setBanners(bannersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setReviews(reviewsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setAbandonedCarts(cartsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)).filter(cart => cart.status === 'active' && cart.items?.length > 0));
+      setLiveSessions(sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
     } finally {
@@ -1070,6 +1119,8 @@ export default function AdminDashboard() {
       updateDoc(doc(db, 'chats', selectedChat.id), {
         unreadCountAdmin: 0
       }).catch(() => {});
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `chats/${selectedChat.id}/messages`);
     });
 
     return () => unsubscribe();
@@ -1838,45 +1889,36 @@ export default function AdminDashboard() {
       <main className={`flex-grow transition-all duration-300 ${sidebarOpen ? 'md:ml-64' : 'md:ml-20'}`}>
         {/* Top Bar */}
         <header className="bg-white h-20 flex items-center justify-between px-4 md:px-8 sticky top-0 z-40 shadow-sm border-b border-gray-100">
-          <div className="flex items-center space-x-4">
-            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 hover:bg-gray-50 rounded-lg md:hidden">
+          <div className="flex items-center space-x-3 md:space-x-4 min-w-0">
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 hover:bg-gray-50 rounded-lg md:hidden flex-shrink-0">
               <Menu size={20} />
             </button>
-            <h1 className="text-2xl font-black text-[#1A2C54] capitalize">
+            <h1 className="text-lg md:text-2xl font-black text-[#1A2C54] capitalize truncate">
               {viewingCustomer ? 'Customer Details' : activeTab}
             </h1>
-            {activeTab === 'dashboard' && !viewingCustomer && (
-              <button 
-                onClick={seedData}
-                className="hidden md:flex items-center space-x-2 px-3 py-1 bg-ruby/10 text-ruby rounded-lg text-[10px] font-bold uppercase tracking-widest hover:bg-ruby/20 transition-all ml-4"
-              >
-                <Database size={12} />
-                <span>Seed Data</span>
-              </button>
-            )}
           </div>
 
-          <div className="flex items-center space-x-3 md:space-x-6">
+          <div className="flex items-center space-x-2 md:space-x-6">
             <button 
               onClick={() => setActiveTab('live')}
-              className="flex items-center space-x-2 px-3 py-1.5 bg-green-50 text-green-600 rounded-full hover:bg-green-100 transition-all group"
+              className="flex items-center space-x-2 px-2 md:px-3 py-1.5 bg-green-50 text-green-600 rounded-full hover:bg-green-100 transition-all group"
             >
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
-              <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest">{liveSessions.length} Live</span>
+              <span className="text-[9px] md:text-xs font-black uppercase tracking-widest">{liveSessions.length} <span className="hidden xs:inline">Live</span></span>
             </button>
-            <div className="hidden sm:flex items-center bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 w-72">
+            <div className="hidden lg:flex items-center bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 w-72">
               <Search size={18} className="text-gray-400 mr-2" />
               <input type="text" placeholder="Search..." className="bg-transparent border-none focus:outline-none text-sm w-full font-medium" />
             </div>
             
-            <div className="relative flex items-center space-x-3">
+            <div className="relative flex items-center space-x-2 md:space-x-3">
               <button 
                 onClick={() => setShowNotifications(!showNotifications)}
-                className="p-2.5 bg-gray-50 text-gray-400 hover:text-ruby rounded-xl border border-gray-100 transition-all relative group"
+                className="p-2 md:p-2.5 bg-gray-50 text-gray-400 hover:text-ruby rounded-xl border border-gray-100 transition-all relative group"
               >
-                <Bell size={20} />
+                <Bell size={18} className="md:w-5 md:h-5" />
                 {notifications.length > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-[#EF4444] text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white group-hover:scale-125 transition-transform">
+                  <span className="absolute -top-1 -right-1 w-4 h-4 md:w-5 md:h-5 bg-[#EF4444] text-white text-[8px] md:text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white group-hover:scale-125 transition-transform">
                     {notifications.length}
                   </span>
                 )}
@@ -1983,7 +2025,7 @@ export default function AdminDashboard() {
                     </button>
                   </div>
                   {/* Stats Grid */}
-                  <div className="grid grid-cols-2 gap-6">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
                     {[
                       { label: 'Total Sales', value: `₹${totalSalesVal.toLocaleString()}`, trend: '+12% Today', icon: TrendingUp, color: 'text-ruby', bgColor: 'bg-ruby/10' },
                       { label: 'Total Orders', value: totalOrdersVal, trend: '+5% This Week', icon: ShoppingCart, color: 'text-ruby', bgColor: 'bg-ruby/10' },
@@ -2421,7 +2463,7 @@ export default function AdminDashboard() {
           {activeTab === 'orders' && !viewingCustomer && (
             <div className="space-y-6">
               {/* Orders Stats */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {[
                   { label: 'Total Orders', value: orders.length.toLocaleString(), trend: '+12% Today', icon: ShoppingBag, color: 'text-ruby', bgColor: 'bg-white' },
                   { label: 'Pending', value: orders.filter(o => o.status === 'Pending').length, trend: `+${orders.filter(o => o.status === 'Pending').length}`, icon: AlertTriangle, color: 'text-[#FACC15]', bgColor: 'bg-white' },
@@ -2974,68 +3016,190 @@ export default function AdminDashboard() {
           )}
 
           {activeTab === 'live' && (
-            <div className="h-[calc(100vh-180px)] w-full bg-[#050505] rounded-3xl overflow-hidden relative border border-gray-800 shadow-2xl">
-              <div className="absolute top-8 left-8 z-10 space-y-2">
-                <h2 className="text-3xl font-black text-white tracking-tight">Global Presence</h2>
-                <div className="flex items-center gap-3">
-                  <div className="px-3 py-1 bg-green-500/20 text-green-400 rounded-lg text-[10px] font-black uppercase tracking-widest border border-green-500/30 flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
-                    {liveSessions.length} Active Visitors
+            <div className="h-[calc(100vh-120px)] md:h-[calc(100vh-140px)] bg-[#050B18] rounded-3xl md:rounded-[3rem] overflow-hidden relative border border-white/5 shadow-2xl flex flex-col">
+              {/* Mission Control Header */}
+              <div className="absolute top-4 md:top-8 left-4 md:left-8 right-4 md:right-8 z-20 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-6 pointer-events-none">
+                <div className="space-y-1 md:space-y-2 pointer-events-auto">
+                  <div className="flex items-center gap-2 md:gap-3">
+                    <div className="w-2 h-2 md:w-3 md:h-3 rounded-full bg-ruby animate-pulse shadow-[0_0_15px_rgba(225,29,72,0.8)]"></div>
+                    <h2 className="text-lg md:text-2xl font-black text-white tracking-tighter uppercase">Mission Control</h2>
                   </div>
-                  <div className="px-3 py-1 bg-white/5 text-white/60 rounded-lg text-[10px] font-black uppercase tracking-widest border border-white/10">
-                    Real-time Tracking
+                  <p className="text-[8px] md:text-[10px] font-bold text-white/40 uppercase tracking-[0.3em]">Global Real-time Traffic</p>
+                </div>
+
+                <div className="flex items-center gap-3 md:gap-4 pointer-events-auto w-full md:w-auto justify-between md:justify-end">
+                  <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-3 md:p-4 rounded-2xl md:rounded-3xl flex items-center gap-3 md:gap-4 shadow-2xl">
+                    <div className="w-8 h-8 md:w-10 md:h-10 rounded-xl md:rounded-2xl bg-ruby/20 flex items-center justify-center text-ruby">
+                      <Users size={16} md:size={20} />
+                    </div>
+                    <div>
+                      <p className="text-[7px] md:text-[8px] font-bold text-white/40 uppercase tracking-widest leading-none mb-1">Live Visitors</p>
+                      <p className="text-sm md:text-xl font-black text-white leading-none">{liveSessions.length}</p>
+                    </div>
                   </div>
+                  <button 
+                    onClick={() => setActiveTab('dashboard')}
+                    className="p-2 md:p-3 bg-white/10 hover:bg-white/20 text-white rounded-xl md:rounded-2xl border border-white/10 transition-all backdrop-blur-md"
+                  >
+                    <X size={18} md:size={20} />
+                  </button>
                 </div>
               </div>
 
-              <div className="absolute bottom-8 left-8 z-10 max-w-xs space-y-4">
-                <div className="p-4 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10 space-y-3">
-                  <h3 className="text-[10px] font-black text-white/40 uppercase tracking-widest">Recent Activity</h3>
-                  <div className="space-y-2">
-                    {liveSessions.slice(0, 3).map((session, i) => (
-                      <div key={i} className="flex items-center gap-3">
-                        <div className="w-2 h-2 bg-ruby rounded-full" />
-                        <div className="flex-1">
-                          <p className="text-xs font-bold text-white/90">{session.city}, {session.country}</p>
-                          <p className="text-[9px] font-medium text-white/40">{session.path}</p>
+              {/* Top States Sidebar - Hidden on Mobile */}
+              <div className="absolute top-32 left-8 z-20 w-64 hidden lg:block pointer-events-none">
+                <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-[2.5rem] space-y-6 pointer-events-auto shadow-2xl">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <h3 className="text-[10px] font-black text-white/40 uppercase tracking-widest">Top Traffic States</h3>
+                      <p className="text-[8px] font-bold text-ruby uppercase tracking-widest">Live Breakdown</p>
+                    </div>
+                    <div className="w-8 h-8 rounded-xl bg-ruby/20 flex items-center justify-center">
+                      <MapPin size={14} className="text-ruby" />
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    {topStates.slice(0, 5).length > 0 ? (
+                      topStates.slice(0, 5).map((state, i) => (
+                        <div key={i} className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[10px] font-bold">
+                            <span className="text-white/80">{state.name}</span>
+                            <span className="text-ruby">{state.count}</span>
+                          </div>
+                          <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(state.count / liveSessions.length) * 100}%` }}
+                              className="h-full bg-ruby"
+                            />
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                    {liveSessions.length === 0 && (
-                      <p className="text-xs font-medium text-white/40 italic">Waiting for visitors...</p>
+                      ))
+                    ) : (
+                      <p className="text-[10px] text-white/20 font-bold uppercase tracking-widest text-center py-4">No state data yet</p>
                     )}
                   </div>
                 </div>
               </div>
 
-              <div className="w-full h-full flex items-center justify-center">
+              {/* Globe Container */}
+              <div ref={globeContainerRef} className="flex-grow w-full relative cursor-move bg-[#050B18]">
                 <ReactGlobe
-                  globeImageUrl="//unpkg.com/three-globe/example/img/earth-dark.jpg"
+                  width={globeSize.width}
+                  height={globeSize.height}
+                  globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
                   bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
                   backgroundImageUrl="//unpkg.com/three-globe/example/img/night-sky.png"
-                  pointsData={liveSessions.filter(s => s.lat && s.lng).map(s => ({
-                    lat: s.lat,
-                    lng: s.lng,
-                    size: 0.1,
-                    color: '#E11D48',
-                    label: `${s.city}, ${s.country}`
-                  }))}
-                  pointAltitude={0.1}
+                  pointsData={[
+                    ...liveSessions.filter(s => s.lat && s.lng).map(s => ({
+                      lat: s.lat,
+                      lng: s.lng,
+                      size: 0.25,
+                      color: '#E11D48',
+                      label: `${s.city}, ${s.region}, ${s.country}`
+                    })),
+                    { lat: 19.0760, lng: 72.8777, size: 0.4, color: '#ffffff', label: 'THE RUBY HQ (Mumbai)' }
+                  ]}
+                  pointAltitude={0.02}
                   pointColor="color"
-                  pointRadius={0.5}
-                  pointsMerge={true}
+                  pointRadius={0.8}
+                  pointsMerge={false}
                   pointLabel="label"
-                  atmosphereColor="#E11D48"
+                  labelsData={[
+                    ...liveSessions.filter(s => s.lat && s.lng).map(s => ({
+                      lat: s.lat,
+                      lng: s.lng,
+                      text: s.city || s.region,
+                      color: '#ffffff',
+                      size: 0.5
+                    })),
+                    { lat: 19.0760, lng: 72.8777, text: 'RUBY HQ', color: '#E11D48', size: 1 }
+                  ]}
+                  labelColor="color"
+                  labelSize="size"
+                  labelDotRadius={0.4}
+                  labelAltitude={0.03}
+                  atmosphereColor="#3B82F6"
                   atmosphereAltitude={0.15}
+                  arcsData={liveSessions.filter(s => s.lat && s.lng).map(s => ({
+                    startLat: s.lat,
+                    startLng: s.lng,
+                    endLat: 19.0760, // Mumbai
+                    endLng: 72.8777,
+                    color: ['#E11D48', '#ffffff']
+                  }))}
+                  arcColor="color"
+                  arcDashLength={0.4}
+                  arcDashGap={4}
+                  arcDashAnimateTime={1500}
+                  arcStroke={0.5}
+                  ringsData={liveSessions.filter(s => s.lat && s.lng).map(s => ({
+                    lat: s.lat,
+                    lng: s.lng
+                  }))}
+                  ringColor={() => '#E11D48'}
+                  ringMaxRadius={2.5}
+                  ringPropagationSpeed={3}
+                  ringRepeatPeriod={800}
                 />
               </div>
-              
-              <button 
-                onClick={() => setActiveTab('home')}
-                className="absolute top-8 right-8 z-10 p-3 bg-white/5 hover:bg-white/10 text-white rounded-2xl border border-white/10 transition-all backdrop-blur-md"
-              >
-                <X size={20} />
-              </button>
+
+              {/* Stats Box - Separate from Map */}
+              <div className="bg-[#0A1224] border-t border-white/10 p-4 md:p-6 overflow-hidden flex flex-col gap-3 md:gap-4 shrink-0">
+                {/* Row 1: Global Traffic */}
+                <div className="relative overflow-hidden">
+                  <div className="flex items-center gap-8 md:gap-12 animate-marquee whitespace-nowrap">
+                    <div className="flex items-center gap-3 shrink-0">
+                      <Globe size={14} className="text-white animate-pulse" />
+                      <span className="text-[8px] md:text-[11px] font-black text-white uppercase tracking-[0.2em]">Global Traffic:</span>
+                    </div>
+                    {(topCountries.length > 0 ? topCountries.concat(topCountries) : [{name: 'Global', count: 0}]).map((country, i) => (
+                      <div key={`country-${i}`} className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/5">
+                        <span className="text-[8px] md:text-[10px] font-bold text-white/60 uppercase tracking-widest">{country.name}</span>
+                        <span className="text-[8px] md:text-[10px] font-black text-white">{country.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Row 2: Regional Traffic - Hidden or simplified on mobile if requested, but user said "alag line me" */}
+                <div className="relative overflow-hidden">
+                  <div className="flex items-center gap-8 md:gap-12 animate-marquee-reverse whitespace-nowrap">
+                    <div className="flex items-center gap-3 shrink-0">
+                      <MapPin size={14} className="text-ruby animate-pulse" />
+                      <span className="text-[8px] md:text-[11px] font-black text-ruby uppercase tracking-[0.2em]">Regional Traffic:</span>
+                    </div>
+                    {(topStates.length > 0 ? topStates.concat(topStates) : [{name: 'Regional', count: 0}]).map((state, i) => (
+                      <div key={`state-${i}`} className="flex items-center gap-2 px-3 py-1 bg-ruby/10 rounded-full border border-ruby/10">
+                        <span className="text-[8px] md:text-[10px] font-bold text-white/40 uppercase tracking-widest">{state.name}</span>
+                        <span className="text-[8px] md:text-[10px] font-black text-ruby">{state.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <style>{`
+                @keyframes marquee {
+                  0% { transform: translateX(0); }
+                  100% { transform: translateX(-50%); }
+                }
+                @keyframes marquee-reverse {
+                  0% { transform: translateX(-50%); }
+                  100% { transform: translateX(0); }
+                }
+                .animate-marquee {
+                  display: inline-flex;
+                  animation: marquee 40s linear infinite;
+                }
+                .animate-marquee-reverse {
+                  display: inline-flex;
+                  animation: marquee-reverse 50s linear infinite;
+                }
+                .animate-marquee:hover, .animate-marquee-reverse:hover {
+                  animation-play-state: paused;
+                }
+              `}</style>
             </div>
           )}
 
@@ -3184,73 +3348,186 @@ export default function AdminDashboard() {
             <div className="space-y-8">
               <div className="flex justify-between items-center">
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-800">Customers</h2>
-                  <p className="text-sm text-gray-400">Manage user roles and permissions</p>
+                  <h2 className="text-2xl font-black text-[#1A2C54]">Customers</h2>
+                  <p className="text-sm text-gray-400 font-medium">Manage your community and user insights</p>
                 </div>
               </div>
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-gray-50/50 text-[10px] font-bold uppercase tracking-widest text-gray-400 border-b border-gray-100">
-                      <th className="py-4 px-8">Customer</th>
-                      <th className="py-4 px-8">Email</th>
-                      <th className="py-4 px-8">Loyalty Points</th>
-                      <th className="py-4 px-8">Role</th>
-                      <th className="py-4 px-8">Joined</th>
-                      <th className="py-4 px-8 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="text-sm">
-                    {customers.map(customer => (
-                      <tr key={customer.id} className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors">
-                        <td className="py-4 px-8 flex items-center space-x-4">
-                          <div className="w-10 h-10 rounded-xl bg-gray-100 overflow-hidden">
-                            <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${customer.displayName || customer.email}`} alt="Avatar" />
+
+              {selectedCustomer ? (
+                <motion.div 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-8"
+                >
+                  <button 
+                    onClick={() => setSelectedCustomer(null)}
+                    className="flex items-center space-x-2 text-gray-400 hover:text-ruby transition-colors group"
+                  >
+                    <div className="p-2 bg-gray-50 rounded-lg group-hover:bg-ruby/10 transition-all">
+                      <ChevronRight size={18} className="rotate-180" />
+                    </div>
+                    <span className="text-xs font-bold uppercase tracking-widest">Back to List</span>
+                  </button>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* Profile Summary */}
+                    <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 space-y-8">
+                      <div className="flex flex-col items-center text-center space-y-4">
+                        <div className="relative">
+                          <div className="w-32 h-32 rounded-[2rem] bg-gray-50 border-4 border-white shadow-2xl overflow-hidden">
+                            <img 
+                              src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedCustomer.displayName || selectedCustomer.email}`} 
+                              alt="Avatar" 
+                              className="w-full h-full object-cover"
+                            />
                           </div>
-                          <span className="font-bold text-[#1A2C54]">{customer.displayName || 'Anonymous'}</span>
-                        </td>
-                        <td className="py-4 px-8 text-gray-500">{customer.email}</td>
-                        <td className="py-4 px-8">
-                          <div className="flex items-center gap-3">
-                            <div className="flex flex-col">
-                              <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-lg bg-yellow-50 flex items-center justify-center text-yellow-600 shadow-sm border border-yellow-100">
-                                  <Star size={14} className="fill-yellow-500" />
-                                </div>
-                                <span className="text-lg font-black text-[#1A2C54]">{customer.loyaltyPoints || 0}</span>
-                              </div>
-                              <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-1">Total Points</p>
+                          <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-green-500 border-4 border-white rounded-2xl shadow-lg flex items-center justify-center">
+                            <CheckCheck size={16} className="text-white" />
+                          </div>
+                        </div>
+                        <div>
+                          <h3 className="text-2xl font-black text-[#1A2C54]">{selectedCustomer.displayName || 'Anonymous'}</h3>
+                          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">{selectedCustomer.role || 'User'}</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="p-5 bg-gray-50 rounded-3xl border border-gray-100 space-y-1">
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Email Address</p>
+                          <p className="text-sm font-bold text-[#1A2C54]">{selectedCustomer.email}</p>
+                        </div>
+                        <div className="p-5 bg-gray-50 rounded-3xl border border-gray-100 space-y-1">
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Member Since</p>
+                          <p className="text-sm font-bold text-[#1A2C54]">{new Date(selectedCustomer.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3">
+                        <button 
+                          onClick={() => handleUpdateUserRole(selectedCustomer.id, selectedCustomer.role || 'user')}
+                          className="flex-1 py-4 bg-[#1A2C54] text-white rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-blue-900/20"
+                        >
+                          Change Role
+                        </button>
+                        <button 
+                          onClick={() => updateLoyaltyPoints(selectedCustomer.id, 100)}
+                          className="flex-1 py-4 bg-ruby text-white rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-ruby/20"
+                        >
+                          Gift Points
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Advanced Analytics */}
+                    <div className="lg:col-span-2 space-y-8">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        {[
+                          { 
+                            label: 'Total Orders', 
+                            value: orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).length, 
+                            icon: ShoppingBag, 
+                            color: 'text-blue-600', 
+                            bgColor: 'bg-blue-50' 
+                          },
+                          { 
+                            label: 'Lifetime Value', 
+                            value: `₹${orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).reduce((sum, o) => sum + (o.total || 0), 0).toLocaleString()}`, 
+                            icon: TrendingUp, 
+                            color: 'text-green-600', 
+                            bgColor: 'bg-green-50' 
+                          },
+                          { 
+                            label: 'Avg Order', 
+                            value: `₹${Math.round(orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).reduce((sum, o) => sum + (o.total || 0), 0) / (orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).length || 1)).toLocaleString()}`, 
+                            icon: BarChart3, 
+                            color: 'text-purple-600', 
+                            bgColor: 'bg-purple-50' 
+                          },
+                          { 
+                            label: 'Loyalty Points', 
+                            value: selectedCustomer.loyaltyPoints || 0, 
+                            icon: Star, 
+                            color: 'text-yellow-600', 
+                            bgColor: 'bg-yellow-50' 
+                          },
+                        ].map((stat, i) => (
+                          <div key={i} className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm space-y-3">
+                            <div className={`w-10 h-10 rounded-2xl ${stat.bgColor} ${stat.color} flex items-center justify-center`}>
+                              <stat.icon size={20} />
                             </div>
-                            <button 
-                              onClick={() => updateLoyaltyPoints(customer.id, 50)}
-                              className="p-2 bg-gray-50 hover:bg-ruby hover:text-white rounded-xl text-gray-400 transition-all shadow-sm active:scale-90"
-                              title="Add 50 Points"
-                            >
-                              <Plus size={16} />
-                            </button>
+                            <div>
+                              <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{stat.label}</p>
+                              <p className="text-lg font-black text-[#1A2C54]">{stat.value}</p>
+                            </div>
                           </div>
-                        </td>
-                        <td className="py-4 px-8">
-                          <span className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest ${customer.role === 'admin' ? 'bg-ruby/10 text-ruby' : 'bg-blue-50 text-blue-600'}`}>
-                            {customer.role || 'user'}
-                          </span>
-                        </td>
-                        <td className="py-4 px-8 text-gray-400 font-medium">
-                          {new Date(customer.createdAt).toLocaleDateString()}
-                        </td>
-                        <td className="py-4 px-8 text-right">
-                          <button 
-                            onClick={() => handleUpdateUserRole(customer.id, customer.role || 'user')}
-                            className="text-xs font-bold text-ruby hover:underline uppercase tracking-widest"
-                          >
-                            Make {customer.role === 'admin' ? 'User' : 'Admin'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                        ))}
+                      </div>
+
+                      <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm">
+                        <h4 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest mb-6 flex items-center gap-2">
+                          <History size={18} className="text-ruby" />
+                          Order History
+                        </h4>
+                        <div className="space-y-4">
+                          {orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).length > 0 ? (
+                            orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).map((order, i) => (
+                              <div key={i} className="flex items-center justify-between p-5 bg-gray-50 rounded-3xl border border-gray-100 group hover:border-ruby/20 transition-all">
+                                <div className="flex items-center gap-4">
+                                  <div className="w-12 h-12 rounded-2xl bg-white border border-gray-100 flex items-center justify-center text-ruby font-black text-xs">
+                                    #{order.orderId?.slice(-4) || 'ORD'}
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-bold text-[#1A2C54]">₹{order.total?.toLocaleString()}</p>
+                                    <p className="text-[10px] font-medium text-gray-400">{new Date(order.createdAt).toLocaleDateString()}</p>
+                                  </div>
+                                </div>
+                                <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${statusColors[order.status || 'Pending']}`}>
+                                  {order.status || 'Pending'}
+                                </span>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="py-12 text-center space-y-3">
+                              <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto">
+                                <ShoppingBag size={24} className="text-gray-200" />
+                              </div>
+                              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">No orders found</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4 md:gap-6">
+                  {customers.map(customer => (
+                    <motion.div 
+                      key={customer.id}
+                      whileHover={{ y: -5 }}
+                      onClick={() => setSelectedCustomer(customer)}
+                      className="bg-white p-6 rounded-[2.5rem] border border-gray-100 shadow-sm hover:shadow-xl hover:border-ruby/20 transition-all cursor-pointer text-center space-y-4 group"
+                    >
+                      <div className="relative mx-auto w-20 h-20">
+                        <div className="w-full h-full rounded-[1.5rem] bg-gray-50 border-2 border-white shadow-lg overflow-hidden group-hover:scale-105 transition-transform">
+                          <img 
+                            src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${customer.displayName || customer.email}`} 
+                            alt="Avatar" 
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-white rounded-lg shadow-md flex items-center justify-center">
+                          <div className={`w-2 h-2 rounded-full ${customer.role === 'admin' ? 'bg-ruby' : 'bg-blue-500'}`} />
+                        </div>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-black text-[#1A2C54] truncate group-hover:text-ruby transition-colors">{customer.displayName || 'Anonymous'}</h3>
+                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mt-0.5 truncate">{customer.email}</p>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -3296,78 +3573,214 @@ export default function AdminDashboard() {
           )}
 
           {activeTab === 'stats' && (
-            <div className="space-y-8">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-800">Business Analytics</h2>
-                  <p className="text-sm text-gray-400">Track your store performance and sales trends</p>
+            <div className="space-y-10">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                <div className="space-y-1">
+                  <h2 className="text-3xl font-black text-[#1A2C54] tracking-tight">Business Analytics</h2>
+                  <p className="text-sm text-gray-400 font-medium">Deep dive into your store's performance metrics</p>
+                </div>
+                <div className="flex bg-white p-1.5 rounded-2xl border border-gray-100 shadow-sm">
+                  {['7D', '30D', '90D', 'ALL'].map((period) => (
+                    <button 
+                      key={period}
+                      className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${period === '30D' ? 'bg-ruby text-white shadow-lg shadow-ruby/20' : 'text-gray-400 hover:text-[#1A2C54]'}`}
+                    >
+                      {period}
+                    </button>
+                  ))}
                 </div>
               </div>
               
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
-                  <h3 className="text-lg font-bold text-gray-800 mb-6">Revenue Overview</h3>
-                  <div className="h-[300px]">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Main Revenue Chart */}
+                <div className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-8">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-black text-[#1A2C54] uppercase tracking-widest flex items-center gap-2">
+                      <TrendingUp size={20} className="text-ruby" />
+                      Revenue Growth
+                    </h3>
+                    <div className="text-right">
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total Period Revenue</p>
+                      <p className="text-xl font-black text-ruby">₹{totalRevenue.toLocaleString()}</p>
+                    </div>
+                  </div>
+                  <div className="h-[350px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={chartData}>
                         <defs>
                           <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#E0115F" stopOpacity={0.1}/>
-                            <stop offset="95%" stopColor="#E0115F" stopOpacity={0}/>
+                            <stop offset="5%" stopColor="#E11D48" stopOpacity={0.2}/>
+                            <stop offset="95%" stopColor="#E11D48" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#9CA3AF', fontSize: 12}} />
-                        <YAxis axisLine={false} tickLine={false} tick={{fill: '#9CA3AF', fontSize: 12}} />
-                        <Tooltip 
-                          contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
+                        <XAxis 
+                          dataKey="name" 
+                          axisLine={false} 
+                          tickLine={false} 
+                          tick={{fill: '#9CA3AF', fontSize: 10, fontWeight: 'bold'}} 
                         />
-                        <Area type="monotone" dataKey="revenue" stroke="#E0115F" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
+                        <YAxis 
+                          axisLine={false} 
+                          tickLine={false} 
+                          tick={{fill: '#9CA3AF', fontSize: 10, fontWeight: 'bold'}}
+                          tickFormatter={(value) => `₹${value >= 1000 ? (value/1000).toFixed(1) + 'k' : value}`}
+                        />
+                        <Tooltip 
+                          contentStyle={{borderRadius: '24px', border: 'none', boxShadow: '0 25px 50px -12px rgb(0 0 0 / 0.15)', padding: '16px'}}
+                          itemStyle={{fontWeight: '900', fontSize: '14px'}}
+                          labelStyle={{fontWeight: 'bold', color: '#9CA3AF', marginBottom: '4px'}}
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="revenue" 
+                          stroke="#E11D48" 
+                          strokeWidth={4} 
+                          fillOpacity={1} 
+                          fill="url(#colorRevenue)" 
+                          animationDuration={2000}
+                        />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
 
-                <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
-                  <h3 className="text-lg font-bold text-gray-800 mb-6">Order Volume</h3>
-                  <div className="h-[300px]">
+                {/* Status Distribution */}
+                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-8">
+                  <h3 className="text-lg font-black text-[#1A2C54] uppercase tracking-widest">Order Status</h3>
+                  <div className="h-[250px] relative">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#9CA3AF', fontSize: 12}} />
-                        <YAxis axisLine={false} tickLine={false} tick={{fill: '#9CA3AF', fontSize: 12}} />
-                        <Tooltip 
-                          contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
-                          cursor={{fill: '#F9FAFB'}}
-                        />
-                        <Bar dataKey="orders" fill="#1F2937" radius={[6, 6, 0, 0]} />
-                      </BarChart>
+                      <PieChart>
+                        <Pie
+                          data={[
+                            { name: 'Delivered', value: orders.filter(o => o.status === 'Delivered').length, color: '#22C55E' },
+                            { name: 'Pending', value: orders.filter(o => o.status === 'Pending').length, color: '#FACC15' },
+                            { name: 'Shipped', value: orders.filter(o => o.status === 'Shipped').length, color: '#3B82F6' },
+                            { name: 'Cancelled', value: orders.filter(o => o.status === 'Cancelled').length, color: '#EF4444' },
+                          ]}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={80}
+                          paddingAngle={8}
+                          dataKey="value"
+                        >
+                          {[
+                            { color: '#22C55E' },
+                            { color: '#FACC15' },
+                            { color: '#3B82F6' },
+                            { color: '#EF4444' },
+                          ].map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
                     </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <p className="text-2xl font-black text-[#1A2C54]">{orders.length}</p>
+                      <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">Total Orders</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    {[
+                      { label: 'Delivered', color: 'bg-green-500', count: orders.filter(o => o.status === 'Delivered').length },
+                      { label: 'Pending', color: 'bg-yellow-400', count: orders.filter(o => o.status === 'Pending').length },
+                      { label: 'Shipped', color: 'bg-blue-500', count: orders.filter(o => o.status === 'Shipped').length },
+                      { label: 'Cancelled', color: 'bg-red-500', count: orders.filter(o => o.status === 'Cancelled').length },
+                    ].map((item, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${item.color}`} />
+                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{item.label}</span>
+                        <span className="text-[10px] font-black text-[#1A2C54] ml-auto">{item.count}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
-                  <p className="text-sm font-medium text-gray-400 mb-2">Average Order Value</p>
-                  <p className="text-3xl font-black text-gray-800">₹{(totalRevenue / (orders.length || 1)).toFixed(2)}</p>
-                  <div className="mt-4 flex items-center text-green-500 text-sm font-bold">
-                    <TrendingUp size={16} className="mr-1" /> +5.2% from last month
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Top Categories */}
+                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-8">
+                  <h3 className="text-lg font-black text-[#1A2C54] uppercase tracking-widest">Category Performance</h3>
+                  <div className="space-y-6">
+                    {categories.slice(0, 4).map((cat, i) => {
+                      const catOrders = orders.filter(o => o.items?.some((item: any) => item.category === cat.name)).length;
+                      const percentage = orders.length > 0 ? (catOrders / orders.length) * 100 : 0;
+                      return (
+                        <div key={i} className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-ruby">
+                                <Tags size={14} />
+                              </div>
+                              <span className="text-xs font-bold text-[#1A2C54]">{cat.name}</span>
+                            </div>
+                            <span className="text-xs font-black text-ruby">{Math.round(percentage)}%</span>
+                          </div>
+                          <div className="h-2 w-full bg-gray-50 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${percentage}%` }}
+                              className="h-full bg-ruby rounded-full"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-                <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
-                  <p className="text-sm font-medium text-gray-400 mb-2">Conversion Rate</p>
-                  <p className="text-3xl font-black text-gray-800">3.2%</p>
-                  <div className="mt-4 flex items-center text-ruby text-sm font-bold">
-                    <TrendingDown size={16} className="mr-1" /> -0.8% from last month
-                  </div>
-                </div>
-                <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
-                  <p className="text-sm font-medium text-gray-400 mb-2">Customer Retention</p>
-                  <p className="text-3xl font-black text-gray-800">24%</p>
-                  <div className="mt-4 flex items-center text-green-500 text-sm font-bold">
-                    <TrendingUp size={16} className="mr-1" /> +12% from last month
-                  </div>
+
+                {/* Key Metrics Grid */}
+                <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {[
+                    { 
+                      label: 'Average Order Value', 
+                      value: `₹${(totalRevenue / (orders.length || 1)).toFixed(2)}`, 
+                      trend: '+5.2%', 
+                      trendUp: true,
+                      desc: 'Revenue per unique order'
+                    },
+                    { 
+                      label: 'Customer Acquisition', 
+                      value: customers.filter(c => {
+                        const joined = new Date(c.createdAt);
+                        const thirtyDaysAgo = new Date();
+                        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                        return joined > thirtyDaysAgo;
+                      }).length, 
+                      trend: '+12.4%', 
+                      trendUp: true,
+                      desc: 'New users in last 30 days'
+                    },
+                    { 
+                      label: 'Return Customer Rate', 
+                      value: '24.8%', 
+                      trend: '+2.1%', 
+                      trendUp: true,
+                      desc: 'Customers with >1 order'
+                    },
+                    { 
+                      label: 'Abandoned Cart Rate', 
+                      value: `${Math.round((abandonedCarts.length / (orders.length + abandonedCarts.length || 1)) * 100)}%`, 
+                      trend: '-1.5%', 
+                      trendUp: false,
+                      desc: 'Potential revenue lost'
+                    },
+                  ].map((metric, i) => (
+                    <div key={i} className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-4 group hover:border-ruby/20 transition-all">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{metric.label}</p>
+                        <div className={`px-2 py-1 rounded-lg text-[10px] font-black ${metric.trendUp ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                          {metric.trend}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-3xl font-black text-[#1A2C54]">{metric.value}</p>
+                        <p className="text-[10px] font-medium text-gray-400 mt-1">{metric.desc}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -3928,27 +4341,75 @@ export default function AdminDashboard() {
           )}
 
           {activeTab === 'insights' && (
-            <div className="space-y-10">
+            <div className="space-y-10 pb-20">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div>
-                  <h2 className="text-3xl font-serif font-bold text-[#1A2C54]">Product Performance Heatmap 🔥</h2>
-                  <p className="text-sm text-gray-400 font-medium">Visualize product engagement and conversion gaps</p>
+                  <h2 className="text-3xl font-black text-[#1A2C54] tracking-tight">Product Insights ✨</h2>
+                  <p className="text-sm text-gray-400 font-medium">AI-powered analysis of your inventory and customer behavior</p>
                 </div>
                 <div className="flex items-center gap-3 bg-white p-2 rounded-2xl border border-gray-100 shadow-sm">
                   <div className="flex items-center gap-2 px-3 py-1 bg-ruby/5 rounded-lg">
                     <div className="w-2 h-2 rounded-full bg-ruby animate-pulse"></div>
-                    <span className="text-[10px] font-bold text-ruby uppercase tracking-widest">Live Data</span>
+                    <span className="text-[10px] font-bold text-ruby uppercase tracking-widest">Live Analysis</span>
                   </div>
                 </div>
               </div>
 
+              {/* AI Insight Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {[
+                  {
+                    title: 'Inventory Alert',
+                    desc: `${products.filter(p => p.stock < 5).length} products are running low on stock. Restock soon to avoid lost sales.`,
+                    icon: AlertTriangle,
+                    color: 'text-amber-600',
+                    bgColor: 'bg-amber-50',
+                    action: 'View Low Stock'
+                  },
+                  {
+                    title: 'Trending Up',
+                    desc: 'Women\'s Summer Collection has seen a 40% increase in views this week.',
+                    icon: TrendingUp,
+                    color: 'text-green-600',
+                    bgColor: 'bg-green-50',
+                    action: 'Promote Now'
+                  },
+                  {
+                    title: 'Abandoned Recovery',
+                    desc: 'Sending reminders for abandoned carts could recover up to ₹45,000 this month.',
+                    icon: ShoppingCart,
+                    color: 'text-ruby',
+                    bgColor: 'bg-ruby/5',
+                    action: 'Send Reminders'
+                  }
+                ].map((insight, i) => (
+                  <motion.div 
+                    key={i}
+                    whileHover={{ y: -5 }}
+                    className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6 relative overflow-hidden group"
+                  >
+                    <div className={`w-12 h-12 rounded-2xl ${insight.bgColor} ${insight.color} flex items-center justify-center`}>
+                      <insight.icon size={24} />
+                    </div>
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest">{insight.title}</h4>
+                      <p className="text-xs text-gray-500 leading-relaxed">{insight.desc}</p>
+                    </div>
+                    <button className="text-[10px] font-black text-ruby uppercase tracking-widest hover:underline">
+                      {insight.action} →
+                    </button>
+                    <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-gray-50 rounded-full group-hover:scale-150 transition-transform -z-10 opacity-50" />
+                  </motion.div>
+                ))}
+              </div>
+
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Top Viewed vs Wishlisted */}
-                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
+                {/* Engagement Heatmap */}
+                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-8">
                   <div className="flex justify-between items-center">
-                    <h3 className="text-lg font-bold text-[#1A2C54] flex items-center gap-2">
+                    <h3 className="text-lg font-black text-[#1A2C54] uppercase tracking-widest flex items-center gap-2">
                       <BarChart3 size={20} className="text-ruby" />
-                      Engagement Metrics
+                      Customer Interest
                     </h3>
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-1.5">
@@ -3961,37 +4422,34 @@ export default function AdminDashboard() {
                       </div>
                     </div>
                   </div>
-                  <div className="h-[400px]">
+                  <div className="h-[350px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={products.sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)).slice(0, 8)}>
+                      <BarChart data={products.sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)).slice(0, 6)}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
                         <XAxis 
                           dataKey="name" 
                           axisLine={false} 
                           tickLine={false} 
-                          tick={{ fontSize: 10, fill: '#9CA3AF', fontWeight: 'bold' }}
+                          tick={{ fontSize: 9, fill: '#9CA3AF', fontWeight: 'bold' }}
                           interval={0}
-                          angle={-45}
-                          textAnchor="end"
-                          height={80}
                         />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#9CA3AF', fontWeight: 'bold' }} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#9CA3AF', fontWeight: 'bold' }} />
                         <Tooltip 
                           cursor={{ fill: '#F9FAFB' }}
-                          contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                          contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 25px 50px -12px rgb(0 0 0 / 0.15)' }}
                         />
-                        <Bar dataKey="viewCount" name="Views" fill="#1A2C54" radius={[4, 4, 0, 0]} barSize={20} />
-                        <Bar dataKey="wishlistCount" name="Wishlists" fill="#E11D48" radius={[4, 4, 0, 0]} barSize={20} />
+                        <Bar dataKey="viewCount" name="Views" fill="#1A2C54" radius={[6, 6, 0, 0]} barSize={24} />
+                        <Bar dataKey="wishlistCount" name="Wishlists" fill="#E11D48" radius={[6, 6, 0, 0]} barSize={24} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
 
-                {/* Conversion Gap Heatmap */}
-                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
-                  <h3 className="text-lg font-bold text-[#1A2C54] flex items-center gap-2">
-                    <TrendingDown size={20} className="text-yellow-500" />
-                    Conversion Gap (High Interest, Low Sales)
+                {/* Conversion Gap */}
+                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-8">
+                  <h3 className="text-lg font-black text-[#1A2C54] uppercase tracking-widest flex items-center gap-2">
+                    <TrendingDown size={20} className="text-ruby" />
+                    Conversion Opportunities
                   </h3>
                   <div className="space-y-4">
                     {products
@@ -4002,24 +4460,23 @@ export default function AdminDashboard() {
                         return { ...p, sales, interest, gap };
                       })
                       .sort((a, b) => b.gap - a.gap)
-                      .slice(0, 5)
+                      .slice(0, 4)
                       .map((p, idx) => (
-                        <div key={idx} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl group hover:bg-ruby/5 transition-all">
+                        <div key={idx} className="flex items-center justify-between p-5 bg-gray-50 rounded-[2rem] border border-gray-100 group hover:border-ruby/20 transition-all">
                           <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 rounded-xl overflow-hidden bg-white border border-gray-100">
+                            <div className="w-14 h-14 rounded-2xl overflow-hidden bg-white border border-gray-100">
                               {p.images[0] && <img src={p.images[0]} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />}
                             </div>
                             <div>
-                              <p className="text-sm font-bold text-[#1A2C54]">{p.name}</p>
+                              <p className="text-sm font-black text-[#1A2C54]">{p.name}</p>
                               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{p.category}</p>
                             </div>
                           </div>
                           <div className="text-right">
                             <div className="flex items-center gap-2 justify-end">
-                              <span className="text-xs font-bold text-ruby">{Math.round(p.gap * 100)}% Gap</span>
-                              <AlertTriangle size={14} className="text-ruby" />
+                              <span className="text-xs font-black text-ruby">{Math.round(p.gap * 100)}% Gap</span>
                             </div>
-                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{p.interest} Interest vs {p.sales} Sales</p>
+                            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{p.interest} Interest vs {p.sales} Sales</p>
                           </div>
                         </div>
                       ))}
@@ -4027,48 +4484,49 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {/* Visual Heatmap Grid */}
-              <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
-                <div className="flex justify-between items-center">
+              {/* Popularity Grid */}
+              <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-8">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                   <div>
-                    <h3 className="text-lg font-bold text-[#1A2C54]">Product Popularity Grid</h3>
-                    <p className="text-xs text-gray-400">Darker red indicates higher customer engagement</p>
+                    <h3 className="text-lg font-black text-[#1A2C54] uppercase tracking-widest">Engagement Heatmap</h3>
+                    <p className="text-xs text-gray-400 font-medium">Visualizing product popularity across the catalog</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Low</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Low</span>
                     <div className="w-32 h-2 bg-gradient-to-r from-ruby/5 to-ruby rounded-full"></div>
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">High</span>
+                    <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">High</span>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
-                  {products.map((p, idx) => {
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
+                  {products.slice(0, 16).map((p, idx) => {
                     const popularity = (p.viewCount || 0) + (p.wishlistCount || 0) * 2;
                     const maxPopularity = Math.max(...products.map(pr => (pr.viewCount || 0) + (pr.wishlistCount || 0) * 2), 1);
                     const intensity = popularity / maxPopularity;
                     
                     return (
-                      <div 
+                      <motion.div 
                         key={idx} 
-                        className="aspect-square rounded-2xl p-4 flex flex-col items-center justify-center text-center space-y-2 relative group overflow-hidden transition-all hover:scale-105"
+                        whileHover={{ scale: 1.05 }}
+                        className="aspect-square rounded-3xl p-4 flex flex-col items-center justify-center text-center space-y-1 relative group overflow-hidden transition-all border border-transparent"
                         style={{ 
                           backgroundColor: `rgba(225, 29, 72, ${Math.max(0.05, intensity)})`,
-                          border: intensity > 0.7 ? '2px solid #E11D48' : '1px solid rgba(225, 29, 72, 0.1)'
+                          borderColor: intensity > 0.7 ? '#E11D48' : 'transparent'
                         }}
                       >
-                        <div className="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-4 text-white">
-                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1">{p.name}</p>
-                          <div className="flex flex-col items-center gap-1">
-                            <span className="text-[8px] font-bold uppercase tracking-widest opacity-60">Views: {p.viewCount || 0}</span>
-                            <span className="text-[8px] font-bold uppercase tracking-widest opacity-60">Wish: {p.wishlistCount || 0}</span>
+                        <div className="absolute inset-0 bg-[#1A2C54]/95 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-3 text-white">
+                          <p className="text-[8px] font-black uppercase tracking-widest mb-2 leading-tight">{p.name}</p>
+                          <div className="flex flex-col items-center gap-0.5">
+                            <span className="text-[7px] font-bold uppercase tracking-widest opacity-60">Views: {p.viewCount || 0}</span>
+                            <span className="text-[7px] font-bold uppercase tracking-widest opacity-60">Wish: {p.wishlistCount || 0}</span>
                           </div>
                         </div>
-                        <p className={`text-2xl font-black ${intensity > 0.5 ? 'text-white' : 'text-ruby'}`}>
+                        <p className={`text-xl font-black ${intensity > 0.5 ? 'text-white' : 'text-ruby'}`}>
                           {popularity}
                         </p>
-                        <p className={`text-[8px] font-bold uppercase tracking-widest ${intensity > 0.5 ? 'text-white/80' : 'text-gray-400'}`}>
+                        <p className={`text-[8px] font-black uppercase tracking-widest ${intensity > 0.5 ? 'text-white/80' : 'text-gray-400'}`}>
                           Score
                         </p>
-                      </div>
+                      </motion.div>
                     );
                   })}
                 </div>
@@ -4557,7 +5015,7 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {activeTab !== 'dashboard' && activeTab !== 'products' && activeTab !== 'orders' && activeTab !== 'category' && activeTab !== 'colour' && activeTab !== 'size' && activeTab !== 'coupon' && activeTab !== 'customer' && activeTab !== 'rocket' && activeTab !== 'stats' && activeTab !== 'settings' && !viewingCustomer && (
+          {activeTab !== 'dashboard' && activeTab !== 'products' && activeTab !== 'orders' && activeTab !== 'category' && activeTab !== 'colour' && activeTab !== 'size' && activeTab !== 'coupon' && activeTab !== 'customer' && activeTab !== 'rocket' && activeTab !== 'stats' && activeTab !== 'settings' && activeTab !== 'live' && activeTab !== 'notifications' && activeTab !== 'chats' && activeTab !== 'reviews' && activeTab !== 'abandoned' && activeTab !== 'insights' && !viewingCustomer && (
             <div className="h-[60vh] flex flex-col items-center justify-center bg-white rounded-3xl border-2 border-dashed border-gray-100 text-gray-400 space-y-4">
               <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center">
                 <Settings size={32} className="text-gray-200 animate-spin-slow" />

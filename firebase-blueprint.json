@@ -130,6 +130,22 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["items", "totalAmount", "status"]
+    },
+    "ActiveSession": {
+      "title": "ActiveSession",
+      "description": "Live visitor session tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "city": { "type": "string" },
+        "country": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "lastSeen": { "type": "string", "format": "date-time" },
+        "userAgent": { "type": "string" },
+        "path": { "type": "string" }
+      },
+      "required": ["id", "lastSeen"]
     }
   },
   "firestore": {
@@ -143,6 +159,7 @@
     "/banners/{bannerId}": { "schema": "Banner", "description": "Marketing banners" },
     "/reviews/{reviewId}": { "schema": "Review", "description": "Product reviews" },
     "/carts/{cartId}": { "schema": "Cart", "description": "Shopping carts" },
-    "/settings/{settingId}": { "schema": "object", "description": "Global store settings" }
+    "/settings/{settingId}": { "schema": "object", "description": "Global store settings" },
+    "/active_sessions/{sessionId}": { "schema": "ActiveSession", "description": "Live visitor sessions" }
   }
 }
