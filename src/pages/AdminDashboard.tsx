@@ -23,6 +23,7 @@ import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
 
 import { generateInvoice } from '../utils/invoiceGenerator';
+import { generateShippingLabel } from '../utils/shippingLabelGenerator';
 
 enum OperationType {
   CREATE = 'create',
@@ -749,7 +750,8 @@ export default function AdminDashboard() {
       instagram: '',
       x: '',
       facebook: '',
-      youtube: ''
+      youtube: '',
+      whatsapp: ''
     },
     footerContact: {
       email: 'hello@theruby.com',
@@ -2762,10 +2764,34 @@ export default function AdminDashboard() {
                   <span className="text-sm font-bold uppercase tracking-widest">Back to Orders</span>
                 </button>
                 <div className="flex space-x-2 w-full sm:w-auto">
-                  <button className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-gray-100 text-gray-600 rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-widest hover:bg-gray-200 transition-all">
-                    Edit
+                  <button 
+                    onClick={() => generateInvoice(viewingCustomer, settings)}
+                    className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-gray-100 text-gray-600 rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-widest hover:bg-gray-200 transition-all flex items-center justify-center gap-2"
+                  >
+                    <ShoppingBag size={14} />
+                    Invoice
                   </button>
-                  <button className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-[#3B82F6] text-white rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg shadow-blue-200">
+                  <button 
+                    onClick={() => generateShippingLabel(viewingCustomer, settings)}
+                    className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-[#1A2C54] text-white rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-widest hover:bg-[#0A1A34] transition-all shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2"
+                  >
+                    <Truck size={14} />
+                    Shipping Label
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const customerId = viewingCustomer.userId || viewingCustomer.customerEmail || viewingCustomer.email;
+                      const existingChat = chats.find(c => c.id === customerId || c.userId === customerId);
+                      if (existingChat) {
+                        setSelectedChat(existingChat);
+                        setActiveTab('chats');
+                      } else {
+                        toast.error("No active chat found for this customer.");
+                      }
+                    }}
+                    className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-[#3B82F6] text-white rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg shadow-blue-200 flex items-center justify-center gap-2"
+                  >
+                    <MessageCircle size={14} />
                     Message
                   </button>
                 </div>
@@ -2775,25 +2801,67 @@ export default function AdminDashboard() {
                 {/* Profile Card */}
                 <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6">
                   <div className="flex flex-col items-center text-center space-y-4">
-                    <div className="w-24 h-24 rounded-3xl bg-gray-50 border-4 border-white shadow-xl overflow-hidden">
-                      <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${viewingCustomer.address?.name || viewingCustomer.customerName || viewingCustomer.customer}`} alt="Avatar" />
+                    <div className="relative">
+                      <div className="w-24 h-24 rounded-3xl bg-gray-50 border-4 border-white shadow-xl overflow-hidden">
+                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${viewingCustomer.address?.name || viewingCustomer.customerName || viewingCustomer.customer}`} alt="Avatar" />
+                      </div>
+                      <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-green-500 border-4 border-white rounded-full shadow-lg flex items-center justify-center">
+                        <CheckCheck size={12} className="text-white" />
+                      </div>
                     </div>
                     <div>
                       <h3 className="text-xl font-black text-[#1A2C54]">{viewingCustomer.address?.name || viewingCustomer.customerName || viewingCustomer.customer}</h3>
-                      <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Order Details</p>
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Verified Customer</p>
                     </div>
                   </div>
+                  
+                  <div className="p-4 bg-ruby/5 rounded-2xl border border-ruby/10 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-ruby/10 flex items-center justify-center">
+                          <Database size={12} className="text-ruby" />
+                        </div>
+                        <span className="text-[10px] font-bold text-ruby uppercase tracking-widest">Order ID</span>
+                      </div>
+                      <span className="text-xs font-black text-ruby">#{viewingCustomer.orderId || viewingCustomer.id.substring(0, 8)}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-ruby/10 flex items-center justify-center">
+                          <Calendar size={12} className="text-ruby" />
+                        </div>
+                        <span className="text-[10px] font-bold text-ruby uppercase tracking-widest">Date</span>
+                      </div>
+                      <span className="text-xs font-black text-ruby">{new Date(viewingCustomer.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                    </div>
+                  </div>
+
                   <div className="space-y-4 pt-6 border-t border-gray-50">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Email</span>
+                    <div className="flex items-center justify-between group cursor-pointer">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
+                          <Mail size={14} />
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Email</span>
+                      </div>
                       <span className="text-sm font-bold text-[#1A2C54]">{viewingCustomer.address?.email || viewingCustomer.email || 'N/A'}</span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Phone</span>
+                    <div className="flex items-center justify-between group cursor-pointer">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-green-50 group-hover:text-green-500 transition-colors">
+                          <Phone size={14} />
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Phone</span>
+                      </div>
                       <span className="text-sm font-bold text-[#1A2C54]">{viewingCustomer.address?.number || viewingCustomer.shippingAddress?.phone || 'N/A'}</span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Payment</span>
+                    <div className="flex items-center justify-between group cursor-pointer">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-purple-50 group-hover:text-purple-500 transition-colors">
+                          <Shield size={14} />
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Payment</span>
+                      </div>
                       <span className="text-sm font-bold text-[#1A2C54]">{viewingCustomer.paymentMethod}</span>
                     </div>
                   </div>
@@ -2803,18 +2871,25 @@ export default function AdminDashboard() {
                 <div className="lg:col-span-2 space-y-8">
                   <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6">
                     <h4 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Shipping Address</h4>
-                    <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
-                      <p className="text-sm font-bold text-[#1A2C54] leading-relaxed">
+                    <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100 relative overflow-hidden group">
+                      <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                        <Truck size={48} className="text-[#1A2C54]" />
+                      </div>
+                      <p className="text-sm font-bold text-[#1A2C54] leading-relaxed relative z-10">
                         {viewingCustomer.address ? (
                           <>
-                            {viewingCustomer.address.name}<br />
+                            <span className="text-ruby text-[10px] font-black uppercase tracking-widest block mb-1">Recipient Name</span>
+                            <span className="text-lg">{viewingCustomer.address.name}</span><br />
+                            <span className="text-ruby text-[10px] font-black uppercase tracking-widest block mt-3 mb-1">Full Address</span>
                             {viewingCustomer.address.address},<br />
                             {viewingCustomer.address.city}, {viewingCustomer.address.state} - {viewingCustomer.address.pincode}<br />
                             India
                           </>
                         ) : viewingCustomer.shippingAddress ? (
                           <>
-                            {viewingCustomer.shippingAddress.fullName}<br />
+                            <span className="text-ruby text-[10px] font-black uppercase tracking-widest block mb-1">Recipient Name</span>
+                            <span className="text-lg">{viewingCustomer.shippingAddress.fullName}</span><br />
+                            <span className="text-ruby text-[10px] font-black uppercase tracking-widest block mt-3 mb-1">Full Address</span>
                             {viewingCustomer.shippingAddress.address},<br />
                             {viewingCustomer.shippingAddress.city}, {viewingCustomer.shippingAddress.zipCode}<br />
                             {viewingCustomer.shippingAddress.country}
@@ -2846,24 +2921,27 @@ export default function AdminDashboard() {
                     </div>
                     <div className="space-y-4">
                       {(viewingCustomer.items || []).map((item: any, idx: number) => (
-                        <div key={idx} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 sm:p-6 bg-gray-50 rounded-2xl border border-gray-100 gap-4">
+                        <div key={idx} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 sm:p-6 bg-gray-50 rounded-2xl border border-gray-100 gap-4 hover:border-ruby/20 transition-all group">
                           <div className="flex items-center space-x-4">
-                            <div className="w-12 h-12 sm:w-16 sm:h-16 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden">
+                            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-white rounded-2xl flex items-center justify-center shadow-sm overflow-hidden border border-gray-100 group-hover:scale-105 transition-transform">
                               {item.image ? (
                                 <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                               ) : (
-                                <ShoppingBag size={20} className="text-[#3B82F6]" />
+                                <ShoppingBag size={24} className="text-[#3B82F6]" />
                               )}
                             </div>
                             <div>
-                              <p className="text-sm font-bold text-[#1A2C54]">{item.name}</p>
-                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                                Qty: {item.quantity} • Size: {item.selectedSize || 'N/A'} • Price: ₹{item.price.toLocaleString()}
-                              </p>
+                              <p className="text-base font-black text-[#1A2C54]">{item.name}</p>
+                              <div className="flex flex-wrap gap-2 mt-1">
+                                <span className="px-2 py-0.5 bg-white border border-gray-100 rounded-md text-[9px] font-bold text-gray-500 uppercase tracking-widest">Qty: {item.quantity}</span>
+                                <span className="px-2 py-0.5 bg-white border border-gray-100 rounded-md text-[9px] font-bold text-gray-500 uppercase tracking-widest">Size: {item.selectedSize || 'N/A'}</span>
+                                <span className="px-2 py-0.5 bg-white border border-gray-100 rounded-md text-[9px] font-bold text-gray-500 uppercase tracking-widest">₹{item.price.toLocaleString()}</span>
+                              </div>
                             </div>
                           </div>
-                          <div className="text-left sm:text-right w-full sm:w-auto">
-                            <p className="text-lg font-black text-[#1A2C54]">
+                          <div className="text-left sm:text-right w-full sm:w-auto pt-4 sm:pt-0 border-t sm:border-t-0 border-gray-100">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Subtotal</p>
+                            <p className="text-xl font-black text-[#1A2C54]">
                               ₹{(item.price * item.quantity).toLocaleString()}
                             </p>
                           </div>
@@ -4385,7 +4463,7 @@ export default function AdminDashboard() {
                                 <li>Select your project &gt; <b>Authentication</b> &gt; <b>Settings</b> tab</li>
                                 <li>If you see a back arrow (←) next to "User account linking", click it to see the main settings list</li>
                                 <li>Scroll down and click on <b>Authorized domains</b></li>
-                                <li>Click <b>Add domain</b> and add <b>rubyfashion.shop</b></li>
+                                <li>Click <b>Add domain</b> and add <b>therubyfashion.shop</b></li>
                               </ol>
                             </div>
                           </div>
