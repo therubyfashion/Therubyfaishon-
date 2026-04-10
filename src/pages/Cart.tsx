@@ -285,9 +285,9 @@ export default function Cart() {
             <div className="pt-6 border-t border-gray-50 flex justify-between items-end">
               <div className="space-y-1">
                 <p className="text-base sm:text-lg font-bold text-[#1A2C54]">Total Payable</p>
-                {savings > 0 && (
+                {discount > 0 && (
                   <p className="text-[9px] sm:text-[10px] font-bold text-green-500 uppercase tracking-widest flex items-center gap-1">
-                    🎉 You save ₹{savings.toLocaleString()} on this order!
+                    🎉 You save ₹{appliedPromo?.discount.toLocaleString()} on this order!
                   </p>
                 )}
               </div>

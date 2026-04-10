@@ -8,10 +8,33 @@
         "uid": { "type": "string", "description": "Firebase Auth UID" },
         "email": { "type": "string", "format": "email" },
         "displayName": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "phoneVerified": { "type": "boolean" },
+        "isVerified": { "type": "boolean" },
         "role": { "type": "string", "enum": ["admin", "user"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email", "role"]
+    },
+    "Address": {
+      "title": "Address",
+      "description": "User shipping address.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "number": { "type": "string" },
+        "address": { "type": "string" },
+        "landmark": { "type": "string" },
+        "state": { "type": "string" },
+        "city": { "type": "string" },
+        "pincode": { "type": "string" },
+        "label": { "type": "string", "enum": ["Home", "Office", "Other"] },
+        "isDefault": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "number", "address", "state", "city", "pincode", "label"]
     },
     "Product": {
       "title": "Product",
@@ -150,6 +173,7 @@
   },
   "firestore": {
     "/users/{uid}": { "schema": "User", "description": "User profiles" },
+    "/users/{uid}/addresses/{addressId}": { "schema": "Address", "description": "User saved addresses" },
     "/products/{productId}": { "schema": "Product", "description": "Product catalog" },
     "/orders/{orderId}": { "schema": "Order", "description": "Customer orders" },
     "/categories/{categoryId}": { "schema": "Category", "description": "Product categories" },

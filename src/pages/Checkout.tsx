@@ -45,10 +45,8 @@ export default function Checkout() {
     const saved = localStorage.getItem('checkout_step');
     return saved ? parseInt(saved, 10) : 1;
   });
-  const [addresses, setAddresses] = useState<any[]>(() => {
-    const saved = localStorage.getItem('user_addresses');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [addresses, setAddresses] = useState<any[]>([]);
+  const [loadingAddresses, setLoadingAddresses] = useState(true);
   const [selectedAddress, setSelectedAddress] = useState<string | null>(() => {
     return localStorage.getItem('selected_address_id');
   });
@@ -57,9 +55,36 @@ export default function Checkout() {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [showPhoneVerify, setShowPhoneVerify] = useState(false);
+  const [pendingAddress, setPendingAddress] = useState<any>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [storeSettings, setStoreSettings] = useState<any>(null);
   const { profile } = useAuth();
+
+  useEffect(() => {
+    const fetchAddresses = async () => {
+      if (!user) {
+        setLoadingAddresses(false);
+        return;
+      }
+      try {
+        const querySnapshot = await getDocs(collection(db, `users/${user.uid}/addresses`));
+        const fetchedAddresses = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as any[];
+        setAddresses(fetchedAddresses);
+        if (fetchedAddresses.length > 0 && !selectedAddress) {
+          const defaultAddr = fetchedAddresses.find(a => a.isDefault) || fetchedAddresses[0];
+          setSelectedAddress(defaultAddr.id);
+        }
+      } catch (error) {
+        console.error("Error fetching addresses:", error);
+      } finally {
+        setLoadingAddresses(false);
+      }
+    };
+    fetchAddresses();
+  }, [user]);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -99,7 +124,8 @@ export default function Checkout() {
     landmark: '',
     state: '',
     city: '',
-    pincode: ''
+    pincode: '',
+    label: 'Home' as 'Home' | 'Office' | 'Other'
   });
 
   const shippingOptions = [
@@ -152,7 +178,7 @@ export default function Checkout() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleAddAddress = (e: React.FormEvent) => {
+  const handleAddAddress = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!validateForm()) {
@@ -160,28 +186,62 @@ export default function Checkout() {
       return;
     }
 
-    const addressId = Math.random().toString(36).substr(2, 9);
     const addressData = {
-      id: addressId,
       ...newAddress,
-      type: 'Home', // Default type
-      isDefault: addresses.length === 0
+      isDefault: addresses.length === 0,
+      createdAt: new Date().toISOString()
     };
-    setAddresses([...addresses, addressData]);
-    setSelectedAddress(addressId);
-    setShowAddressForm(false);
-    setNewAddress({
-      name: '',
-      email: '',
-      number: '',
-      address: '',
-      landmark: '',
-      state: '',
-      city: '',
-      pincode: ''
-    });
-    setErrors({});
-    toast.success('Address added successfully!');
+
+    // If phone is not verified, trigger verification first
+    if (!profile?.phoneVerified) {
+      setPendingAddress(addressData);
+      setShowPhoneVerify(true);
+      
+      // Also trigger email verification if not verified
+      if (user && !user.emailVerified) {
+        try {
+          const { sendEmailVerification } = await import('firebase/auth');
+          await sendEmailVerification(user);
+          toast.info('A verification email has been sent to your Gmail. Please verify it for secure checkout.');
+        } catch (err) {
+          console.error("Email verify error:", err);
+        }
+      }
+      return;
+    }
+
+    try {
+      if (user) {
+        const docRef = await addDoc(collection(db, `users/${user.uid}/addresses`), addressData);
+        const savedAddress = { id: docRef.id, ...addressData };
+        setAddresses([...addresses, savedAddress]);
+        setSelectedAddress(docRef.id);
+      } else {
+        // Guest mode fallback
+        const guestId = Math.random().toString(36).substr(2, 9);
+        const savedAddress = { id: guestId, ...addressData };
+        setAddresses([...addresses, savedAddress]);
+        setSelectedAddress(guestId);
+      }
+      
+      setShowAddressForm(false);
+      setNewAddress({
+        name: '',
+        email: '',
+        number: '',
+        address: '',
+        landmark: '',
+        state: '',
+        city: '',
+        pincode: '',
+        label: 'Home'
+      });
+      setErrors({});
+      toast.success('Address added successfully!');
+    } catch (error) {
+      console.error("Error saving address:", error);
+      toast.error("Failed to save address. Please try again.");
+    }
   };
 
   const handlePlaceOrder = async (isVerifiedOverride = false) => {
@@ -248,30 +308,36 @@ export default function Checkout() {
               const emailHtml = `
                 <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #FAFAFA; padding: 40px 20px; color: #1A2C54;">
                   <div style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 40px; padding: 60px; box-shadow: 0 20px 50px -20px rgba(0,0,0,0.08); border: 1px solid #F0F0F0;">
-                    <div style="text-align: center; margin-bottom: 50px;">
-                      ${settingsData.storeLogo ? `<img src="${settingsData.storeLogo}" alt="${settingsData.storeName}" style="max-height: 60px; margin-bottom: 10px;">` : `<h1 style="font-size: 32px; font-weight: bold; letter-spacing: -1px; margin: 0; color: #E11D48;">${settingsData.storeName?.toUpperCase() || 'THE RUBY'}</h1>`}
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 50px;">
+                      <div>
+                        ${settingsData.storeLogo ? `<img src="${settingsData.storeLogo}" alt="${settingsData.storeName}" style="max-height: 50px; margin-bottom: 10px;">` : `<h1 style="font-size: 24px; font-weight: bold; letter-spacing: -1px; margin: 0; color: #E11D48;">${settingsData.storeName?.toUpperCase() || 'THE RUBY'}</h1>`}
+                      </div>
+                      <div style="text-align: right;">
+                        <h1 style="font-size: 14px; font-weight: bold; color: #9CA3AF; text-transform: uppercase; letter-spacing: 2px; margin: 0;">Tax Invoice</h1>
+                        <p style="font-size: 12px; color: #1A2C54; font-weight: bold; margin: 4px 0 0 0;">#${finalOrderData.orderId}</p>
+                      </div>
                     </div>
                     
                     <div style="text-align: center; margin-bottom: 40px;">
                       <div style="display: inline-block; background-color: #FDF2F8; color: #E11D48; padding: 12px 24px; border-radius: 100px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 24px;">Order Confirmed</div>
                       <h2 style="font-size: 28px; font-weight: bold; margin: 0 0 16px 0; color: #1A2C54;">Thank you for your order, ${finalOrderData.address.name}!</h2>
-                      <p style="font-size: 16px; color: #666666; line-height: 1.6; margin: 0;">We've received your order and our team is already working on getting it to you. Here's a summary of what you've ordered.</p>
+                      <p style="font-size: 16px; color: #666666; line-height: 1.6; margin: 0;">We've received your order and our team is already working on getting it to you. Here's your official tax invoice.</p>
                     </div>
 
                     <div style="background-color: #F9FAFB; border-radius: 24px; padding: 32px; margin-bottom: 40px; border: 1px solid #F3F4F6;">
-                      <div style="display: flex; justify-content: space-between; margin-bottom: 24px; border-bottom: 1px solid #E5E7EB; pb-16px;">
+                      <div style="display: flex; justify-content: space-between; margin-bottom: 24px; border-bottom: 1px solid #E5E7EB; padding-bottom: 16px;">
                         <div style="flex: 1;">
-                          <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 8px 0;">Order Number</p>
-                          <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${finalOrderData.orderId}</p>
+                          <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 8px 0;">Date</p>
+                          <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
                         </div>
                         <div style="flex: 1; text-align: right;">
-                          <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 8px 0;">Estimated Delivery</p>
-                          <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${finalOrderData.estimatedDelivery}</p>
+                          <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 8px 0;">Payment Method</p>
+                          <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${finalOrderData.paymentId === 'COD' ? 'Cash on Delivery' : 'Prepaid (Razorpay)'}</p>
                         </div>
                       </div>
 
                       <div style="margin-bottom: 24px;">
-                        <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 12px 0;">Items Ordered</p>
+                        <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 12px 0;">Items Summary</p>
                         ${finalOrderData.items.map((item: any) => `
                           <div style="display: flex; align-items: center; margin-bottom: 16px;">
                             <div style="width: 50px; height: 60px; background-color: #FFFFFF; border-radius: 8px; overflow: hidden; margin-right: 16px; border: 1px solid #E5E7EB;">
@@ -288,7 +354,7 @@ export default function Checkout() {
                         `).join('')}
                       </div>
 
-                      <div style="border-top: 1px solid #E5E7EB; pt-24px;">
+                      <div style="border-top: 1px solid #E5E7EB; padding-top: 24px;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                           <p style="font-size: 14px; color: #666666; margin: 0;">Subtotal</p>
                           <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">₹${finalOrderData.subtotal.toLocaleString()}</p>
@@ -303,7 +369,7 @@ export default function Checkout() {
                           <p style="font-size: 14px; color: #666666; margin: 0;">Shipping</p>
                           <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${finalOrderData.shippingCost === 0 ? 'FREE' : `₹${finalOrderData.shippingCost.toLocaleString()}`}</p>
                         </div>
-                        <div style="display: flex; justify-content: space-between; border-top: 2px solid #1A2C54; pt-16px;">
+                        <div style="display: flex; justify-content: space-between; border-top: 2px solid #1A2C54; padding-top: 16px;">
                           <p style="font-size: 18px; font-weight: bold; color: #1A2C54; margin: 0;">Total Amount</p>
                           <p style="font-size: 24px; font-weight: bold; color: #E11D48; margin: 0;">₹${finalOrderData.total.toLocaleString()}</p>
                         </div>
@@ -311,7 +377,7 @@ export default function Checkout() {
                     </div>
 
                     <div style="margin-bottom: 40px;">
-                      <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 12px 0;">Delivery Address</p>
+                      <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 12px 0;">Billing & Shipping Address</p>
                       <p style="font-size: 14px; color: #666666; line-height: 1.6; margin: 0;">
                         <strong>${finalOrderData.address.name}</strong><br/>
                         ${finalOrderData.address.address}, ${finalOrderData.address.landmark ? finalOrderData.address.landmark + ', ' : ''}<br/>
@@ -320,7 +386,7 @@ export default function Checkout() {
                       </p>
                     </div>
 
-                    <div style="text-align: center; border-top: 1px solid #F0F0F0; pt-40px;">
+                    <div style="text-align: center; border-top: 1px solid #F0F0F0; padding-top: 40px;">
                       <p style="font-size: 14px; color: #9CA3AF; margin-bottom: 24px;">Need help with your order? Reply to this email or visit our support center.</p>
                       <div style="margin-bottom: 32px;">
                         <a href="${window.location.origin}/profile" style="display: inline-block; background-color: #1A2C54; color: #FFFFFF; padding: 18px 36px; border-radius: 16px; text-decoration: none; font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; box-shadow: 0 10px 20px -5px rgba(26,44,84,0.3);">Track Your Order</a>
@@ -471,17 +537,59 @@ export default function Checkout() {
               ))}
             </div>
 
-            {/* Step Content */}
-            <AnimatePresence mode="wait">
+            {/* Phone Verification Modal */}
+            <AnimatePresence>
               {showPhoneVerify && (
                 <PhoneVerification 
-                  onClose={() => setShowPhoneVerify(false)}
-                  onSuccess={() => {
+                  prefillPhone={pendingAddress?.number || newAddress.number}
+                  onClose={() => {
                     setShowPhoneVerify(false);
-                    handlePlaceOrder(true);
+                    setPendingAddress(null);
+                  }}
+                  onSuccess={async () => {
+                    setShowPhoneVerify(false);
+                    if (pendingAddress) {
+                      try {
+                        let savedAddress;
+                        if (user) {
+                          const docRef = await addDoc(collection(db, `users/${user.uid}/addresses`), pendingAddress);
+                          savedAddress = { id: docRef.id, ...pendingAddress };
+                          setSelectedAddress(docRef.id);
+                        } else {
+                          const guestId = Math.random().toString(36).substr(2, 9);
+                          savedAddress = { id: guestId, ...pendingAddress };
+                          setSelectedAddress(guestId);
+                        }
+                        
+                        setAddresses([...addresses, savedAddress]);
+                        setShowAddressForm(false);
+                        setNewAddress({
+                          name: '',
+                          email: '',
+                          number: '',
+                          address: '',
+                          landmark: '',
+                          state: '',
+                          city: '',
+                          pincode: '',
+                          label: 'Home'
+                        });
+                        setPendingAddress(null);
+                        toast.success('Phone verified & Address added! 🎉');
+                      } catch (error) {
+                        console.error("Error saving address after verification:", error);
+                        toast.error("Phone verified but failed to save address.");
+                      }
+                    } else {
+                      handlePlaceOrder(true);
+                    }
                   }}
                 />
               )}
+            </AnimatePresence>
+
+            {/* Step Content */}
+            <AnimatePresence mode="wait">
               {currentStep === 1 ? (
                 <motion.div 
                   key="step1"
@@ -493,7 +601,13 @@ export default function Checkout() {
                   <h2 className="text-xl font-bold text-[#1A2C54]">Delivery Address</h2>
                   
                   <div className="address-options flex flex-col gap-4">
-                    {addresses.map((addr) => (
+                    {loadingAddresses ? (
+                      <div className="flex flex-col items-center justify-center p-12 bg-white rounded-[2rem] border border-gray-100">
+                        <LoadingSpinner />
+                        <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-4">Loading Addresses...</p>
+                      </div>
+                    ) : addresses.length > 0 ? (
+                      addresses.map((addr) => (
                       <div
                         key={addr.id}
                         onClick={() => setSelectedAddress(addr.id)}
@@ -505,7 +619,7 @@ export default function Checkout() {
                         <div className="addr-card-top flex items-center gap-3 mb-2">
                           <span className="addr-name text-[16px] font-bold text-[#1A2C54]">{addr.name}</span>
                           <span className="bg-gray-100 text-gray-500 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                            {addr.type}
+                            {addr.label}
                           </span>
                         </div>
                         <p className="addr-text text-sm text-gray-400 leading-relaxed font-medium">
@@ -522,9 +636,10 @@ export default function Checkout() {
                           {selectedAddress === addr.id && <div className="w-2 h-2 bg-white rounded-full" />}
                         </div>
                       </div>
-                    ))}
+                    ))
+                  ) : null}
 
-                    {!showAddressForm ? (
+                  {!showAddressForm ? (
                       <button 
                         onClick={() => setShowAddressForm(true)}
                         className="add-address flex items-center justify-center gap-3 p-6 border-2 border-dashed border-gray-200 rounded-[1.5rem] text-sm text-gray-400 cursor-pointer transition-all duration-200 hover:border-ruby hover:text-ruby group"
@@ -694,6 +809,29 @@ export default function Checkout() {
                               placeholder="Enter state"
                             />
                             {errors.state && <p className="text-[9px] font-bold text-ruby uppercase tracking-widest">{errors.state}</p>}
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Address Label</label>
+                          <div className="flex gap-3">
+                            {(['Home', 'Office', 'Other'] as const).map((label) => (
+                              <button
+                                key={label}
+                                type="button"
+                                onClick={() => setNewAddress({ ...newAddress, label })}
+                                className={cn(
+                                  "flex-1 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest border transition-all",
+                                  newAddress.label === label 
+                                    ? "bg-ruby text-white border-ruby shadow-lg shadow-ruby/20" 
+                                    : "bg-gray-50 text-gray-400 border-gray-100 hover:border-ruby/30"
+                                )}
+                              >
+                                {label === 'Home' && <Home size={14} className="inline mr-2 mb-0.5" />}
+                                {label === 'Office' && <Briefcase size={14} className="inline mr-2 mb-0.5" />}
+                                {label}
+                              </button>
+                            ))}
                           </div>
                         </div>
 

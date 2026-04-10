@@ -22,14 +22,17 @@ import {
 } from 'lucide-react';
 import { collection } from 'firebase/firestore';
 import { db } from '../firebase';
+import { cn } from '../lib/utils';
 
 import PhoneVerification from '../components/PhoneVerification';
+import AddressManager from '../components/AddressManager';
 import { AnimatePresence } from 'motion/react';
 
 export default function Profile() {
   const { user, profile, loading, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [showPhoneVerify, setShowPhoneVerify] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState<'menu' | 'addresses'>('menu');
 
   const handleLogout = async () => {
     try {
@@ -128,107 +131,138 @@ export default function Profile() {
           </div>
         </motion.div>
 
-        {/* Contact Info */}
-        <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-50 space-y-4">
-          <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400 px-2">Contact Information</h3>
-          <div className="space-y-2">
-            <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-2xl">
-              <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-gray-400 shadow-sm">
-                <Mail size={18} />
-              </div>
-              <div className="flex-grow min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Email Address</p>
-                <p className="text-sm font-bold text-[#1A2C54] truncate">{user.email}</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-2xl group transition-all">
-              <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-gray-400 shadow-sm group-hover:text-ruby transition-colors">
-                <Phone size={18} />
-              </div>
-              <div className="flex-grow min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Phone Number</p>
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-bold text-[#1A2C54] truncate">
-                    {profile?.phoneNumber ? `+91 ${profile.phoneNumber}` : 'Not Verified'}
-                  </p>
-                  {!profile?.phoneNumber ? (
-                    <button 
-                      onClick={() => setShowPhoneVerify(true)}
-                      className="text-[10px] font-bold text-ruby uppercase tracking-widest hover:underline"
-                    >
-                      Verify Now
-                    </button>
-                  ) : (
-                    <div className="flex items-center gap-1 text-green-500">
-                      <ShieldCheck size={12} />
-                      <span className="text-[8px] font-bold uppercase tracking-widest">Verified</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <AnimatePresence>
-          {showPhoneVerify && (
-            <PhoneVerification 
-              onClose={() => setShowPhoneVerify(false)}
-              onSuccess={() => {
-                setShowPhoneVerify(false);
-                window.location.reload(); // Refresh to update profile state
-              }}
-            />
-          )}
-        </AnimatePresence>
-
-        {/* Menu Items */}
-        <div className="bg-white overflow-hidden rounded-[2rem] shadow-sm border border-gray-50 divide-y divide-gray-50">
-          {menuItems.map((item, idx) => (
-            item.path ? (
-              <Link 
-                key={idx} 
-                to={item.path}
-                className="flex items-center justify-between p-6 hover:bg-gray-50 transition-all group"
-              >
-                <div className="flex items-center gap-4">
-                  <div className={`w-12 h-12 rounded-2xl ${item.bg} ${item.color} flex items-center justify-center transition-transform group-hover:scale-110`}>
-                    <item.icon size={22} />
-                  </div>
-                  <span className="text-sm font-bold text-[#1A2C54] uppercase tracking-widest">{item.label}</span>
-                </div>
-                <ChevronRight size={18} className="text-gray-300 group-hover:text-ruby group-hover:translate-x-1 transition-all" />
-              </Link>
-            ) : (
-              <button 
-                key={idx} 
-                onClick={item.onClick}
-                className="w-full flex items-center justify-between p-6 hover:bg-gray-50 transition-all group"
-              >
-                <div className="flex items-center gap-4">
-                  <div className={`w-12 h-12 rounded-2xl ${item.bg} ${item.color} flex items-center justify-center transition-transform group-hover:scale-110`}>
-                    <item.icon size={22} />
-                  </div>
-                  <span className="text-sm font-bold text-[#1A2C54] uppercase tracking-widest">{item.label}</span>
-                </div>
-                <ChevronRight size={18} className="text-gray-300 group-hover:text-ruby group-hover:translate-x-1 transition-all" />
-              </button>
-            )
-          ))}
+        {/* Tabs */}
+        <div className="flex gap-4 px-2">
           <button 
-            onClick={handleLogout}
-            className="w-full flex items-center justify-between p-6 hover:bg-ruby/5 transition-all group"
+            onClick={() => setActiveTab('menu')}
+            className={cn(
+              "flex-1 py-4 rounded-2xl text-[10px] font-bold uppercase tracking-[0.2em] transition-all",
+              activeTab === 'menu' ? "bg-[#1A2C54] text-white shadow-lg shadow-[#1A2C54]/20" : "bg-white text-gray-400 border border-gray-50"
+            )}
           >
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-ruby/10 text-ruby flex items-center justify-center transition-transform group-hover:scale-110">
-                <LogOut size={22} />
-              </div>
-              <span className="text-sm font-bold text-ruby uppercase tracking-widest">Logout</span>
-            </div>
-            <ChevronRight size={18} className="text-ruby/30 group-hover:translate-x-1 transition-all" />
+            Menu
+          </button>
+          <button 
+            onClick={() => setActiveTab('addresses')}
+            className={cn(
+              "flex-1 py-4 rounded-2xl text-[10px] font-bold uppercase tracking-[0.2em] transition-all",
+              activeTab === 'addresses' ? "bg-[#1A2C54] text-white shadow-lg shadow-[#1A2C54]/20" : "bg-white text-gray-400 border border-gray-50"
+            )}
+          >
+            Addresses
           </button>
         </div>
+
+        <AnimatePresence mode="wait">
+          {activeTab === 'menu' ? (
+            <motion.div 
+              key="menu"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-8"
+            >
+              {/* Contact Info */}
+              <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-50 space-y-4">
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400 px-2">Contact Information</h3>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-2xl">
+                    <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-gray-400 shadow-sm">
+                      <Mail size={18} />
+                    </div>
+                    <div className="flex-grow min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Email Address</p>
+                      <p className="text-sm font-bold text-[#1A2C54] truncate">{user.email}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-2xl group transition-all">
+                    <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-gray-400 shadow-sm group-hover:text-ruby transition-colors">
+                      <Phone size={18} />
+                    </div>
+                    <div className="flex-grow min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Phone Number</p>
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-bold text-[#1A2C54] truncate">
+                          {profile?.phoneNumber ? `+91 ${profile.phoneNumber}` : 'Not Verified'}
+                        </p>
+                        {!profile?.phoneVerified ? (
+                          <button 
+                            onClick={() => setShowPhoneVerify(true)}
+                            className="text-[10px] font-bold text-ruby uppercase tracking-widest hover:underline"
+                          >
+                            Verify Now
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-1 text-green-500">
+                            <ShieldCheck size={12} />
+                            <span className="text-[8px] font-bold uppercase tracking-widest">Verified</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Menu Items */}
+              <div className="bg-white overflow-hidden rounded-[2rem] shadow-sm border border-gray-50 divide-y divide-gray-50">
+                {menuItems.map((item, idx) => (
+                  item.path ? (
+                    <Link 
+                      key={idx} 
+                      to={item.path}
+                      className="flex items-center justify-between p-6 hover:bg-gray-50 transition-all group"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className={`w-12 h-12 rounded-2xl ${item.bg} ${item.color} flex items-center justify-center transition-transform group-hover:scale-110`}>
+                          <item.icon size={22} />
+                        </div>
+                        <span className="text-sm font-bold text-[#1A2C54] uppercase tracking-widest">{item.label}</span>
+                      </div>
+                      <ChevronRight size={18} className="text-gray-300 group-hover:text-ruby group-hover:translate-x-1 transition-all" />
+                    </Link>
+                  ) : (
+                    <button 
+                      key={idx} 
+                      onClick={item.onClick}
+                      className="w-full flex items-center justify-between p-6 hover:bg-gray-50 transition-all group"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className={`w-12 h-12 rounded-2xl ${item.bg} ${item.color} flex items-center justify-center transition-transform group-hover:scale-110`}>
+                          <item.icon size={22} />
+                        </div>
+                        <span className="text-sm font-bold text-[#1A2C54] uppercase tracking-widest">{item.label}</span>
+                      </div>
+                      <ChevronRight size={18} className="text-gray-300 group-hover:text-ruby group-hover:translate-x-1 transition-all" />
+                    </button>
+                  )
+                ))}
+                <button 
+                  onClick={handleLogout}
+                  className="w-full flex items-center justify-between p-6 hover:bg-ruby/5 transition-all group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-ruby/10 text-ruby flex items-center justify-center transition-transform group-hover:scale-110">
+                      <LogOut size={22} />
+                    </div>
+                    <span className="text-sm font-bold text-ruby uppercase tracking-widest">Logout</span>
+                  </div>
+                  <ChevronRight size={18} className="text-ruby/30 group-hover:translate-x-1 transition-all" />
+                </button>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="addresses"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
+              <AddressManager />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <p className="text-[10px] text-center text-gray-300 uppercase tracking-[0.3em] font-bold pt-4">
           The Ruby Premium Experience

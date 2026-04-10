@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { UserProfile } from '../types';
 
@@ -24,51 +24,63 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    let unsubscribeProfile: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
       
       if (firebaseUser) {
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-        const userData = userDoc.data() as UserProfile | undefined;
+        // Use onSnapshot for real-time profile updates
+        unsubscribeProfile = onSnapshot(doc(db, 'users', firebaseUser.uid), async (userDoc) => {
+          const userData = userDoc.data() as UserProfile | undefined;
 
-        if (userDoc.exists()) {
-          // If it's an email user, check if they are verified in Firestore
-          const isGoogleUser = firebaseUser.providerData.some(p => p.providerId === 'google.com');
-          const isPhoneUser = firebaseUser.providerData.some(p => p.providerId === 'phone');
-          
-          if (!isGoogleUser && !isPhoneUser && !userData?.isVerified) {
-            setProfile(null);
-            setUser(null);
-            await auth.signOut();
-          } else {
-            setProfile(userData);
+          if (userDoc.exists()) {
+            // If it's an email user, check if they are verified in Firestore
+            const isGoogleUser = firebaseUser.providerData.some(p => p.providerId === 'google.com');
+            const isPhoneUser = firebaseUser.providerData.some(p => p.providerId === 'phone');
+            
+            if (!isGoogleUser && !isPhoneUser && !userData?.isVerified) {
+              setProfile(null);
+              setUser(null);
+              await auth.signOut();
+            } else {
+              setProfile(userData);
+            }
+          } else if (
+            firebaseUser.emailVerified || 
+            firebaseUser.providerData.some(p => p.providerId === 'google.com') ||
+            firebaseUser.providerData.some(p => p.providerId === 'phone')
+          ) {
+            // Create profile only if verified, Google, or Phone
+            const newProfile: UserProfile = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || '',
+              displayName: firebaseUser.displayName || '',
+              phoneNumber: firebaseUser.phoneNumber || '',
+              role: 'user',
+              isVerified: firebaseUser.providerData.some(p => p.providerId === 'phone') ? true : false,
+              phoneVerified: firebaseUser.providerData.some(p => p.providerId === 'phone') ? true : false,
+              createdAt: new Date().toISOString(),
+            };
+            await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
+            setProfile(newProfile);
           }
-        } else if (
-          firebaseUser.emailVerified || 
-          firebaseUser.providerData.some(p => p.providerId === 'google.com') ||
-          firebaseUser.providerData.some(p => p.providerId === 'phone')
-        ) {
-          // Create profile only if verified, Google, or Phone
-          const newProfile: UserProfile = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email || '',
-            displayName: firebaseUser.displayName || '',
-            phoneNumber: firebaseUser.phoneNumber || '',
-            role: 'user',
-            isVerified: firebaseUser.providerData.some(p => p.providerId === 'phone') ? true : false, // Phone users are verified by default
-            phoneVerified: firebaseUser.providerData.some(p => p.providerId === 'phone') ? true : false,
-            createdAt: new Date().toISOString(),
-          };
-          await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
-          setProfile(newProfile);
-        }
+          setLoading(false);
+        }, (error) => {
+          console.error("Profile snapshot error:", error);
+          setLoading(false);
+        });
       } else {
         setProfile(null);
+        if (unsubscribeProfile) unsubscribeProfile();
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeProfile) unsubscribeProfile();
+    };
   }, []);
 
   return (

@@ -84,7 +84,21 @@ service cloud.firestore {
              data.uid is string && data.uid.size() > 0 &&
              data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
              data.role in ['admin', 'user'] &&
-             data.createdAt is string;
+             data.createdAt is string &&
+             (!('phoneNumber' in data) || data.phoneNumber is string) &&
+             (!('phoneVerified' in data) || data.phoneVerified is bool) &&
+             (!('isVerified' in data) || data.isVerified is bool);
+    }
+
+    function isValidAddress(data) {
+      return data.keys().hasAll(['name', 'number', 'address', 'state', 'city', 'pincode', 'label']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.number is string && data.number.size() >= 10 &&
+             data.address is string && data.address.size() > 0 &&
+             data.state is string &&
+             data.city is string &&
+             data.pincode is string &&
+             data.label in ['Home', 'Office', 'Other'];
     }
 
     function isValidProduct(data) {
@@ -132,6 +146,12 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == 'user';
       allow update: if isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role && isValidUser(request.resource.data));
       allow delete: if isAdmin();
+
+      match /addresses/{addressId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidAddress(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
     }
 
     match /products/{productId} {

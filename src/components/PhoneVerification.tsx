@@ -10,6 +10,7 @@ import { useAuth } from '../contexts/AuthContext';
 interface PhoneVerificationProps {
   onSuccess?: (phoneNumber: string) => void;
   onClose?: () => void;
+  prefillPhone?: string;
 }
 
 declare global {
@@ -18,16 +19,30 @@ declare global {
   }
 }
 
-export default function PhoneVerification({ onSuccess, onClose }: PhoneVerificationProps) {
+export default function PhoneVerification({ onSuccess, onClose, prefillPhone }: PhoneVerificationProps) {
   const { user } = useAuth();
   const [step, setStep] = useState<'input' | 'otp'>('input');
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState(prefillPhone || '');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState(0);
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
   const recaptchaRef = useRef<HTMLDivElement>(null);
   const verifierRef = useRef<RecaptchaVerifier | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (step === 'input' && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [step]);
+
+  // Auto-trigger send OTP if prefilled and valid
+  useEffect(() => {
+    if (prefillPhone && prefillPhone.length === 10 && step === 'input' && !confirmationResult && !loading) {
+      // We can't auto-trigger easily because of reCAPTCHA, but we can highlight the button
+    }
+  }, [prefillPhone]);
 
   useEffect(() => {
     let interval: any;
@@ -205,6 +220,7 @@ export default function PhoneVerification({ onSuccess, onClose }: PhoneVerificat
         await setDoc(doc(db, 'users', verifiedUser.uid), {
           phoneNumber: phoneNumber,
           phoneVerified: true,
+          isVerified: true, // Mark as verified user
           lastLogin: new Date().toISOString()
         }, { merge: true });
       }
@@ -233,7 +249,7 @@ export default function PhoneVerification({ onSuccess, onClose }: PhoneVerificat
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
     >
       <motion.div 
         initial={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -281,6 +297,7 @@ export default function PhoneVerification({ onSuccess, onClose }: PhoneVerificat
                     <span className="text-sm font-bold">+91</span>
                   </div>
                   <input 
+                    ref={inputRef}
                     type="tel"
                     placeholder="Phone Number"
                     value={phoneNumber}
