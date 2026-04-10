@@ -40,12 +40,19 @@ async function startServer() {
   });
 
   app.post("/api/create-razorpay-order", async (req, res) => {
-    const keyId = process.env.VITE_RAZORPAY_KEY_ID?.trim();
+    // Check for both prefixed and non-prefixed versions
+    const keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID)?.trim();
     const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
 
     if (!keyId || !keySecret) {
-      console.error("Razorpay keys missing in environment:", { hasId: !!keyId, hasSecret: !!keySecret });
-      return res.status(500).json({ error: "Razorpay keys are not configured on the server. Please add VITE_RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Secrets." });
+      console.error("Razorpay keys missing in environment:", { 
+        hasViteId: !!process.env.VITE_RAZORPAY_KEY_ID, 
+        hasId: !!process.env.RAZORPAY_KEY_ID,
+        hasSecret: !!process.env.RAZORPAY_KEY_SECRET 
+      });
+      return res.status(500).json({ 
+        error: "Razorpay keys are not configured on the server. Please ensure VITE_RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are added in the Secrets panel and then DEPLOY the app." 
+      });
     }
 
     // Always create a fresh instance or update if keys changed
