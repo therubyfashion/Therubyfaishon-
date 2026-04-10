@@ -1,8 +1,9 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
-import { db, auth } from '../firebase';
+import { db, auth, storage } from '../firebase';
 import { signOut, updateProfile } from 'firebase/auth';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import { 
@@ -20,13 +21,13 @@ import {
   Mail, 
   Phone,
   Calendar,
-  MessageCircle
+  MessageCircle,
+  MapPin
 } from 'lucide-react';
 import { collection, doc, updateDoc } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 
 import PhoneVerification from '../components/PhoneVerification';
-import AddressManager from '../components/AddressManager';
 import { AnimatePresence } from 'motion/react';
 
 export default function Profile() {
@@ -34,6 +35,8 @@ export default function Profile() {
   const navigate = useNavigate();
   const [showPhoneVerify, setShowPhoneVerify] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
+  const [isUploading, setIsUploading] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [editForm, setEditForm] = React.useState({
     displayName: '',
     photoURL: '',
@@ -75,6 +78,38 @@ export default function Profile() {
     } catch (error) {
       console.error("Update profile error:", error);
       toast.error("Failed to update profile.");
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error("Please select an image file.");
+      return;
+    }
+
+    // Validate file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Image size should be less than 2MB.");
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const storageRef = ref(storage, `profiles/${user.uid}/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(storageRef);
+      
+      setEditForm(prev => ({ ...prev, photoURL: downloadURL }));
+      toast.success("Image uploaded! Click Save to apply.");
+    } catch (error) {
+      console.error("Upload error:", error);
+      toast.error("Failed to upload image.");
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -123,6 +158,7 @@ export default function Profile() {
 
   const menuItems = [
     { icon: ShoppingBag, label: 'My Orders', path: '/my-orders', color: 'text-blue-500', bg: 'bg-blue-50' },
+    { icon: MapPin, label: 'Saved Addresses', path: '/addresses', color: 'text-green-500', bg: 'bg-green-50' },
     { icon: Heart, label: 'Wishlist', path: '/wishlist', color: 'text-ruby', bg: 'bg-ruby/5' },
     { icon: MessageCircle, label: 'Chat with Support', onClick: () => window.dispatchEvent(new CustomEvent('open-ruby-chat')), color: 'text-ruby', bg: 'bg-ruby/5' },
     { icon: Settings, label: 'Settings', path: '/settings', color: 'text-gray-500', bg: 'bg-gray-50' },
@@ -210,16 +246,34 @@ export default function Profile() {
 
                 <form onSubmit={handleUpdateProfile} className="space-y-4">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Profile Picture URL</label>
-                    <div className="relative">
-                      <Camera className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                      <input 
-                        type="url"
-                        value={editForm.photoURL}
-                        onChange={(e) => setEditForm({...editForm, photoURL: e.target.value})}
-                        className="w-full bg-gray-50 border-none rounded-2xl py-4 pl-12 pr-4 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20"
-                        placeholder="https://example.com/photo.jpg"
-                      />
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Profile Picture</label>
+                    <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-2xl">
+                      <div className="w-16 h-16 rounded-xl bg-white flex items-center justify-center overflow-hidden border border-gray-100 shadow-sm">
+                        {editForm.photoURL ? (
+                          <img src={editForm.photoURL} alt="Preview" className="w-full h-full object-cover" />
+                        ) : (
+                          <User size={24} className="text-gray-300" />
+                        )}
+                      </div>
+                      <div className="flex-grow">
+                        <input 
+                          type="file" 
+                          ref={fileInputRef}
+                          onChange={handleFileChange}
+                          accept="image/*"
+                          className="hidden"
+                        />
+                        <button 
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isUploading}
+                          className="w-full bg-white border border-gray-100 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest text-[#1A2C54] hover:border-ruby/30 hover:text-ruby transition-all flex items-center justify-center gap-2"
+                        >
+                          <Camera size={14} />
+                          {isUploading ? 'Uploading...' : 'Choose from Gallery'}
+                        </button>
+                        <p className="text-[8px] text-gray-400 mt-2 px-1 font-medium italic">Max size 2MB. JPG, PNG supported.</p>
+                      </div>
                     </div>
                   </div>
 
@@ -353,18 +407,6 @@ export default function Profile() {
                     </div>
                     <ChevronRight size={18} className="text-gray-300 group-hover:text-ruby group-hover:translate-x-1 transition-all" />
                   </button>
-                )}
-                {/* Insert Address Manager after My Orders */}
-                {item.label === 'My Orders' && (
-                  <div className="p-6 bg-gray-50/50">
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-gray-400 shadow-sm">
-                        <Calendar size={18} />
-                      </div>
-                      <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">Manage Addresses</h3>
-                    </div>
-                    <AddressManager />
-                  </div>
                 )}
               </React.Fragment>
             ))}

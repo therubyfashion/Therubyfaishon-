@@ -27,6 +27,7 @@ const OrderSuccess = React.lazy(() => import('./pages/OrderSuccess'));
 const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
 const Search = React.lazy(() => import('./pages/Search'));
 const Profile = React.lazy(() => import('./pages/Profile'));
+const Addresses = React.lazy(() => import('./pages/Addresses'));
 const VerifyEmail = React.lazy(() => import('./pages/VerifyEmail'));
 const VerifyPrompt = React.lazy(() => import('./pages/VerifyPrompt'));
 const InfoPage = React.lazy(() => import('./pages/InfoPage'));
@@ -133,6 +134,7 @@ function AppContent() {
             <Route path="/order-success" element={<OrderSuccess />} />
             <Route path="/search" element={<Search />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/addresses" element={<Addresses />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/verify-prompt" element={<VerifyPrompt />} />
             <Route path="/:slug" element={<InfoPage />} />
