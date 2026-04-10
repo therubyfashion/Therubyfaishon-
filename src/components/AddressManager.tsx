@@ -89,7 +89,7 @@ export default function AddressManager() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!user || !window.confirm("Are you sure you want to delete this address?")) return;
+    if (!user) return;
     try {
       await deleteDoc(doc(db, `users/${user.uid}/addresses`, id));
       toast.success("Address deleted.");
@@ -120,8 +120,7 @@ export default function AddressManager() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between px-2">
-        <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">My Saved Addresses</h3>
+      <div className="flex items-center justify-end px-2">
         {!showForm && (
           <button 
             onClick={() => setShowForm(true)}

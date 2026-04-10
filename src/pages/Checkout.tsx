@@ -441,44 +441,59 @@ export default function Checkout() {
         return;
       }
 
-      const options = {
-        key: razorpayKey,
-        amount: Math.round(finalTotal * 100), // Amount in paise
-        currency: 'INR',
-        name: storeSettings?.storeName || 'The Ruby',
-        description: `Order ${orderId}`,
-        // Use store logo if available, otherwise use a professional ruby gemstone icon
-        image: storeSettings?.storeLogo || 'https://cdn-icons-png.flaticon.com/512/2909/2909813.png', 
-        handler: async function (response: any) {
-          // Note: The merchant name shown in UPI apps (like GPay/PhonePe) 
-          // is controlled by your Razorpay Dashboard settings (Business Name).
-          await completeOrder(response.razorpay_payment_id);
-        },
-        prefill: {
-          name: selectedAddrObj?.name,
-          email: selectedAddrObj?.email,
-          contact: selectedAddrObj?.number,
-        },
-        theme: {
-          color: '#E11D48',
-        },
-        modal: {
-          ondismiss: function() {
-            setIsProcessingPayment(false);
-          }
-        }
-      };
-
       try {
+        // Create order on server first
+        const orderResponse = await fetch('/api/create-razorpay-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: Math.round(finalTotal * 100),
+            currency: 'INR',
+            receipt: orderId
+          })
+        });
+
+        const orderData = await orderResponse.json();
+
+        if (!orderResponse.ok) {
+          throw new Error(orderData.error || 'Failed to create order');
+        }
+
+        const options = {
+          key: razorpayKey,
+          amount: orderData.amount,
+          currency: orderData.currency,
+          name: storeSettings?.storeName || 'The Ruby',
+          description: `Order ${orderId}`,
+          image: storeSettings?.storeLogo || 'https://cdn-icons-png.flaticon.com/512/2909/2909813.png',
+          order_id: orderData.id,
+          handler: async function (response: any) {
+            await completeOrder(response.razorpay_payment_id);
+          },
+          prefill: {
+            name: selectedAddrObj?.name,
+            email: selectedAddrObj?.email,
+            contact: selectedAddrObj?.number,
+          },
+          theme: {
+            color: '#E11D48',
+          },
+          modal: {
+            ondismiss: function() {
+              setIsProcessingPayment(false);
+            }
+          }
+        };
+
         const rzp = new (window as any).Razorpay(options);
         rzp.on('payment.failed', function (response: any) {
           toast.error(response.error.description);
           setIsProcessingPayment(false);
         });
         rzp.open();
-      } catch (e) {
+      } catch (e: any) {
         console.error('Razorpay initialization failed:', e);
-        toast.error('Failed to initialize payment gateway. Please try again.');
+        toast.error(e.message || 'Failed to initialize payment gateway. Please try again.');
         setIsProcessingPayment(false);
       }
     } else {

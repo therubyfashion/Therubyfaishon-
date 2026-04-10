@@ -2,6 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { Resend } from 'resend';
+import Razorpay from 'razorpay';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 
@@ -12,6 +13,14 @@ const __dirname = path.dirname(__filename);
 
 let currentResendApiKey = process.env.RESEND_API_KEY;
 let resend = new Resend(currentResendApiKey);
+
+let razorpay: Razorpay | null = null;
+if (process.env.VITE_RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+  razorpay = new Razorpay({
+    key_id: process.env.VITE_RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET,
+  });
+}
 
 async function startServer() {
   const app = express();
@@ -28,6 +37,34 @@ async function startServer() {
       console.log("Resend API Key updated");
     }
     res.json({ status: "ok" });
+  });
+
+  app.post("/api/create-razorpay-order", async (req, res) => {
+    if (!razorpay) {
+      // Re-initialize if keys were added after startup
+      if (process.env.VITE_RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+        razorpay = new Razorpay({
+          key_id: process.env.VITE_RAZORPAY_KEY_ID,
+          key_secret: process.env.RAZORPAY_KEY_SECRET,
+        });
+      } else {
+        return res.status(500).json({ error: "Razorpay keys are not configured" });
+      }
+    }
+
+    const { amount, currency, receipt } = req.body;
+
+    try {
+      const order = await razorpay.orders.create({
+        amount, // amount in the smallest currency unit
+        currency,
+        receipt,
+      });
+      res.json(order);
+    } catch (error: any) {
+      console.error("Razorpay order creation error:", error);
+      res.status(500).json({ error: error.message || "Failed to create Razorpay order" });
+    }
   });
 
   app.post("/api/send-email", async (req, res) => {

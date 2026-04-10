@@ -1,11 +1,14 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
-import { auth } from '../firebase';
-import { signOut } from 'firebase/auth';
+import { db, auth } from '../firebase';
+import { signOut, updateProfile } from 'firebase/auth';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import { 
+  Pencil,
+  Camera,
+  X,
   User, 
   ShoppingBag, 
   Heart, 
@@ -17,11 +20,9 @@ import {
   Mail, 
   Phone,
   Calendar,
-  Sparkles,
   MessageCircle
 } from 'lucide-react';
-import { collection } from 'firebase/firestore';
-import { db } from '../firebase';
+import { collection, doc, updateDoc } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 
 import PhoneVerification from '../components/PhoneVerification';
@@ -32,7 +33,50 @@ export default function Profile() {
   const { user, profile, loading, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [showPhoneVerify, setShowPhoneVerify] = React.useState(false);
-  const [activeTab, setActiveTab] = React.useState<'menu' | 'addresses'>('menu');
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [editForm, setEditForm] = React.useState({
+    displayName: '',
+    photoURL: '',
+    phoneNumber: '',
+    email: ''
+  });
+
+  React.useEffect(() => {
+    if (user && profile) {
+      setEditForm({
+        displayName: user.displayName || '',
+        photoURL: user.photoURL || '',
+        phoneNumber: profile.phoneNumber || '',
+        email: user.email || ''
+      });
+    }
+  }, [user, profile]);
+
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    try {
+      // Update Firebase Auth (Display Name & Photo)
+      await updateProfile(user, {
+        displayName: editForm.displayName,
+        photoURL: editForm.photoURL
+      });
+
+      // Update Firestore (Name, Phone, Email)
+      await updateDoc(doc(db, 'users', user.uid), {
+        displayName: editForm.displayName,
+        phoneNumber: editForm.phoneNumber,
+        email: editForm.email
+      });
+
+      toast.success("Profile updated successfully!");
+      setIsEditing(false);
+    } catch (error) {
+      console.error("Update profile error:", error);
+      toast.error("Failed to update profile.");
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -91,6 +135,12 @@ export default function Profile() {
   return (
     <div className="min-h-screen bg-[#FAFAFA] pt-24 pb-24 px-4">
       <div className="max-w-2xl mx-auto space-y-8">
+        {/* Page Title */}
+        <div className="flex items-center justify-between px-2">
+          <h1 className="text-3xl font-serif font-bold text-[#1A2C54]">Profile</h1>
+          <div className="h-1 w-12 bg-ruby rounded-full" />
+        </div>
+
         {/* Profile Header */}
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
@@ -99,17 +149,20 @@ export default function Profile() {
         >
           <div className="absolute top-0 right-0 w-32 h-32 bg-ruby/5 rounded-full blur-3xl -mr-16 -mt-16" />
           
-          <div className="relative">
-            <div className="w-24 h-24 rounded-[2rem] bg-ruby/10 flex items-center justify-center text-ruby ring-4 ring-white shadow-lg">
+          <div className="relative group">
+            <div className="w-24 h-24 rounded-[2rem] bg-ruby/10 flex items-center justify-center text-ruby ring-4 ring-white shadow-lg overflow-hidden">
               {user.photoURL ? (
-                <img src={user.photoURL} alt={user.displayName || ''} className="w-full h-full object-cover rounded-[2rem]" referrerPolicy="no-referrer" />
+                <img src={user.photoURL} alt={user.displayName || ''} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
               ) : (
                 <User size={40} />
               )}
             </div>
-            <div className="absolute -bottom-2 -right-2 bg-white p-2 rounded-xl shadow-md border border-gray-50">
-              <Sparkles size={16} className="text-ruby" />
-            </div>
+            <button 
+              onClick={() => setIsEditing(true)}
+              className="absolute -bottom-2 -right-2 bg-white p-2.5 rounded-xl shadow-md border border-gray-50 text-ruby hover:scale-110 transition-transform active:scale-95"
+            >
+              <Pencil size={16} />
+            </button>
           </div>
 
           <div className="space-y-1">
@@ -131,138 +184,204 @@ export default function Profile() {
           </div>
         </motion.div>
 
-        {/* Tabs */}
-        <div className="flex gap-4 px-2">
-          <button 
-            onClick={() => setActiveTab('menu')}
-            className={cn(
-              "flex-1 py-4 rounded-2xl text-[10px] font-bold uppercase tracking-[0.2em] transition-all",
-              activeTab === 'menu' ? "bg-[#1A2C54] text-white shadow-lg shadow-[#1A2C54]/20" : "bg-white text-gray-400 border border-gray-50"
-            )}
-          >
-            Menu
-          </button>
-          <button 
-            onClick={() => setActiveTab('addresses')}
-            className={cn(
-              "flex-1 py-4 rounded-2xl text-[10px] font-bold uppercase tracking-[0.2em] transition-all",
-              activeTab === 'addresses' ? "bg-[#1A2C54] text-white shadow-lg shadow-[#1A2C54]/20" : "bg-white text-gray-400 border border-gray-50"
-            )}
-          >
-            Addresses
-          </button>
-        </div>
+        {/* Edit Profile Modal */}
+        <AnimatePresence>
+          {isEditing && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsEditing(false)}
+                className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative z-10 space-y-6"
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xl font-serif font-bold text-[#1A2C54]">Edit Profile</h3>
+                  <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-gray-50 rounded-xl transition-colors">
+                    <X size={20} className="text-gray-400" />
+                  </button>
+                </div>
 
-        <AnimatePresence mode="wait">
-          {activeTab === 'menu' ? (
-            <motion.div 
-              key="menu"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              className="space-y-8"
-            >
-              {/* Contact Info */}
-              <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-50 space-y-4">
-                <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400 px-2">Contact Information</h3>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-2xl">
-                    <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-gray-400 shadow-sm">
-                      <Mail size={18} />
-                    </div>
-                    <div className="flex-grow min-w-0">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Email Address</p>
-                      <p className="text-sm font-bold text-[#1A2C54] truncate">{user.email}</p>
+                <form onSubmit={handleUpdateProfile} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Profile Picture URL</label>
+                    <div className="relative">
+                      <Camera className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                      <input 
+                        type="url"
+                        value={editForm.photoURL}
+                        onChange={(e) => setEditForm({...editForm, photoURL: e.target.value})}
+                        className="w-full bg-gray-50 border-none rounded-2xl py-4 pl-12 pr-4 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20"
+                        placeholder="https://example.com/photo.jpg"
+                      />
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-2xl group transition-all">
-                    <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-gray-400 shadow-sm group-hover:text-ruby transition-colors">
-                      <Phone size={18} />
-                    </div>
-                    <div className="flex-grow min-w-0">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Phone Number</p>
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-bold text-[#1A2C54] truncate">
-                          {profile?.phoneNumber ? `+91 ${profile.phoneNumber}` : 'Not Verified'}
-                        </p>
-                        {!profile?.phoneVerified ? (
-                          <button 
-                            onClick={() => setShowPhoneVerify(true)}
-                            className="text-[10px] font-bold text-ruby uppercase tracking-widest hover:underline"
-                          >
-                            Verify Now
-                          </button>
-                        ) : (
-                          <div className="flex items-center gap-1 text-green-500">
-                            <ShieldCheck size={12} />
-                            <span className="text-[8px] font-bold uppercase tracking-widest">Verified</span>
-                          </div>
-                        )}
-                      </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Full Name</label>
+                    <div className="relative">
+                      <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                      <input 
+                        type="text"
+                        value={editForm.displayName}
+                        onChange={(e) => setEditForm({...editForm, displayName: e.target.value})}
+                        className="w-full bg-gray-50 border-none rounded-2xl py-4 pl-12 pr-4 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20"
+                        placeholder="Your Name"
+                        required
+                      />
                     </div>
                   </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Email Address</label>
+                    <div className="relative">
+                      <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                      <input 
+                        type="email"
+                        value={editForm.email}
+                        onChange={(e) => setEditForm({...editForm, email: e.target.value})}
+                        className="w-full bg-gray-50 border-none rounded-2xl py-4 pl-12 pr-4 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20"
+                        placeholder="example@gmail.com"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Phone Number</label>
+                    <div className="relative">
+                      <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                      <input 
+                        type="tel"
+                        value={editForm.phoneNumber}
+                        onChange={(e) => setEditForm({...editForm, phoneNumber: e.target.value})}
+                        className="w-full bg-gray-50 border-none rounded-2xl py-4 pl-12 pr-4 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20"
+                        placeholder="9876543210"
+                      />
+                    </div>
+                  </div>
+
+                  <button 
+                    type="submit"
+                    className="w-full bg-[#1A2C54] text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-[0.2em] hover:bg-ruby transition-all shadow-lg shadow-[#1A2C54]/20 pt-4"
+                  >
+                    Save Changes
+                  </button>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        <div className="space-y-8">
+          {/* Contact Info */}
+          <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-50 space-y-4">
+            <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400 px-2">Contact Information</h3>
+            <div className="space-y-2">
+              <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-2xl">
+                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-gray-400 shadow-sm">
+                  <Mail size={18} />
+                </div>
+                <div className="flex-grow min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Email Address</p>
+                  <p className="text-sm font-bold text-[#1A2C54] truncate">{user.email}</p>
                 </div>
               </div>
 
-              {/* Menu Items */}
-              <div className="bg-white overflow-hidden rounded-[2rem] shadow-sm border border-gray-50 divide-y divide-gray-50">
-                {menuItems.map((item, idx) => (
-                  item.path ? (
-                    <Link 
-                      key={idx} 
-                      to={item.path}
-                      className="flex items-center justify-between p-6 hover:bg-gray-50 transition-all group"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className={`w-12 h-12 rounded-2xl ${item.bg} ${item.color} flex items-center justify-center transition-transform group-hover:scale-110`}>
-                          <item.icon size={22} />
-                        </div>
-                        <span className="text-sm font-bold text-[#1A2C54] uppercase tracking-widest">{item.label}</span>
+              <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-2xl group transition-all">
+                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-gray-400 shadow-sm group-hover:text-ruby transition-colors">
+                  <Phone size={18} />
+                </div>
+                <div className="flex-grow min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Phone Number</p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-bold text-[#1A2C54] truncate">
+                      {profile?.phoneNumber ? `+91 ${profile.phoneNumber}` : 'Not Verified'}
+                    </p>
+                    {!profile?.phoneVerified ? (
+                      <button 
+                        onClick={() => setShowPhoneVerify(true)}
+                        className="text-[10px] font-bold text-ruby uppercase tracking-widest hover:underline"
+                      >
+                        Verify Now
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1 text-green-500">
+                        <ShieldCheck size={12} />
+                        <span className="text-[8px] font-bold uppercase tracking-widest">Verified</span>
                       </div>
-                      <ChevronRight size={18} className="text-gray-300 group-hover:text-ruby group-hover:translate-x-1 transition-all" />
-                    </Link>
-                  ) : (
-                    <button 
-                      key={idx} 
-                      onClick={item.onClick}
-                      className="w-full flex items-center justify-between p-6 hover:bg-gray-50 transition-all group"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className={`w-12 h-12 rounded-2xl ${item.bg} ${item.color} flex items-center justify-center transition-transform group-hover:scale-110`}>
-                          <item.icon size={22} />
-                        </div>
-                        <span className="text-sm font-bold text-[#1A2C54] uppercase tracking-widest">{item.label}</span>
-                      </div>
-                      <ChevronRight size={18} className="text-gray-300 group-hover:text-ruby group-hover:translate-x-1 transition-all" />
-                    </button>
-                  )
-                ))}
-                <button 
-                  onClick={handleLogout}
-                  className="w-full flex items-center justify-between p-6 hover:bg-ruby/5 transition-all group"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-ruby/10 text-ruby flex items-center justify-center transition-transform group-hover:scale-110">
-                      <LogOut size={22} />
-                    </div>
-                    <span className="text-sm font-bold text-ruby uppercase tracking-widest">Logout</span>
+                    )}
                   </div>
-                  <ChevronRight size={18} className="text-ruby/30 group-hover:translate-x-1 transition-all" />
-                </button>
+                </div>
               </div>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="addresses"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
+            </div>
+          </div>
+
+          {/* Menu Items */}
+          <div className="bg-white overflow-hidden rounded-[2rem] shadow-sm border border-gray-50 divide-y divide-gray-50">
+            {menuItems.map((item, idx) => (
+              <React.Fragment key={idx}>
+                {item.path ? (
+                  <Link 
+                    to={item.path}
+                    className="flex items-center justify-between p-6 hover:bg-gray-50 transition-all group"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={`w-12 h-12 rounded-2xl ${item.bg} ${item.color} flex items-center justify-center transition-transform group-hover:scale-110`}>
+                        <item.icon size={22} />
+                      </div>
+                      <span className="text-sm font-bold text-[#1A2C54] uppercase tracking-widest">{item.label}</span>
+                    </div>
+                    <ChevronRight size={18} className="text-gray-300 group-hover:text-ruby group-hover:translate-x-1 transition-all" />
+                  </Link>
+                ) : (
+                  <button 
+                    onClick={item.onClick}
+                    className="w-full flex items-center justify-between p-6 hover:bg-gray-50 transition-all group"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={`w-12 h-12 rounded-2xl ${item.bg} ${item.color} flex items-center justify-center transition-transform group-hover:scale-110`}>
+                        <item.icon size={22} />
+                      </div>
+                      <span className="text-sm font-bold text-[#1A2C54] uppercase tracking-widest">{item.label}</span>
+                    </div>
+                    <ChevronRight size={18} className="text-gray-300 group-hover:text-ruby group-hover:translate-x-1 transition-all" />
+                  </button>
+                )}
+                {/* Insert Address Manager after My Orders */}
+                {item.label === 'My Orders' && (
+                  <div className="p-6 bg-gray-50/50">
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-gray-400 shadow-sm">
+                        <Calendar size={18} />
+                      </div>
+                      <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">Manage Addresses</h3>
+                    </div>
+                    <AddressManager />
+                  </div>
+                )}
+              </React.Fragment>
+            ))}
+            <button 
+              onClick={handleLogout}
+              className="w-full flex items-center justify-between p-6 hover:bg-ruby/5 transition-all group"
             >
-              <AddressManager />
-            </motion.div>
-          )}
-        </AnimatePresence>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-ruby/10 text-ruby flex items-center justify-center transition-transform group-hover:scale-110">
+                  <LogOut size={22} />
+                </div>
+                <span className="text-sm font-bold text-ruby uppercase tracking-widest">Logout</span>
+              </div>
+              <ChevronRight size={18} className="text-ruby/30 group-hover:translate-x-1 transition-all" />
+            </button>
+          </div>
+        </div>
 
         <p className="text-[10px] text-center text-gray-300 uppercase tracking-[0.3em] font-bold pt-4">
           The Ruby Premium Experience
