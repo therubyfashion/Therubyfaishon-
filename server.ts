@@ -43,8 +43,27 @@ async function startServer() {
   });
 
   app.get("/api/payment-config", (req, res) => {
-    const keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim();
-    res.json({ razorpayKeyId: keyId || null });
+    const vId = process.env.VITE_RAZORPAY_KEY_ID;
+    const rId = process.env.RAZORPAY_KEY_ID;
+    const rKey = process.env.RAZORPAY_ID;
+    
+    const keyId = (vId || rId || rKey)?.trim();
+    
+    // Diagnostic info (safe - only shows if keys exist, not the values)
+    console.log("Payment Config Request:", {
+      hasViteId: !!vId,
+      hasId: !!rId,
+      hasAltId: !!rKey,
+      foundKey: !!keyId
+    });
+
+    res.json({ 
+      razorpayKeyId: keyId || null,
+      diagnostics: {
+        serverHasViteKey: !!vId,
+        serverHasSecretKey: !!(process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)
+      }
+    });
   });
 
   app.post("/api/create-razorpay-order", async (req, res) => {

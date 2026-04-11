@@ -443,15 +443,24 @@ export default function Checkout() {
           const configRes = await fetch('/api/payment-config');
           const configData = await configRes.json();
           razorpayKey = configData.razorpayKeyId;
+          
+          if (!razorpayKey) {
+            const { diagnostics } = configData;
+            let errorMsg = 'Razorpay Key ID is missing.';
+            
+            if (!diagnostics?.serverHasViteKey && !diagnostics?.serverHasSecretKey) {
+              errorMsg += ' Server sees NO Razorpay keys. Did you click DEPLOY after adding Secrets?';
+            } else if (!diagnostics?.serverHasSecretKey) {
+              errorMsg += ' Key ID found, but Secret Key is missing on server.';
+            }
+            
+            toast.error(errorMsg, { duration: 6000 });
+            setIsProcessingPayment(false);
+            return;
+          }
         } catch (err) {
           console.error("Failed to fetch payment config:", err);
         }
-      }
-
-      if (!razorpayKey) {
-        toast.error('Razorpay Key ID is missing. Please ensure VITE_RAZORPAY_KEY_ID is added to your Secrets in AI Studio and then click DEPLOY.');
-        setIsProcessingPayment(false);
-        return;
       }
 
       try {
