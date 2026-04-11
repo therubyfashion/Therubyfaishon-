@@ -116,8 +116,10 @@ export default function Profile() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
+      localStorage.removeItem('phone_user');
       toast.success("Logged out successfully!");
       navigate('/');
+      window.location.reload();
     } catch (error) {
       console.error("Logout error:", error);
       toast.error("Failed to logout.");

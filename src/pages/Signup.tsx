@@ -131,6 +131,7 @@ export default function Signup() {
         })
       });
 
+      localStorage.removeItem('phone_user');
       await signOut(auth);
       toast.success("Verification email sent! Please check your inbox.");
       navigate(`/verify-prompt?email=${encodeURIComponent(formData.email)}&uid=${user.uid}`);

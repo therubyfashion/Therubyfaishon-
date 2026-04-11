@@ -6,8 +6,9 @@ import Razorpay from 'razorpay';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, doc, setDoc, getDoc, deleteDoc, query, where } from 'firebase/firestore';
 import fs from 'fs';
+import axios from 'axios';
 
 dotenv.config();
 
@@ -47,6 +48,130 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Fast2SMS OTP Endpoints
+  app.post("/api/send-otp", async (req, res) => {
+    const { phoneNumber } = req.body;
+    if (!phoneNumber || phoneNumber.length !== 10) {
+      return res.status(400).json({ error: "Invalid phone number" });
+    }
+
+    // Get Fast2SMS API Key from env or Firestore
+    let fast2smsKey = process.env.FAST2SMS_API_KEY;
+    if (!fast2smsKey && db) {
+      try {
+        const settingsSnap = await getDocs(collection(db, 'settings'));
+        if (!settingsSnap.empty) {
+          fast2smsKey = settingsSnap.docs[0].data().fast2smsApiKey;
+        }
+      } catch (err) {
+        console.error("Error fetching Fast2SMS key:", err);
+      }
+    }
+
+    if (!fast2smsKey) {
+      return res.status(500).json({ error: "Fast2SMS is not configured" });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes expiry
+
+    try {
+      // Store OTP in Firestore
+      if (db) {
+        await setDoc(doc(db, 'otp_codes', phoneNumber), {
+          otp,
+          expiry: expiry.toISOString(),
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      // Send via Fast2SMS
+      const response = await axios.get('https://www.fast2sms.com/dev/bulkV2', {
+        params: {
+          authorization: fast2smsKey,
+          route: 'otp',
+          variables_values: otp,
+          numbers: phoneNumber
+        }
+      });
+
+      if (response.data.return) {
+        res.json({ success: true, message: "OTP sent successfully" });
+      } else {
+        console.error("Fast2SMS Error:", response.data);
+        res.status(500).json({ error: response.data.message || "Failed to send SMS" });
+      }
+    } catch (error: any) {
+      console.error("OTP Send Error:", error);
+      res.status(500).json({ error: error.message || "Failed to send OTP" });
+    }
+  });
+
+  app.post("/api/verify-otp", async (req, res) => {
+    const { phoneNumber, otp } = req.body;
+    if (!phoneNumber || !otp) {
+      return res.status(400).json({ error: "Phone number and OTP are required" });
+    }
+
+    try {
+      if (!db) throw new Error("Database not initialized");
+
+      const otpDoc = await getDoc(doc(db, 'otp_codes', phoneNumber));
+      if (!otpDoc.exists()) {
+        return res.status(400).json({ error: "OTP not found or expired" });
+      }
+
+      const data = otpDoc.data();
+      const now = new Date();
+      const expiry = new Date(data.expiry);
+
+      if (now > expiry) {
+        await deleteDoc(doc(db, 'otp_codes', phoneNumber));
+        return res.status(400).json({ error: "OTP expired" });
+      }
+
+      if (data.otp !== otp) {
+        return res.status(400).json({ error: "Invalid OTP" });
+      }
+
+      // Success! Delete OTP after verification
+      await deleteDoc(doc(db, 'otp_codes', phoneNumber));
+
+      // Find or create user
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where("phoneNumber", "==", phoneNumber));
+      const querySnapshot = await getDocs(q);
+      
+      let userData: any = null;
+      if (!querySnapshot.empty) {
+        userData = { id: querySnapshot.docs[0].id, ...querySnapshot.docs[0].data() };
+      } else {
+        // Create new user if not exists
+        const newUserId = `phone_${phoneNumber}`;
+        const newUser = {
+          uid: newUserId,
+          phoneNumber: phoneNumber,
+          role: 'user',
+          isVerified: true,
+          phoneVerified: true,
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(doc(db, 'users', newUserId), newUser);
+        userData = newUser;
+      }
+
+      res.json({ 
+        success: true, 
+        user: userData,
+        message: "Verified successfully" 
+      });
+    } catch (error: any) {
+      console.error("OTP Verify Error:", error);
+      res.status(500).json({ error: error.message || "Verification failed" });
+    }
+  });
 
   // API routes
   app.post("/api/config", (req, res) => {

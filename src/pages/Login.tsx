@@ -5,7 +5,8 @@ import { auth, db } from '../firebase';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
-import { Mail, Lock, ArrowRight, LogIn } from 'lucide-react';
+import { Mail, Lock, ArrowRight, LogIn, Smartphone } from 'lucide-react';
+import PhoneVerification from '../components/PhoneVerification';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -13,6 +14,7 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [storeSettings, setStoreSettings] = useState<any>(null);
+  const [showPhoneLogin, setShowPhoneLogin] = useState(false);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -61,6 +63,7 @@ export default function Login() {
         toast.error("Please verify your email before logging in.");
         const userEmail = user.email;
         const userUid = user.uid;
+        localStorage.removeItem('phone_user');
         await auth.signOut();
         navigate(`/verify-prompt?email=${encodeURIComponent(userEmail || '')}&uid=${userUid}`);
         return;
@@ -200,6 +203,25 @@ export default function Login() {
             <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
             Google
           </button>
+
+          <button 
+            onClick={() => setShowPhoneLogin(true)}
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-3 bg-white border border-gray-100 py-4 rounded-2xl text-sm font-bold text-[#1A2C54] hover:bg-gray-50 transition-all shadow-sm"
+          >
+            <Smartphone size={18} className="text-ruby" />
+            Phone Number
+          </button>
+
+          {showPhoneLogin && (
+            <PhoneVerification 
+              onClose={() => setShowPhoneLogin(false)}
+              onSuccess={() => {
+                toast.success("Logged in with phone!");
+                navigate('/');
+              }}
+            />
+          )}
 
           <p className="text-center text-sm text-gray-400">
             New here? <Link to="/signup" className="text-ruby font-bold hover:underline ml-1">Create Account</Link>

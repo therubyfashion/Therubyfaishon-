@@ -1499,8 +1499,10 @@ export default function AdminDashboard() {
   };
 
   const handleLogout = async () => {
+    localStorage.removeItem('phone_user');
     await auth.signOut();
     navigate('/login');
+    window.location.reload();
   };
 
   const handleSaveProduct = async (e: React.FormEvent) => {
@@ -4878,7 +4880,23 @@ export default function AdminDashboard() {
                                 />
                               </div>
                             </div>
-                            <p className="mt-2 text-[9px] font-bold text-ruby uppercase tracking-widest">Note: After saving, the server will use these keys for payments.</p>
+                          </div>
+
+                          <div className="pt-4 border-t border-gray-50">
+                            <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-widest mb-4">Fast2SMS Configuration (OTP)</h4>
+                            <div className="grid grid-cols-1 gap-4">
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Fast2SMS API Key</label>
+                                <input 
+                                  type="password" 
+                                  placeholder="Enter your Fast2SMS Authorization Key"
+                                  value={settings.fast2smsApiKey || ''}
+                                  onChange={(e) => setSettings({...settings, fast2smsApiKey: e.target.value})}
+                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                />
+                              </div>
+                            </div>
+                            <p className="mt-2 text-[9px] font-bold text-ruby uppercase tracking-widest">Note: This will be used for sending real OTPs via SMS.</p>
                           </div>
 
                           <div className="pt-4 border-t border-gray-50">

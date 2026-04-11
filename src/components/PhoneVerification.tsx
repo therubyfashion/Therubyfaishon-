@@ -100,64 +100,35 @@ export default function PhoneVerification({ onSuccess, onClose, prefillPhone }: 
 
   const handleSendOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (phoneNumber.length < 10) {
-      toast.error("Please enter a valid phone number");
+    
+    // Clean phone number
+    let cleanPhone = phoneNumber.replace(/\D/g, '');
+    if (cleanPhone.startsWith('91') && cleanPhone.length === 12) {
+      cleanPhone = cleanPhone.slice(2);
+    }
+    
+    if (cleanPhone.length !== 10) {
+      toast.error("Please enter a valid 10-digit phone number");
       return;
     }
 
     setLoading(true);
     try {
-      // Ensure verifier is ready
-      if (!verifierRef.current) {
-        if (recaptchaRef.current) {
-          recaptchaRef.current.innerHTML = '';
-        }
-        verifierRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
-          'size': 'invisible'
-        });
-      }
+      const response = await fetch('/api/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber: cleanPhone })
+      });
 
-      const appVerifier = verifierRef.current;
-      const formattedPhone = `+91${phoneNumber}`;
-      
-      console.log("Sending OTP to:", formattedPhone);
-      
-      let result;
-      if (auth.currentUser) {
-        // If user is already logged in (e.g. with Google), link the phone number
-        result = await linkWithPhoneNumber(auth.currentUser, formattedPhone, appVerifier);
-      } else {
-        // If not logged in, just sign in with phone
-        result = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
-      }
-      setConfirmationResult(result);
-      
-      toast.success(`OTP sent to ${phoneNumber}! 📲`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to send OTP");
+
+      toast.success(`OTP sent to ${cleanPhone}! 📲`);
       setStep('otp');
       setTimer(60);
     } catch (error: any) {
       console.error("OTP Error:", error);
-      if (error.code === 'auth/invalid-phone-number') {
-        toast.error("Invalid phone number format.");
-      } else if (error.code === 'auth/account-exists-with-different-credential' || error.code === 'auth/credential-already-in-use') {
-        toast.error("This phone number is already linked to another account using a different login method (e.g., Google or Email). Please use your original method to sign in.");
-      } else if (error.code === 'auth/too-many-requests') {
-        toast.error("Too many requests. Please try again later.");
-      } else if (error.code === 'auth/operation-not-allowed') {
-        toast.error("SMS is not enabled for this region. Please enable it in Firebase Console.");
-      } else if (error.code === 'auth/billing-not-enabled') {
-        toast.error("Real SMS requires a Billing Account in Firebase. For testing, please use a 'Test Phone Number' configured in your Firebase Console.");
-      } else if (error.code === 'auth/captcha-check-failed') {
-        toast.error("reCAPTCHA check failed. Please refresh and try again.");
-      } else {
-        toast.error("Failed to send OTP. Please check your Firebase Console settings.");
-      }
-      
-      // Reset recaptcha on error
-      if (verifierRef.current) {
-        verifierRef.current.clear();
-        verifierRef.current = null;
-      }
+      toast.error(error.message || "Failed to send OTP. Please check Fast2SMS settings.");
     } finally {
       setLoading(false);
     }
@@ -202,43 +173,35 @@ export default function PhoneVerification({ onSuccess, onClose, prefillPhone }: 
       return;
     }
 
-    if (!confirmationResult) {
-      toast.error("Session expired. Please resend OTP.");
-      setStep('input');
-      return;
+    // Clean phone number
+    let cleanPhone = phoneNumber.replace(/\D/g, '');
+    if (cleanPhone.startsWith('91') && cleanPhone.length === 12) {
+      cleanPhone = cleanPhone.slice(2);
     }
 
     setLoading(true);
     try {
-      const result = await confirmationResult.confirm(enteredOtp);
-      const verifiedUser = result.user;
-      
-      console.log("Verification successful for user:", verifiedUser.uid);
-      
-      // Update Firestore profile
-      if (verifiedUser) {
-        await setDoc(doc(db, 'users', verifiedUser.uid), {
-          phoneNumber: phoneNumber,
-          phoneVerified: true,
-          isVerified: true, // Mark as verified user
-          lastLogin: new Date().toISOString()
-        }, { merge: true });
-      }
+      const response = await fetch('/api/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber: cleanPhone, otp: enteredOtp })
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Verification failed");
+
+      // Store in localStorage for AuthContext fallback
+      localStorage.setItem('phone_user', JSON.stringify(data.user));
       
       toast.success("Phone number verified successfully! 🎉");
-      if (onSuccess) onSuccess(phoneNumber);
+      if (onSuccess) onSuccess(cleanPhone);
       if (onClose) onClose();
+      
+      // Refresh to apply auth state
+      window.location.reload();
     } catch (error: any) {
-      console.error("Verification error details:", error);
-      if (error.code === 'auth/invalid-verification-code') {
-        toast.error("Invalid OTP code. Please check the code and try again.");
-      } else if (error.code === 'auth/code-expired') {
-        toast.error("OTP code has expired. Please resend a new code.");
-      } else if (error.code === 'auth/credential-already-in-use') {
-        toast.error("This phone number is already linked to another account. Please use a different number.");
-      } else {
-        toast.error(`Verification failed: ${error.message || 'Please try again.'}`);
-      }
+      console.error("Verification error:", error);
+      toast.error(error.message || "Verification failed. Please try again.");
     } finally {
       setLoading(false);
     }
