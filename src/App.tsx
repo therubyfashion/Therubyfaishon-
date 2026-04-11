@@ -6,10 +6,11 @@ import { db } from './firebase';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { CartProvider } from './contexts/CartContext';
 import { WishlistProvider } from './contexts/WishlistContext';
-import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import BottomNav from './components/BottomNav';
 import ChatWidget from './components/ChatWidget';
+import SplashScreen from './components/SplashScreen';
+import { AnimatePresence } from 'motion/react';
 
 // Lazy load pages
 const Home = React.lazy(() => import('./pages/Home'));
@@ -65,9 +66,17 @@ import { useVisitorTracking } from './hooks/useVisitorTracking';
 function AppContent() {
   const location = useLocation();
   const isAdminPath = location.pathname.startsWith('/admin');
+  const [showSplash, setShowSplash] = React.useState(true);
   
   // Track live visitors
   useVisitorTracking();
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Apply SEO settings globally
   React.useEffect(() => {
@@ -115,8 +124,10 @@ function AppContent() {
   
   return (
     <div className="min-h-screen flex flex-col">
+      <AnimatePresence>
+        {showSplash && <SplashScreen />}
+      </AnimatePresence>
       <ScrollToTop />
-      {!isAdminPath && location.pathname === '/' && <Navbar />}
       <main className="flex-grow">
         <React.Suspense fallback={<div className="h-screen flex items-center justify-center">Loading...</div>}>
           <Routes>

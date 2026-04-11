@@ -146,7 +146,7 @@ export default function Home() {
       {/* Header (Not Sticky) */}
       <div className="bg-white border-b border-gray-100 px-5 py-4">
         <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center space-x-3">
+          <Link to="/profile" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
             <div className="w-11 h-11 rounded-full bg-[#c4a882] overflow-hidden flex items-center justify-center text-white font-bold">
               {auth.currentUser?.photoURL ? (
                 <img src={auth.currentUser.photoURL} alt="User" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -160,7 +160,7 @@ export default function Home() {
                 {auth.currentUser?.displayName || 'Andrew Ainsley'}
               </p>
             </div>
-          </div>
+          </Link>
           <div className="flex items-center space-x-1">
             <button className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-50 transition-colors">
               <Bell size={22} className="text-[#111]" />

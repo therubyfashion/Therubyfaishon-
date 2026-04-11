@@ -435,9 +435,21 @@ export default function Checkout() {
     };
 
     if (selectedPayment === 'upi') {
-      const razorpayKey = (import.meta as any).env.VITE_RAZORPAY_KEY_ID;
+      let razorpayKey = (import.meta as any).env.VITE_RAZORPAY_KEY_ID;
+      
+      // If not in env, try to fetch from server
       if (!razorpayKey) {
-        toast.error('Razorpay Key ID is missing. Please configure it in your environment.');
+        try {
+          const configRes = await fetch('/api/payment-config');
+          const configData = await configRes.json();
+          razorpayKey = configData.razorpayKeyId;
+        } catch (err) {
+          console.error("Failed to fetch payment config:", err);
+        }
+      }
+
+      if (!razorpayKey) {
+        toast.error('Razorpay Key ID is missing. Please ensure VITE_RAZORPAY_KEY_ID is added to your Secrets in AI Studio and then click DEPLOY.');
         setIsProcessingPayment(false);
         return;
       }

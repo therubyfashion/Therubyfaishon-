@@ -15,10 +15,13 @@ let currentResendApiKey = process.env.RESEND_API_KEY;
 let resend = new Resend(currentResendApiKey);
 
 let razorpay: Razorpay | null = null;
-if (process.env.VITE_RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+const initialKeyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim();
+const initialKeySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)?.trim();
+
+if (initialKeyId && initialKeySecret) {
   razorpay = new Razorpay({
-    key_id: process.env.VITE_RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET,
+    key_id: initialKeyId,
+    key_secret: initialKeySecret,
   });
 }
 
@@ -39,19 +42,20 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  app.get("/api/payment-config", (req, res) => {
+    const keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim();
+    res.json({ razorpayKeyId: keyId || null });
+  });
+
   app.post("/api/create-razorpay-order", async (req, res) => {
-    // Check for both prefixed and non-prefixed versions
-    const keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID)?.trim();
-    const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
+    // Check for both prefixed and non-prefixed versions, and common variations
+    const keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim();
+    const keySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)?.trim();
 
     if (!keyId || !keySecret) {
-      console.error("Razorpay keys missing in environment:", { 
-        hasViteId: !!process.env.VITE_RAZORPAY_KEY_ID, 
-        hasId: !!process.env.RAZORPAY_KEY_ID,
-        hasSecret: !!process.env.RAZORPAY_KEY_SECRET 
-      });
+      console.error("Razorpay keys missing in environment. Available env keys:", Object.keys(process.env).filter(k => k.includes('RAZORPAY')));
       return res.status(500).json({ 
-        error: "Razorpay keys are not configured on the server. Please ensure VITE_RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are added in the Secrets panel and then DEPLOY the app." 
+        error: "Razorpay API is not configured on the server. Please ensure you have added VITE_RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to your Secrets in AI Studio, and then click 'Deploy' to apply the changes." 
       });
     }
 

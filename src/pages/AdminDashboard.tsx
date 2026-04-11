@@ -20,7 +20,7 @@ import { useNavigate } from 'react-router-dom';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 import { generateInvoice } from '../utils/invoiceGenerator';
 import { generateShippingLabel } from '../utils/shippingLabelGenerator';
@@ -236,8 +236,9 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
   const [newVariant, setNewVariant] = useState({ size: '', color: '', stock: 0 });
 
   const generateSKU = () => {
-    const prefix = formData.category.substring(0, 3).toUpperCase();
-    const namePart = formData.name.substring(0, 3).toUpperCase().replace(/\s/g, '');
+    const categoryName = typeof formData.category === 'string' ? formData.category : 'PROD';
+    const prefix = categoryName.substring(0, 3).toUpperCase();
+    const namePart = (formData.name || 'ITEM').substring(0, 3).toUpperCase().replace(/\s/g, '');
     const random = Math.floor(1000 + Math.random() * 9000);
     const sku = `${prefix}-${namePart}-${random}`;
     setFormData({ ...formData, sku });
@@ -266,7 +267,8 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
 
     setIsGeneratingAI(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+      const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
       const prompt = `Write a professional, attractive, and "kadak" (strong) product description for an e-commerce store.
       Product Name: ${formData.name}
@@ -284,12 +286,9 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
       
       Return ONLY the HTML content.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt
-      });
-      
-      const text = response.text?.replace(/```html|```/g, '').trim() || '';
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text().replace(/```html|```/g, '').trim();
       
       setFormData({ ...formData, description: text });
       toast.success('AI Description Generated!');
@@ -319,7 +318,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
   };
 
   return (
-    <div className="space-y-8 pb-20">
+    <div className="space-y-6 md:space-y-8 pb-20">
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -329,43 +328,43 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
       />
       
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center space-x-4">
           <button 
             type="button"
             onClick={onCancel}
-            className="p-2.5 bg-white border border-gray-100 rounded-xl text-gray-400 hover:text-ruby hover:shadow-md transition-all"
+            className="p-2 md:p-2.5 bg-white border border-gray-100 rounded-xl text-gray-400 hover:text-ruby hover:shadow-md transition-all"
           >
             <ArrowLeft size={20} />
           </button>
           <div>
-            <h1 className="text-2xl font-black text-[#1A2C54]">{isEditing ? 'Edit Product' : 'Add Product'}</h1>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Store Inventory / {isEditing ? 'Edit' : 'New'}</p>
+            <h1 className="text-xl md:text-2xl font-black text-[#1A2C54]">{isEditing ? 'Edit Product' : 'Add Product'}</h1>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Store Inventory / {isEditing ? 'Edit' : 'New'}</p>
           </div>
         </div>
-        <div className="flex items-center space-x-4">
-          <div className="hidden sm:block text-right">
-            <p className="text-sm font-bold text-[#1A2C54]">Admin User</p>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Store Manager</p>
+        <div className="flex items-center space-x-4 w-full sm:w-auto justify-between sm:justify-end">
+          <div className="text-left sm:text-right">
+            <p className="text-xs md:text-sm font-bold text-[#1A2C54]">Admin User</p>
+            <p className="text-[9px] md:text-[10px] font-bold text-gray-400 uppercase tracking-widest">Store Manager</p>
           </div>
-          <div className="w-10 h-10 rounded-xl bg-ruby/10 flex items-center justify-center text-ruby font-bold shadow-sm">
+          <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-ruby/10 flex items-center justify-center text-ruby font-bold shadow-sm">
             A
           </div>
         </div>
       </div>
 
-      <form onSubmit={onSave} className="space-y-8">
+      <form onSubmit={onSave} className="space-y-6 md:space-y-8">
         {/* Main Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
           {/* Left: Media */}
           <div className="lg:col-span-1 space-y-6">
-            <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-6">
+            <div className="bg-white p-5 md:p-6 rounded-2xl md:rounded-3xl border border-gray-100 shadow-sm space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-bold text-[#1A2C54] uppercase tracking-widest">Product Media</h3>
-                  <p className="text-[10px] font-bold text-gray-400 mt-1">Select images from your gallery</p>
+                  <h3 className="text-xs md:text-sm font-bold text-[#1A2C54] uppercase tracking-widest">Product Media</h3>
+                  <p className="text-[9px] md:text-[10px] font-bold text-gray-400 mt-1">Select images from gallery</p>
                 </div>
-                <span className="text-[10px] font-bold text-gray-400">{formData.images.filter((img: string) => img).length}/9 Images</span>
+                <span className="text-[9px] md:text-[10px] font-bold text-gray-400">{formData.images.filter((img: string) => img).length}/9 Images</span>
               </div>
               
               <div 
@@ -427,17 +426,17 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
 
           {/* Right: Basic Info */}
           <div className="lg:col-span-2 space-y-6">
-            <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="bg-white p-5 md:p-8 rounded-2xl md:rounded-3xl border border-gray-100 shadow-sm space-y-6 md:space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
                 <div className="md:col-span-2 space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Product Name</label>
                   <input 
                     type="text" 
                     required
                     placeholder="e.g. Premium Cotton T-Shirt"
-                    value={formData.name}
+                    value={formData.name || ''}
                     onChange={e => setFormData({...formData, name: e.target.value})}
-                    className="w-full border-b border-gray-100 py-3 text-lg font-bold text-[#1A2C54] focus:outline-none focus:border-ruby transition-colors bg-transparent placeholder:text-gray-200"
+                    className="w-full border-b border-gray-100 py-3 text-base md:text-lg font-bold text-[#1A2C54] focus:outline-none focus:border-ruby transition-colors bg-transparent placeholder:text-gray-200"
                   />
                 </div>
 
@@ -473,7 +472,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Category</label>
                   <select 
-                    value={formData.category}
+                    value={formData.category || 'Women'}
                     onChange={e => setFormData({...formData, category: e.target.value})}
                     className="w-full border-b border-gray-100 py-3 text-sm font-bold text-[#1A2C54] focus:outline-none focus:border-ruby transition-colors bg-transparent appearance-none"
                   >
@@ -505,7 +504,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Stock Status</label>
                     <select 
-                      value={formData.stockStatus}
+                      value={formData.stockStatus || 'In Stock'}
                       onChange={e => setFormData({...formData, stockStatus: e.target.value})}
                       className="w-full border-b border-gray-100 py-3 text-sm font-bold text-[#1A2C54] focus:outline-none focus:border-ruby transition-colors bg-transparent appearance-none"
                     >
@@ -530,7 +529,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                   <input 
                     type="text" 
                     placeholder="e.g. SAR-RED-001"
-                    value={formData.sku}
+                    value={formData.sku || ''}
                     onChange={e => setFormData({...formData, sku: e.target.value})}
                     className="w-full border-b border-gray-100 py-3 text-sm font-bold text-[#1A2C54] focus:outline-none focus:border-ruby transition-colors bg-transparent"
                   />
@@ -550,7 +549,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                   <input 
                     type="text" 
                     placeholder="e.g. 8901234567890"
-                    value={formData.barcode}
+                    value={formData.barcode || ''}
                     onChange={e => setFormData({...formData, barcode: e.target.value})}
                     className="w-full border-b border-gray-100 py-3 text-sm font-bold text-[#1A2C54] focus:outline-none focus:border-ruby transition-colors bg-transparent"
                   />
@@ -575,15 +574,15 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
         </div>
 
         {/* Description Section */}
-        <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm space-y-6">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-[#1A2C54] uppercase tracking-widest">Product Description</h3>
-            <div className="flex items-center space-x-4">
+        <div className="bg-white p-5 md:p-8 rounded-2xl md:rounded-3xl border border-gray-100 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <h3 className="text-xs md:text-sm font-bold text-[#1A2C54] uppercase tracking-widest">Product Description</h3>
+            <div className="flex items-center space-x-2 md:space-x-4 w-full sm:w-auto">
               <button 
                 type="button"
                 onClick={generateAIDescription}
                 disabled={isGeneratingAI}
-                className="flex items-center space-x-2 px-4 py-1.5 bg-ruby/10 text-ruby rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-ruby hover:text-white transition-all disabled:opacity-50"
+                className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-4 py-2 bg-ruby/10 text-ruby rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-ruby hover:text-white transition-all disabled:opacity-50"
               >
                 {isGeneratingAI ? 'Generating...' : (
                   <>
@@ -596,14 +595,14 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                 <button 
                   type="button"
                   onClick={() => setActiveDescriptionTab('edit')}
-                  className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${activeDescriptionTab === 'edit' ? 'bg-white text-ruby shadow-sm' : 'text-gray-400'}`}
+                  className={`px-3 md:px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${activeDescriptionTab === 'edit' ? 'bg-white text-ruby shadow-sm' : 'text-gray-400'}`}
                 >
                   Edit
                 </button>
                 <button 
                   type="button"
                   onClick={() => setActiveDescriptionTab('preview')}
-                  className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${activeDescriptionTab === 'preview' ? 'bg-white text-ruby shadow-sm' : 'text-gray-400'}`}
+                  className={`px-3 md:px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${activeDescriptionTab === 'preview' ? 'bg-white text-ruby shadow-sm' : 'text-gray-400'}`}
                 >
                   Preview
                 </button>
@@ -701,7 +700,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                 name="description"
                 required
                 placeholder="Write a detailed description of your product..."
-                value={formData.description}
+                value={formData.description || ''}
                 onChange={e => setFormData({...formData, description: e.target.value})}
                 className="w-full min-h-[200px] py-4 text-sm font-medium text-gray-600 focus:outline-none bg-transparent resize-none leading-relaxed"
               />
@@ -722,7 +721,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Size</label>
                   <select 
-                    value={newVariant.size}
+                    value={newVariant.size || ''}
                     onChange={e => setNewVariant({...newVariant, size: e.target.value})}
                     className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-ruby/10"
                   >
@@ -735,7 +734,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Color</label>
                   <select 
-                    value={newVariant.color}
+                    value={newVariant.color || ''}
                     onChange={e => setNewVariant({...newVariant, color: e.target.value})}
                     className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-ruby/10"
                   >
@@ -802,7 +801,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                 <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Meta Title</label>
                 <input 
                   type="text" 
-                  value={formData.seoTitle}
+                  value={formData.seoTitle || ''}
                   onChange={e => setFormData({...formData, seoTitle: e.target.value})}
                   placeholder="Product SEO Title" 
                   className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-ruby/10" 
@@ -811,7 +810,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
               <div className="space-y-2">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Meta Description</label>
                 <textarea 
-                  value={formData.seoDescription}
+                  value={formData.seoDescription || ''}
                   onChange={e => setFormData({...formData, seoDescription: e.target.value})}
                   placeholder="Brief description for search engines..." 
                   className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ruby/10 h-24" 
@@ -826,7 +825,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                 <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Weight (kg)</label>
                 <input 
                   type="text" 
-                  value={formData.weight}
+                  value={formData.weight || ''}
                   onChange={e => setFormData({...formData, weight: e.target.value})}
                   placeholder="0.5" 
                   className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-ruby/10" 
@@ -836,7 +835,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                 <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Dimensions (L x W x H)</label>
                 <input 
                   type="text" 
-                  value={formData.dimensions}
+                  value={formData.dimensions || ''}
                   onChange={e => setFormData({...formData, dimensions: e.target.value})}
                   placeholder="10 x 20 x 5 cm" 
                   className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-ruby/10" 
@@ -886,7 +885,6 @@ export default function AdminDashboard() {
   const bannerImageInputRef = React.useRef<HTMLInputElement>(null);
   const [usersCount, setUsersCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isColorModalOpen, setIsColorModalOpen] = useState(false);
   const [isSizeModalOpen, setIsSizeModalOpen] = useState(false);
@@ -1510,36 +1508,34 @@ export default function AdminDashboard() {
           updatedAt: new Date().toISOString()
         });
         toast.success("Product updated successfully");
-        setShowAddProductPage(false);
-        setEditingProduct(null);
       } else {
         await addDoc(collection(db, 'products'), {
           ...formData,
           createdAt: new Date().toISOString()
         });
         toast.success("Product added successfully");
-        setShowAddProductPage(false);
-        setEditingProduct(null);
-        setFormData({ 
-          name: '', 
-          description: '', 
-          price: 0, 
-          category: 'Women', 
-          sizes: ['S', 'M', 'L', 'XL'], 
-          images: [''], 
-          stock: 10,
-          comparePrice: 0,
-          stockStatus: 'In Stock',
-          seoTitle: '',
-          seoDescription: '',
-          weight: '',
-          dimensions: '',
-          sku: '',
-          barcode: '',
-          isTrending: false,
-          variants: []
-        });
       }
+      setShowAddProductPage(false);
+      setEditingProduct(null);
+      setFormData({ 
+        name: '', 
+        description: '', 
+        price: 0, 
+        category: 'Women', 
+        sizes: sizes.length > 0 ? sizes.map(s => s.name) : ['S', 'M', 'L', 'XL'], 
+        images: [''], 
+        stock: 10,
+        comparePrice: 0,
+        stockStatus: 'In Stock',
+        seoTitle: '',
+        seoDescription: '',
+        weight: '',
+        dimensions: '',
+        sku: '',
+        barcode: '',
+        isTrending: false,
+        variants: []
+      });
       fetchProducts();
     } catch (error) {
       toast.error("Failed to save product");
@@ -1562,30 +1558,6 @@ export default function AdminDashboard() {
     } finally {
       setDeleteModalOpen(false);
       setProductToDelete(null);
-    }
-  };
-
-  const generateAIDescription = async (productName: string) => {
-    if (!productName) {
-      toast.error("Please enter a product name first");
-      return;
-    }
-    setIsGeneratingAI(true);
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Write a professional, catchy, and SEO-friendly product description for a product named "${productName}". Keep it under 150 words.`,
-      });
-      if (response.text) {
-        setFormData(prev => ({ ...prev, description: response.text || '' }));
-        toast.success("Description generated!");
-      }
-    } catch (error) {
-      console.error("AI Generation Error:", error);
-      toast.error("Failed to generate description");
-    } finally {
-      setIsGeneratingAI(false);
     }
   };
 
@@ -2566,7 +2538,7 @@ export default function AdminDashboard() {
                             description: '', 
                             price: 0, 
                             category: 'Women', 
-                            sizes: ['S', 'M', 'L', 'XL'], 
+                            sizes: sizes.length > 0 ? sizes.map(s => s.name) : ['S', 'M', 'L', 'XL'], 
                             images: [''], 
                             stock: 10,
                             comparePrice: 0,
@@ -2575,6 +2547,9 @@ export default function AdminDashboard() {
                             seoDescription: '',
                             weight: '',
                             dimensions: '',
+                            sku: '',
+                            barcode: '',
+                            isTrending: false,
                             variants: []
                           });
                           setShowAddProductPage(true);
@@ -4851,7 +4826,7 @@ export default function AdminDashboard() {
                             <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Store Name</label>
                             <input 
                               type="text" 
-                              value={settings.storeName}
+                              value={settings.storeName || ''}
                               onChange={(e) => setSettings({...settings, storeName: e.target.value})}
                               className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
                             />
@@ -4860,7 +4835,7 @@ export default function AdminDashboard() {
                             <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Support Email</label>
                             <input 
                               type="email" 
-                              value={settings.supportEmail}
+                              value={settings.supportEmail || ''}
                               onChange={(e) => setSettings({...settings, supportEmail: e.target.value})}
                               className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
                             />
@@ -4869,7 +4844,7 @@ export default function AdminDashboard() {
                             <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Currency Symbol</label>
                             <input 
                               type="text" 
-                              value={settings.currency}
+                              value={settings.currency || ''}
                               onChange={(e) => setSettings({...settings, currency: e.target.value})}
                               className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
                             />
@@ -5009,7 +4984,7 @@ export default function AdminDashboard() {
                             <input 
                               type="text" 
                               placeholder="https://docs.google.com/spreadsheets/d/..."
-                              value={settings.googleSheetUrl}
+                              value={settings.googleSheetUrl || ''}
                               onChange={(e) => setSettings({...settings, googleSheetUrl: e.target.value})}
                               className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
                             />
@@ -5019,7 +4994,7 @@ export default function AdminDashboard() {
                             <input 
                               type="password" 
                               placeholder="Enter your Sheet API Key"
-                              value={settings.googleSheetApiKey}
+                              value={settings.googleSheetApiKey || ''}
                               onChange={(e) => setSettings({...settings, googleSheetApiKey: e.target.value})}
                               className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
                             />
@@ -5065,7 +5040,7 @@ export default function AdminDashboard() {
                               <input 
                                 type="password" 
                                 placeholder="re_..."
-                                value={settings.resendApiKey}
+                                value={settings.resendApiKey || ''}
                                 onChange={(e) => setSettings({...settings, resendApiKey: e.target.value})}
                                 className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
                               />
@@ -5075,7 +5050,7 @@ export default function AdminDashboard() {
                               <input 
                                 type="text" 
                                 placeholder="The Ruby <onboarding@resend.dev>"
-                                value={settings.fromEmail}
+                                value={settings.fromEmail || ''}
                                 onChange={(e) => setSettings({...settings, fromEmail: e.target.value})}
                                 className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
                               />
@@ -5118,7 +5093,7 @@ export default function AdminDashboard() {
                               <input 
                                 type="url" 
                                 placeholder="https://example.com/sound.mp3"
-                                value={settings.notificationSound}
+                                value={settings.notificationSound || ''}
                                 onChange={(e) => setSettings({...settings, notificationSound: e.target.value})}
                                 className="flex-grow bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
                               />
@@ -5204,7 +5179,7 @@ export default function AdminDashboard() {
                             <input 
                               type="text" 
                               placeholder="e.g. RUBY Store | Best Fashion Online"
-                              value={settings.siteTitle}
+                              value={settings.siteTitle || ''}
                               onChange={(e) => setSettings({...settings, siteTitle: e.target.value})}
                               className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
                             />
@@ -5217,7 +5192,7 @@ export default function AdminDashboard() {
                             <textarea 
                               rows={4}
                               placeholder="Describe your store for search engines..."
-                              value={settings.metaDescription}
+                              value={settings.metaDescription || ''}
                               onChange={(e) => setSettings({...settings, metaDescription: e.target.value})}
                               className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium resize-none" 
                             />
@@ -5295,7 +5270,7 @@ export default function AdminDashboard() {
                   <input 
                     type="text" 
                     required
-                    value={categoryForm.name}
+                    value={categoryForm.name || ''}
                     onChange={e => setCategoryForm({...categoryForm, name: e.target.value})}
                     className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
                     placeholder="e.g. Summer Collection"
@@ -5378,7 +5353,7 @@ export default function AdminDashboard() {
                   <input 
                     type="text" 
                     required
-                    value={colorForm.name}
+                    value={colorForm.name || ''}
                     onChange={e => setColorForm({...colorForm, name: e.target.value})}
                     className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
                     placeholder="e.g. Ruby Red"
@@ -5389,14 +5364,14 @@ export default function AdminDashboard() {
                   <div className="flex items-center space-x-4">
                     <input 
                       type="color" 
-                      value={colorForm.hex}
+                      value={colorForm.hex || '#000000'}
                       onChange={e => setColorForm({...colorForm, hex: e.target.value})}
                       className="w-12 h-12 rounded-xl border-none p-0 cursor-pointer overflow-hidden shadow-sm"
                     />
                     <input 
                       type="text" 
                       required
-                      value={colorForm.hex}
+                      value={colorForm.hex || '#000000'}
                       onChange={e => setColorForm({...colorForm, hex: e.target.value})}
                       className="flex-grow border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent font-mono"
                       placeholder="#000000"
@@ -5441,7 +5416,7 @@ export default function AdminDashboard() {
                   <input 
                     type="text" 
                     required
-                    value={sizeForm.name}
+                    value={sizeForm.name || ''}
                     onChange={e => setSizeForm({...sizeForm, name: e.target.value})}
                     className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
                     placeholder="e.g. XL, 42, Large"
@@ -5485,7 +5460,7 @@ export default function AdminDashboard() {
                   <input 
                     type="text" 
                     required
-                    value={couponForm.code}
+                    value={couponForm.code || ''}
                     onChange={e => setCouponForm({...couponForm, code: e.target.value.toUpperCase()})}
                     className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent font-black tracking-widest"
                     placeholder="e.g. SUMMER50"
@@ -5495,7 +5470,7 @@ export default function AdminDashboard() {
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Discount Type</label>
                     <select 
-                      value={couponForm.type}
+                      value={couponForm.type || 'percentage'}
                       onChange={e => setCouponForm({...couponForm, type: e.target.value as 'percentage' | 'fixed'})}
                       className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
                     >
@@ -5520,7 +5495,7 @@ export default function AdminDashboard() {
                   <input 
                     type="date" 
                     required
-                    value={couponForm.expiryDate}
+                    value={couponForm.expiryDate || ''}
                     onChange={e => setCouponForm({...couponForm, expiryDate: e.target.value})}
                     className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
                   />
@@ -5534,171 +5509,7 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Add/Edit Product Modal */}
-      <AnimatePresence>
-        {isModalOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsModalOpen(false)}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative bg-white w-full max-w-2xl p-6 md:p-10 rounded-3xl shadow-2xl max-h-[90vh] overflow-y-auto space-y-8"
-            >
-              <div className="flex justify-between items-center border-b border-gray-50 pb-6">
-                <div>
-                  <h2 className="text-xl md:text-2xl font-bold text-gray-800">{editingProduct ? 'Edit Product' : 'Add New Product'}</h2>
-                  <p className="text-sm text-gray-400">Enter product details below</p>
-                </div>
-                <button type="button" onClick={() => setIsModalOpen(false)} className="p-2 hover:text-ruby transition-colors bg-gray-50 rounded-full">
-                  <X size={20} />
-                </button>
-              </div>
-
-              <form onSubmit={handleSaveProduct} className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Product Name</label>
-                    <input 
-                      type="text" 
-                      required
-                      value={formData.name}
-                      onChange={e => setFormData({...formData, name: e.target.value})}
-                      className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Description</label>
-                      <button 
-                        type="button"
-                        onClick={() => generateAIDescription(formData.name)}
-                        disabled={isGeneratingAI}
-                        className="text-[10px] font-bold text-ruby hover:text-ruby-dark uppercase tracking-widest flex items-center gap-1 transition-colors disabled:opacity-50"
-                      >
-                        {isGeneratingAI ? 'Generating...' : (
-                          <>
-                            <BarChart3 size={12} />
-                            AI Generate
-                          </>
-                        )}
-                      </button>
-                    </div>
-                    <textarea 
-                      required
-                      value={formData.description}
-                      onChange={e => setFormData({...formData, description: e.target.value})}
-                      className="w-full border border-gray-100 rounded-xl p-4 text-sm focus:outline-none focus:border-ruby transition-colors h-32 bg-gray-50/50"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Price (₹)</label>
-                      <input 
-                        type="number" 
-                        step="0.01"
-                        required
-                        value={formData.price || ''}
-                        onChange={e => setFormData({...formData, price: e.target.value === '' ? 0 : parseFloat(e.target.value)})}
-                        className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Stock</label>
-                      <input 
-                        type="number" 
-                        required
-                        value={formData.stock || ''}
-                        onChange={e => setFormData({...formData, stock: e.target.value === '' ? 0 : parseInt(e.target.value)})}
-                        className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Category</label>
-                    <select 
-                      value={formData.category}
-                      onChange={e => setFormData({...formData, category: e.target.value})}
-                      className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
-                    >
-                      <option value="">Select Category</option>
-                      {categories.map(cat => (
-                        <option key={cat.id} value={cat.name}>{cat.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Image URL</label>
-                    <div className="flex space-x-2">
-                      <input 
-                        type="url" 
-                        required
-                        value={formData.images[0]}
-                        onChange={e => setFormData({...formData, images: [e.target.value]})}
-                        className="flex-grow border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
-                        placeholder="https://..."
-                      />
-                      <div className="w-10 h-10 bg-gray-50 rounded-lg flex items-center justify-center text-gray-300">
-                        <ImageIcon size={18} />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Sizes</label>
-                    <input 
-                      type="text" 
-                      value={formData.sizes.join(', ')}
-                      onChange={e => setFormData({...formData, sizes: e.target.value.split(',').map(s => s.trim())})}
-                      className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
-                      placeholder="S, M, L, XL"
-                    />
-                  </div>
-
-                  <Accordion title="SEO Settings" icon={Globe}>
-                    <div className="space-y-6">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">SEO Title</label>
-                        <input 
-                          type="text" 
-                          value={formData.seoTitle}
-                          onChange={e => setFormData({...formData, seoTitle: e.target.value})}
-                          placeholder="Product SEO Title" 
-                          className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-ruby/10" 
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Meta Description</label>
-                        <textarea 
-                          value={formData.seoDescription}
-                          onChange={e => setFormData({...formData, seoDescription: e.target.value})}
-                          placeholder="Brief description for search engines..." 
-                          className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ruby/10 h-24" 
-                        />
-                      </div>
-                    </div>
-                  </Accordion>
-                  
-                  <button 
-                    type="submit"
-                    className="w-full bg-black text-white py-4 rounded-xl text-sm font-bold uppercase tracking-widest hover:bg-ruby transition-all mt-8 shadow-xl shadow-black/10"
-                  >
-                    {editingProduct ? 'Update Product' : 'Create Product'}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* Delete Confirmation Modals */}
 
       <AnimatePresence>
         {isBannerModalOpen && (
@@ -5751,7 +5562,7 @@ export default function AdminDashboard() {
                   <input 
                     type="text" 
                     placeholder="e.g. /shop?category=Men"
-                    value={bannerForm.link}
+                    value={bannerForm.link || ''}
                     onChange={e => setBannerForm({...bannerForm, link: e.target.value})}
                     className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
                   />
