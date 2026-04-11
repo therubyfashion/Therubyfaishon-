@@ -995,6 +995,8 @@ export default function AdminDashboard() {
     storeName: 'The Ruby',
     supportEmail: 'support@theruby.com',
     currency: 'INR (₹)',
+    razorpayKeyId: '',
+    razorpayKeySecret: '',
     googleSheetUrl: '',
     googleSheetApiKey: '',
     notificationSound: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3',
@@ -1105,14 +1107,16 @@ export default function AdminDashboard() {
         await updateDoc(doc(db, 'settings', settingsSnap.docs[0].id), settings);
       }
       
-      // Sync Resend API Key with server
-      if (settings.resendApiKey) {
-        await fetch('/api/config', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ resendApiKey: settings.resendApiKey })
-        });
-      }
+      // Sync API Keys with server
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          resendApiKey: settings.resendApiKey,
+          razorpayKeyId: settings.razorpayKeyId,
+          razorpayKeySecret: settings.razorpayKeySecret
+        })
+      });
       
       toast.success('Settings saved successfully');
     } catch (error) {
@@ -4848,6 +4852,33 @@ export default function AdminDashboard() {
                               onChange={(e) => setSettings({...settings, currency: e.target.value})}
                               className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
                             />
+                          </div>
+
+                          <div className="pt-4 border-t border-gray-50">
+                            <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-widest mb-4">Razorpay Configuration</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Razorpay Key ID</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="rzp_live_..."
+                                  value={settings.razorpayKeyId || ''}
+                                  onChange={(e) => setSettings({...settings, razorpayKeyId: e.target.value})}
+                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Razorpay Key Secret</label>
+                                <input 
+                                  type="password" 
+                                  placeholder="Enter your Secret Key"
+                                  value={settings.razorpayKeySecret || ''}
+                                  onChange={(e) => setSettings({...settings, razorpayKeySecret: e.target.value})}
+                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                />
+                              </div>
+                            </div>
+                            <p className="mt-2 text-[9px] font-bold text-ruby uppercase tracking-widest">Note: After saving, the server will use these keys for payments.</p>
                           </div>
 
                           <div className="pt-4 border-t border-gray-50">

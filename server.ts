@@ -5,8 +5,25 @@ import { Resend } from 'resend';
 import Razorpay from 'razorpay';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, getDocs } from 'firebase/firestore';
+import fs from 'fs';
 
 dotenv.config();
+
+// Initialize Firebase for server-side config loading
+let db: any = null;
+try {
+  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+  if (fs.existsSync(configPath)) {
+    const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const firebaseApp = initializeApp(firebaseConfig);
+    db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+    console.log("Firebase initialized on server");
+  }
+} catch (err) {
+  console.error("Failed to initialize Firebase on server:", err);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,43 +50,87 @@ async function startServer() {
 
   // API routes
   app.post("/api/config", (req, res) => {
-    const { resendApiKey } = req.body;
+    const { resendApiKey, razorpayKeyId, razorpayKeySecret } = req.body;
+    
     if (resendApiKey) {
       currentResendApiKey = resendApiKey;
       resend = new Resend(currentResendApiKey);
       console.log("Resend API Key updated");
     }
+
+    if (razorpayKeyId && razorpayKeySecret) {
+      razorpay = new Razorpay({
+        key_id: razorpayKeyId.trim(),
+        key_secret: razorpayKeySecret.trim(),
+      });
+      // Store in process.env for the diagnostic endpoint and other logic
+      process.env.VITE_RAZORPAY_KEY_ID = razorpayKeyId.trim();
+      process.env.RAZORPAY_KEY_SECRET = razorpayKeySecret.trim();
+      console.log("Razorpay Keys updated via Admin Panel");
+    }
+
     res.json({ status: "ok" });
   });
 
-  app.get("/api/payment-config", (req, res) => {
+  app.get("/api/payment-config", async (req, res) => {
     const vId = process.env.VITE_RAZORPAY_KEY_ID;
     const rId = process.env.RAZORPAY_KEY_ID;
     const rKey = process.env.RAZORPAY_ID;
     
-    const keyId = (vId || rId || rKey)?.trim();
+    let keyId = (vId || rId || rKey)?.trim();
+    let hasSecret = !!(process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET);
+
+    // Fallback to Firestore
+    if (!keyId && db) {
+      try {
+        const settingsSnap = await getDocs(collection(db, 'settings'));
+        if (!settingsSnap.empty) {
+          const settings = settingsSnap.docs[0].data();
+          keyId = settings.razorpayKeyId;
+          hasSecret = !!settings.razorpayKeySecret;
+        }
+      } catch (err) {
+        console.error("Error fetching settings for config:", err);
+      }
+    }
     
-    // Diagnostic info (safe - only shows if keys exist, not the values)
+    // Diagnostic info
     console.log("Payment Config Request:", {
-      hasViteId: !!vId,
-      hasId: !!rId,
-      hasAltId: !!rKey,
-      foundKey: !!keyId
+      foundKey: !!keyId,
+      foundSecret: hasSecret
     });
 
     res.json({ 
       razorpayKeyId: keyId || null,
       diagnostics: {
-        serverHasViteKey: !!vId,
-        serverHasSecretKey: !!(process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)
+        serverHasViteKey: !!keyId,
+        serverHasSecretKey: hasSecret
       }
     });
   });
 
   app.post("/api/create-razorpay-order", async (req, res) => {
     // Check for both prefixed and non-prefixed versions, and common variations
-    const keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim();
-    const keySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)?.trim();
+    let keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim();
+    let keySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)?.trim();
+
+    // Fallback: Try to load from Firestore if missing
+    if ((!keyId || !keySecret) && db) {
+      try {
+        console.log("Keys missing in env, attempting to load from Firestore...");
+        const settingsSnap = await getDocs(collection(db, 'settings'));
+        if (!settingsSnap.empty) {
+          const settings = settingsSnap.docs[0].data();
+          if (settings.razorpayKeyId && settings.razorpayKeySecret) {
+            keyId = settings.razorpayKeyId.trim();
+            keySecret = settings.razorpayKeySecret.trim();
+            console.log("Loaded Razorpay keys from Firestore");
+          }
+        }
+      } catch (err) {
+        console.error("Error loading settings from Firestore:", err);
+      }
+    }
 
     if (!keyId || !keySecret) {
       console.error("Razorpay keys missing in environment. Available env keys:", Object.keys(process.env).filter(k => k.includes('RAZORPAY')));
