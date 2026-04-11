@@ -345,6 +345,7 @@ export default function Checkout() {
                             </div>
                             <div style="flex: 1;">
                               <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${item.name}</p>
+                              <p style="font-size: 11px; color: #9CA3AF; margin: 2px 0 0 0;">SKU: ${item.sku || '-'} • Barcode: ${item.barcode || '-'}</p>
                               <p style="font-size: 12px; color: #666666; margin: 4px 0 0 0;">Size: ${item.selectedSize} • Qty: ${item.quantity}</p>
                             </div>
                             <div style="text-align: right;">

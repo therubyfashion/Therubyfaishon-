@@ -17,6 +17,9 @@ export interface Product {
   seoDescription?: string;
   weight?: string;
   dimensions?: string;
+  sku?: string;
+  barcode?: string;
+  isTrending?: boolean;
   variants?: { size: string; color: string; stock: number }[];
   viewCount?: number;
   wishlistCount?: number;
@@ -56,6 +59,14 @@ export interface Order {
     zipCode: string;
     country: string;
   };
+  createdAt: string;
+}
+
+export interface Banner {
+  id: string;
+  image: string;
+  link: string;
+  active: boolean;
   createdAt: string;
 }
 

@@ -46,8 +46,8 @@ export default function Footer() {
                 <img src={settings.storeLogo} alt={settings.storeName} className="h-12 object-contain brightness-0 invert transition-transform duration-500 group-hover:scale-110" />
               ) : (
                 <div className="flex flex-col">
-                  <span className="text-4xl font-serif font-bold tracking-tighter text-white group-hover:text-ruby transition-colors">
-                    {settings?.storeName || 'The Ruby'}
+                  <span className="text-4xl font-serif font-bold tracking-tighter transition-colors">
+                    <span className="text-white">The</span> <span className="text-ruby">Ruby</span>
                   </span>
                   <div className="h-1 w-12 bg-ruby mt-1 rounded-full transform origin-left transition-all duration-500 group-hover:w-full" />
                 </div>

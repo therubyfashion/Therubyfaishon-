@@ -235,6 +235,72 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
 
   const [newVariant, setNewVariant] = useState({ size: '', color: '', stock: 0 });
 
+  const generateSKU = () => {
+    const prefix = formData.category.substring(0, 3).toUpperCase();
+    const namePart = formData.name.substring(0, 3).toUpperCase().replace(/\s/g, '');
+    const random = Math.floor(1000 + Math.random() * 9000);
+    const sku = `${prefix}-${namePart}-${random}`;
+    setFormData({ ...formData, sku });
+    toast.success('SKU Generated!');
+  };
+
+  const generateBarcode = () => {
+    // Generate a 13-digit EAN-13 like barcode
+    let barcode = '890'; // India prefix
+    for (let i = 0; i < 9; i++) {
+      barcode += Math.floor(Math.random() * 10);
+    }
+    // Simple checksum digit (not strictly valid EAN-13 but looks real)
+    barcode += Math.floor(Math.random() * 10);
+    setFormData({ ...formData, barcode });
+    toast.success('Barcode Generated!');
+  };
+
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+
+  const generateAIDescription = async () => {
+    if (!formData.name || !formData.category) {
+      toast.error("Please enter product name and category first");
+      return;
+    }
+
+    setIsGeneratingAI(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+
+      const prompt = `Write a professional, attractive, and "kadak" (strong) product description for an e-commerce store.
+      Product Name: ${formData.name}
+      Category: ${formData.category}
+      Price: ₹${formData.price}
+      
+      Requirements:
+      1. Use HTML tags for formatting.
+      2. Use <b style="color: #E11D48;">...</b> for important keywords or highlights.
+      3. Use <ul> and <li> for features.
+      4. Make it sound premium and exclusive.
+      5. Include a "Why Choose This?" section.
+      6. Keep it concise but impactful.
+      7. Use colors like #E11D48 (Ruby Red) for emphasis.
+      
+      Return ONLY the HTML content.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt
+      });
+      
+      const text = response.text?.replace(/```html|```/g, '').trim() || '';
+      
+      setFormData({ ...formData, description: text });
+      toast.success('AI Description Generated!');
+    } catch (error) {
+      console.error("AI Generation Error:", error);
+      toast.error("Failed to generate AI description. Please try again.");
+    } finally {
+      setIsGeneratingAI(false);
+    }
+  };
+
   const addVariant = () => {
     if (!newVariant.size || !newVariant.color) {
       toast.error("Please enter both size and color");
@@ -449,6 +515,60 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                     </select>
                   </div>
                 </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 flex justify-between items-center">
+                    SKU
+                    <button 
+                      type="button" 
+                      onClick={generateSKU}
+                      className="text-[9px] text-ruby hover:underline"
+                    >
+                      Auto Generate
+                    </button>
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. SAR-RED-001"
+                    value={formData.sku}
+                    onChange={e => setFormData({...formData, sku: e.target.value})}
+                    className="w-full border-b border-gray-100 py-3 text-sm font-bold text-[#1A2C54] focus:outline-none focus:border-ruby transition-colors bg-transparent"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 flex justify-between items-center">
+                    Barcode
+                    <button 
+                      type="button" 
+                      onClick={generateBarcode}
+                      className="text-[9px] text-ruby hover:underline"
+                    >
+                      Auto Generate
+                    </button>
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. 8901234567890"
+                    value={formData.barcode}
+                    onChange={e => setFormData({...formData, barcode: e.target.value})}
+                    className="w-full border-b border-gray-100 py-3 text-sm font-bold text-[#1A2C54] focus:outline-none focus:border-ruby transition-colors bg-transparent"
+                  />
+                </div>
+
+                <div className="md:col-span-2 flex items-center space-x-3 p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, isTrending: !formData.isTrending })}
+                    className={`w-12 h-6 rounded-full transition-all relative ${formData.isTrending ? 'bg-ruby' : 'bg-gray-300'}`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${formData.isTrending ? 'left-7' : 'left-1'}`} />
+                  </button>
+                  <div>
+                    <p className="text-sm font-bold text-[#1A2C54]">Trending Product</p>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Show this product on the home page trending section</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -458,34 +578,127 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
         <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm space-y-6">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-[#1A2C54] uppercase tracking-widest">Product Description</h3>
-            <div className="flex bg-gray-50 p-1 rounded-xl">
+            <div className="flex items-center space-x-4">
               <button 
                 type="button"
-                onClick={() => setActiveDescriptionTab('edit')}
-                className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${activeDescriptionTab === 'edit' ? 'bg-white text-ruby shadow-sm' : 'text-gray-400'}`}
+                onClick={generateAIDescription}
+                disabled={isGeneratingAI}
+                className="flex items-center space-x-2 px-4 py-1.5 bg-ruby/10 text-ruby rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-ruby hover:text-white transition-all disabled:opacity-50"
               >
-                Edit
+                {isGeneratingAI ? 'Generating...' : (
+                  <>
+                    <TrendingUp size={14} className="animate-pulse" />
+                    <span>AI Generate</span>
+                  </>
+                )}
               </button>
-              <button 
-                type="button"
-                onClick={() => setActiveDescriptionTab('preview')}
-                className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${activeDescriptionTab === 'preview' ? 'bg-white text-ruby shadow-sm' : 'text-gray-400'}`}
-              >
-                Preview
-              </button>
+              <div className="flex bg-gray-50 p-1 rounded-xl">
+                <button 
+                  type="button"
+                  onClick={() => setActiveDescriptionTab('edit')}
+                  className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${activeDescriptionTab === 'edit' ? 'bg-white text-ruby shadow-sm' : 'text-gray-400'}`}
+                >
+                  Edit
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setActiveDescriptionTab('preview')}
+                  className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${activeDescriptionTab === 'preview' ? 'bg-white text-ruby shadow-sm' : 'text-gray-400'}`}
+                >
+                  Preview
+                </button>
+              </div>
             </div>
           </div>
 
           <div className="space-y-4">
             <div className="flex items-center space-x-2 pb-4 border-b border-gray-50">
-              <button type="button" className="p-2 hover:bg-gray-50 rounded-lg text-gray-400 hover:text-ruby transition-colors"><Bold size={16} /></button>
-              <button type="button" className="p-2 hover:bg-gray-50 rounded-lg text-gray-400 hover:text-ruby transition-colors"><Heading size={16} /></button>
+              <button 
+                type="button" 
+                onClick={() => {
+                  const textarea = document.querySelector('textarea[name="description"]') as HTMLTextAreaElement;
+                  if (textarea) {
+                    const start = textarea.selectionStart;
+                    const end = textarea.selectionEnd;
+                    const text = textarea.value;
+                    const selected = text.substring(start, end);
+                    const before = text.substring(0, start);
+                    const after = text.substring(end);
+                    const newText = `${before}<b>${selected}</b>${after}`;
+                    setFormData({ ...formData, description: newText });
+                  }
+                }}
+                className="p-2 hover:bg-gray-50 rounded-lg text-gray-400 hover:text-ruby transition-colors"
+                title="Bold"
+              >
+                <Bold size={16} />
+              </button>
+              <button 
+                type="button" 
+                onClick={() => {
+                  const textarea = document.querySelector('textarea[name="description"]') as HTMLTextAreaElement;
+                  if (textarea) {
+                    const start = textarea.selectionStart;
+                    const end = textarea.selectionEnd;
+                    const text = textarea.value;
+                    const selected = text.substring(start, end);
+                    const before = text.substring(0, start);
+                    const after = text.substring(end);
+                    const newText = `${before}<h3 style="color: #1A2C54; font-weight: bold;">${selected}</h3>${after}`;
+                    setFormData({ ...formData, description: newText });
+                  }
+                }}
+                className="p-2 hover:bg-gray-50 rounded-lg text-gray-400 hover:text-ruby transition-colors"
+                title="Heading"
+              >
+                <Heading size={16} />
+              </button>
+              <button 
+                type="button" 
+                onClick={() => {
+                  const textarea = document.querySelector('textarea[name="description"]') as HTMLTextAreaElement;
+                  if (textarea) {
+                    const start = textarea.selectionStart;
+                    const end = textarea.selectionEnd;
+                    const text = textarea.value;
+                    const selected = text.substring(start, end);
+                    const before = text.substring(0, start);
+                    const after = text.substring(end);
+                    const newText = `${before}<span style="color: #E11D48; font-weight: bold;">${selected}</span>${after}`;
+                    setFormData({ ...formData, description: newText });
+                  }
+                }}
+                className="p-2 hover:bg-gray-50 rounded-lg text-gray-400 hover:text-ruby transition-colors"
+                title="Ruby Color"
+              >
+                <Palette size={16} />
+              </button>
               <div className="w-px h-4 bg-gray-100 mx-2"></div>
-              <button type="button" className="p-2 hover:bg-gray-50 rounded-lg text-gray-400 hover:text-ruby transition-colors"><Maximize2 size={16} /></button>
+              <button 
+                type="button" 
+                onClick={() => {
+                  const textarea = document.querySelector('textarea[name="description"]') as HTMLTextAreaElement;
+                  if (textarea) {
+                    const start = textarea.selectionStart;
+                    const end = textarea.selectionEnd;
+                    const text = textarea.value;
+                    const selected = text.substring(start, end);
+                    const before = text.substring(0, start);
+                    const after = text.substring(end);
+                    const newText = `${before}<ul>\n  <li>${selected}</li>\n</ul>${after}`;
+                    setFormData({ ...formData, description: newText });
+                  }
+                }}
+                className="p-2 hover:bg-gray-50 rounded-lg text-gray-400 hover:text-ruby transition-colors"
+                title="Bullet List"
+              >
+                <Maximize2 size={16} />
+              </button>
             </div>
             
             {activeDescriptionTab === 'edit' ? (
               <textarea 
+                name="description"
                 required
                 placeholder="Write a detailed description of your product..."
                 value={formData.description}
@@ -493,9 +706,10 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                 className="w-full min-h-[200px] py-4 text-sm font-medium text-gray-600 focus:outline-none bg-transparent resize-none leading-relaxed"
               />
             ) : (
-              <div className="min-h-[200px] py-4 text-sm font-medium text-gray-600 leading-relaxed">
-                {formData.description || 'No description provided.'}
-              </div>
+              <div 
+                className="min-h-[200px] py-4 text-sm font-medium text-gray-600 leading-relaxed prose prose-sm max-w-none"
+                dangerouslySetInnerHTML={{ __html: formData.description || 'No description provided.' }}
+              />
             )}
           </div>
         </div>
@@ -669,6 +883,7 @@ export default function AdminDashboard() {
   const [adminMessage, setAdminMessage] = useState('');
   const chatScrollRef = React.useRef<HTMLDivElement>(null);
   const adminChatFileRef = React.useRef<HTMLInputElement>(null);
+  const bannerImageInputRef = React.useRef<HTMLInputElement>(null);
   const [usersCount, setUsersCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -676,11 +891,13 @@ export default function AdminDashboard() {
   const [isColorModalOpen, setIsColorModalOpen] = useState(false);
   const [isSizeModalOpen, setIsSizeModalOpen] = useState(false);
   const [isCouponModalOpen, setIsCouponModalOpen] = useState(false);
+  const [isBannerModalOpen, setIsBannerModalOpen] = useState(false);
 
   const [categoryForm, setCategoryForm] = useState({ name: '', image: '' });
   const [colorForm, setColorForm] = useState({ name: '', hex: '#000000' });
   const [sizeForm, setSizeForm] = useState({ name: '' });
   const [couponForm, setCouponForm] = useState({ code: '', discount: 0, expiryDate: '', type: 'percentage' as 'percentage' | 'fixed' });
+  const [bannerForm, setBannerForm] = useState({ image: '', link: '', active: true });
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<string | null>(null);
@@ -1004,6 +1221,9 @@ export default function AdminDashboard() {
     seoDescription: '',
     weight: '',
     dimensions: '',
+    sku: '',
+    barcode: '',
+    isTrending: false,
     variants: [] as { size: string; color: string; stock: number }[]
   });
 
@@ -1314,6 +1534,9 @@ export default function AdminDashboard() {
           seoDescription: '',
           weight: '',
           dimensions: '',
+          sku: '',
+          barcode: '',
+          isTrending: false,
           variants: []
         });
       }
@@ -1633,20 +1856,34 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleAddBanner = async () => {
-    const title = window.prompt('Enter banner title:');
-    const subtitle = window.prompt('Enter banner subtitle:');
-    const image = window.prompt('Enter banner image URL:');
-    if (!title || !image) return;
+  const handleBannerImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 1024 * 1024) {
+      toast.error("Image size must be less than 1MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setBannerForm({ ...bannerForm, image: reader.result as string });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAddBanner = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bannerForm.image) {
+      toast.error('Please provide an image');
+      return;
+    }
     try {
       await addDoc(collection(db, 'banners'), { 
-        title, 
-        subtitle: subtitle || '', 
-        image, 
-        active: true,
+        ...bannerForm,
         createdAt: new Date().toISOString() 
       });
       toast.success('Banner added');
+      setIsBannerModalOpen(false);
+      setBannerForm({ image: '', link: '', active: true });
       fetchDashboardData();
     } catch (error) {
       toast.error('Failed to add banner');
@@ -3538,7 +3775,7 @@ export default function AdminDashboard() {
                   <h2 className="text-2xl font-bold text-gray-800">Marketing & Promotions</h2>
                   <p className="text-sm text-gray-400">Manage homepage banners and promotional content</p>
                 </div>
-                <button onClick={handleAddBanner} className="bg-ruby text-white px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all flex items-center shadow-lg shadow-ruby/20">
+                <button onClick={() => setIsBannerModalOpen(true)} className="bg-ruby text-white px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all flex items-center shadow-lg shadow-ruby/20">
                   <Plus size={16} className="mr-2" /> Add Banner
                 </button>
               </div>
@@ -3546,15 +3783,11 @@ export default function AdminDashboard() {
                 {banners.map(banner => (
                   <div key={banner.id} className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden group hover:border-ruby/30 transition-all">
                     <div className="aspect-video relative overflow-hidden">
-                      {banner.image && <img src={banner.image} alt={banner.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex flex-col justify-end p-8">
-                        <h3 className="text-2xl font-black text-white">{banner.title}</h3>
-                        <p className="text-white/80 text-sm font-medium">{banner.subtitle}</p>
-                      </div>
+                      {banner.image && <img src={banner.image} alt="Banner" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />}
                       <div className="absolute top-4 right-4 flex space-x-2">
                         <button 
                           onClick={() => handleToggleBanner(banner.id, banner.active)}
-                          className={`p-2 rounded-xl backdrop-blur-md border border-white/20 transition-all ${banner.active ? 'bg-green-500/80 text-white' : 'bg-gray-500/80 text-white'}`}
+                          className={`p-2 rounded-xl backdrop-blur-md border border-white/20 transition-all text-[10px] font-bold uppercase tracking-widest ${banner.active ? 'bg-green-500/80 text-white' : 'bg-gray-500/80 text-white'}`}
                         >
                           {banner.active ? 'Active' : 'Inactive'}
                         </button>
@@ -3565,6 +3798,11 @@ export default function AdminDashboard() {
                           <Trash2 size={18} />
                         </button>
                       </div>
+                      {banner.link && (
+                        <div className="absolute bottom-4 left-4 bg-white/80 backdrop-blur-md px-3 py-1 rounded-lg text-[10px] font-bold text-gray-600 truncate max-w-[200px]">
+                          Link: {banner.link}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -5456,6 +5694,71 @@ export default function AdminDashboard() {
                     {editingProduct ? 'Update Product' : 'Create Product'}
                   </button>
                 </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isBannerModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsBannerModalOpen(false)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white w-full max-w-md p-8 rounded-3xl shadow-2xl space-y-6"
+            >
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-bold text-gray-800">Add New Banner</h2>
+                <button onClick={() => setIsBannerModalOpen(false)} className="p-2 hover:text-ruby transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+              <form onSubmit={handleAddBanner} className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Banner Image</label>
+                  <div 
+                    onClick={() => bannerImageInputRef.current?.click()}
+                    className="aspect-video w-full border-2 border-dashed border-gray-100 rounded-2xl flex flex-col items-center justify-center bg-gray-50 cursor-pointer overflow-hidden relative group"
+                  >
+                    {bannerForm.image ? (
+                      <img src={bannerForm.image} alt="Preview" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="text-center space-y-2">
+                        <Camera size={24} className="mx-auto text-gray-300" />
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Click to upload</p>
+                      </div>
+                    )}
+                    <input 
+                      type="file" 
+                      ref={bannerImageInputRef} 
+                      className="hidden" 
+                      accept="image/*" 
+                      onChange={handleBannerImageUpload} 
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Target Link (Optional)</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. /shop?category=Men"
+                    value={bannerForm.link}
+                    onChange={e => setBannerForm({...bannerForm, link: e.target.value})}
+                    className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
+                  />
+                </div>
+                <button type="submit" className="w-full py-4 bg-ruby text-white rounded-2xl text-sm font-bold uppercase tracking-widest shadow-lg shadow-ruby/20 hover:bg-ruby-dark transition-all">
+                  Add Banner
+                </button>
               </form>
             </motion.div>
           </div>

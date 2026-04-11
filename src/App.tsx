@@ -116,7 +116,7 @@ function AppContent() {
   return (
     <div className="min-h-screen flex flex-col">
       <ScrollToTop />
-      {!isAdminPath && <Navbar />}
+      {!isAdminPath && location.pathname === '/' && <Navbar />}
       <main className="flex-grow">
         <React.Suspense fallback={<div className="h-screen flex items-center justify-center">Loading...</div>}>
           <Routes>

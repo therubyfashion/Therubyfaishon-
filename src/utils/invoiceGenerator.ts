@@ -73,7 +73,12 @@ export const generateInvoice = (order: any, settings?: any) => {
 
   // Items Table
   const tableData = order.items.map((item: any) => [
-    item.name + (item.selectedSize ? ` (Size: ${item.selectedSize})` : ''),
+    {
+      content: item.name + (item.selectedSize ? ` (Size: ${item.selectedSize})` : ''),
+      styles: { fontStyle: 'bold' }
+    },
+    item.sku || '-',
+    item.barcode || '-',
     `Rs. ${item.price.toLocaleString()}`,
     item.quantity,
     `Rs. ${(item.price * item.quantity).toLocaleString()}`
@@ -81,7 +86,7 @@ export const generateInvoice = (order: any, settings?: any) => {
 
   (doc as any).autoTable({
     startY: startY + 35,
-    head: [['ITEM DESCRIPTION', 'PRICE', 'QTY', 'TOTAL']],
+    head: [['ITEM', 'SKU', 'BARCODE', 'PRICE', 'QTY', 'TOTAL']],
     body: tableData,
     headStyles: { 
       fillColor: [26, 44, 84], 
