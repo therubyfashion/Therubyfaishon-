@@ -1114,7 +1114,8 @@ export default function AdminDashboard() {
         body: JSON.stringify({ 
           resendApiKey: settings.resendApiKey,
           razorpayKeyId: settings.razorpayKeyId,
-          razorpayKeySecret: settings.razorpayKeySecret
+          razorpayKeySecret: settings.razorpayKeySecret,
+          fast2smsApiKey: settings.fast2smsApiKey
         })
       });
       

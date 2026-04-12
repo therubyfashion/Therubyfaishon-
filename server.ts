@@ -6,6 +6,7 @@ import Razorpay from 'razorpay';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import admin from 'firebase-admin';
+import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 import axios from 'axios';
 
@@ -19,14 +20,15 @@ try {
     const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     
     // Initialize Admin SDK
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        projectId: firebaseConfig.projectId
-      });
-    }
-    db = admin.firestore();
+    const app = !admin.apps.length 
+      ? admin.initializeApp({ projectId: firebaseConfig.projectId })
+      : admin.app();
+
+    // Use getFirestore from firebase-admin/firestore
     if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)') {
-      db = admin.firestore(firebaseConfig.firestoreDatabaseId);
+      db = getFirestore(firebaseConfig.firestoreDatabaseId);
+    } else {
+      db = getFirestore();
     }
     console.log("Firebase Admin initialized on server");
   }
@@ -38,6 +40,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let currentResendApiKey = process.env.RESEND_API_KEY;
+let currentFast2smsKey = process.env.FAST2SMS_API_KEY;
 let resend = new Resend(currentResendApiKey);
 
 let razorpay: Razorpay | null = null;
@@ -64,21 +67,35 @@ async function startServer() {
       return res.status(400).json({ error: "Invalid phone number" });
     }
 
-    // Get Fast2SMS API Key from env or Firestore
-    let fast2smsKey = process.env.FAST2SMS_API_KEY;
+    // Get Fast2SMS API Key from memory, env or Firestore
+    let fast2smsKey = currentFast2smsKey || process.env.FAST2SMS_API_KEY;
+    
     if (!fast2smsKey && db) {
       try {
+        console.log("Attempting to fetch Fast2SMS key from Firestore...");
+        // Try to get from 'settings' collection
         const settingsSnap = await db.collection('settings').get();
+        console.log(`Settings fetch result: ${settingsSnap.empty ? 'Empty' : 'Found ' + settingsSnap.size + ' docs'}`);
+        
         if (!settingsSnap.empty) {
-          fast2smsKey = settingsSnap.docs[0].data().fast2smsApiKey;
+          const settingsData = settingsSnap.docs[0].data();
+          console.log("Settings data keys:", Object.keys(settingsData));
+          fast2smsKey = settingsData.fast2smsApiKey;
+          if (fast2smsKey) {
+            currentFast2smsKey = fast2smsKey; // Cache it
+            console.log("Fast2SMS key successfully loaded and cached from Firestore");
+          } else {
+            console.warn("fast2smsApiKey field is missing in the settings document");
+          }
         }
       } catch (err) {
-        console.error("Error fetching Fast2SMS key:", err);
+        console.error("CRITICAL: Error fetching Fast2SMS key from Firestore:", err);
       }
     }
 
     if (!fast2smsKey) {
-      return res.status(500).json({ error: "Fast2SMS is not configured" });
+      console.error("Fast2SMS is not configured. currentFast2smsKey:", !!currentFast2smsKey, "env:", !!process.env.FAST2SMS_API_KEY, "db:", !!db);
+      return res.status(500).json({ error: "Fast2SMS is not configured. Please add the API key in Admin Settings." });
     }
 
     // Generate 6-digit OTP
@@ -181,12 +198,17 @@ async function startServer() {
 
   // API routes
   app.post("/api/config", (req, res) => {
-    const { resendApiKey, razorpayKeyId, razorpayKeySecret } = req.body;
+    const { resendApiKey, razorpayKeyId, razorpayKeySecret, fast2smsApiKey } = req.body;
     
     if (resendApiKey) {
       currentResendApiKey = resendApiKey;
       resend = new Resend(currentResendApiKey);
       console.log("Resend API Key updated");
+    }
+
+    if (fast2smsApiKey) {
+      currentFast2smsKey = fast2smsApiKey;
+      console.log("Fast2SMS API Key updated in-memory");
     }
 
     if (razorpayKeyId && razorpayKeySecret) {
@@ -201,6 +223,18 @@ async function startServer() {
     }
 
     res.json({ status: "ok" });
+  });
+
+  app.get("/api/debug-otp", (req, res) => {
+    res.json({
+      serverSide: {
+        hasDb: !!db,
+        hasInMemKey: !!currentFast2smsKey,
+        hasEnvKey: !!process.env.FAST2SMS_API_KEY,
+        projectId: admin.apps.length > 0 ? admin.apps[0].options.projectId : 'not-init',
+        nodeEnv: process.env.NODE_ENV
+      }
+    });
   });
 
   app.get("/api/payment-config", async (req, res) => {
