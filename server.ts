@@ -113,24 +113,38 @@ async function startServer() {
       }
 
       // Send via Fast2SMS
-      const response = await axios.get('https://www.fast2sms.com/dev/bulkV2', {
-        params: {
-          authorization: fast2smsKey,
-          route: 'otp',
-          variables_values: otp,
-          numbers: phoneNumber
+      const trimmedKey = fast2smsKey.trim();
+      console.log(`Sending OTP ${otp} to ${phoneNumber} via Fast2SMS q route`);
+      
+      const params = new URLSearchParams();
+      params.append('route', 'q');
+      params.append('message', `Your OTP for The Ruby is ${otp}. Valid for 5 minutes.`);
+      params.append('numbers', phoneNumber);
+
+      const response = await axios.post('https://www.fast2sms.com/dev/bulkV2', params, {
+        headers: {
+          'authorization': trimmedKey,
+          'Content-Type': 'application/x-www-form-urlencoded'
         }
       });
+      
+      console.log("Fast2SMS Response:", response.data);
 
-      if (response.data.return) {
+      if (response.data && response.data.return === true) {
         res.json({ success: true, message: "OTP sent successfully" });
       } else {
-        console.error("Fast2SMS Error:", response.data);
-        res.status(500).json({ error: response.data.message || "Failed to send SMS" });
+        console.error("Fast2SMS API returned failure:", response.data);
+        res.status(500).json({ 
+          error: response.data?.message || "Failed to send SMS via provider", 
+          details: response.data 
+        });
       }
     } catch (error: any) {
-      console.error("OTP Send Error:", error);
-      res.status(500).json({ error: error.message || "Failed to send OTP" });
+      console.error("Fast2SMS Execution Error:", error.response?.data || error.message);
+      res.status(500).json({ 
+        error: "Failed to send OTP", 
+        details: error.response?.data || error.message 
+      });
     }
   });
 
@@ -235,6 +249,47 @@ async function startServer() {
         nodeEnv: process.env.NODE_ENV
       }
     });
+  });
+
+  app.post("/api/test-fast2sms", async (req, res) => {
+    const { apiKey, phoneNumber } = req.body;
+    if (!apiKey) return res.status(400).json({ error: "API Key is required" });
+    
+    const trimmedKey = apiKey.trim();
+    const testPhone = phoneNumber || '9999999999';
+
+    try {
+      console.log(`Testing Fast2SMS with route q to ${testPhone}`);
+      
+      const params = new URLSearchParams();
+      params.append('route', 'q');
+      params.append('message', `Test OTP from The Ruby: 123456`);
+      params.append('numbers', testPhone);
+
+      const response = await axios.post('https://www.fast2sms.com/dev/bulkV2', params, {
+        headers: {
+          'authorization': trimmedKey,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      });
+      
+      console.log("Fast2SMS Test Response:", response.data);
+      
+      if (!response.data || typeof response.data !== 'object') {
+        throw new Error("Empty or invalid response from SMS provider");
+      }
+
+      res.json({ success: true, data: response.data });
+    } catch (error: any) {
+      const errorData = error.response?.data || error.message;
+      const statusCode = error.response?.status;
+      console.error(`Fast2SMS Test Error [${statusCode}]:`, errorData);
+      res.status(500).json({ 
+        error: "API Error", 
+        statusCode,
+        details: errorData 
+      });
+    }
   });
 
   app.get("/api/payment-config", async (req, res) => {

@@ -1005,6 +1005,8 @@ export default function AdminDashboard() {
     metaDescription: 'Discover the latest trends in fashion at The Ruby.',
     resendApiKey: '',
     fromEmail: 'The Ruby <onboarding@resend.dev>',
+    fast2smsApiKey: '',
+    fast2smsTestPhone: '',
     footerSocials: {
       instagram: '',
       x: '',
@@ -4888,13 +4890,76 @@ export default function AdminDashboard() {
                             <div className="grid grid-cols-1 gap-4">
                               <div>
                                 <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Fast2SMS API Key</label>
-                                <input 
-                                  type="password" 
-                                  placeholder="Enter your Fast2SMS Authorization Key"
-                                  value={settings.fast2smsApiKey || ''}
-                                  onChange={(e) => setSettings({...settings, fast2smsApiKey: e.target.value})}
-                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
-                                />
+                                <div className="flex flex-col gap-3">
+                                  <div className="flex gap-2">
+                                    <input 
+                                      type="password" 
+                                      placeholder="Enter your Fast2SMS Authorization Key"
+                                      value={settings.fast2smsApiKey || ''}
+                                      onChange={(e) => setSettings({...settings, fast2smsApiKey: e.target.value})}
+                                      className="flex-1 bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                    />
+                                  </div>
+                                  <div className="flex gap-2 items-center">
+                                    <input 
+                                      type="text" 
+                                      placeholder="Phone number for testing (10 digits)"
+                                      value={settings.fast2smsTestPhone || ''}
+                                      onChange={(e) => setSettings({...settings, fast2smsTestPhone: e.target.value.replace(/\D/g, '').slice(0, 10)})}
+                                      className="flex-1 bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                    />
+                                    <button
+                                      onClick={async () => {
+                                        if (!settings.fast2smsApiKey) return toast.error('Enter API Key first');
+                                        if (!settings.fast2smsTestPhone || settings.fast2smsTestPhone.length !== 10) {
+                                          return toast.error('Enter a valid 10-digit phone number to test');
+                                        }
+                                        
+                                        const loadingToast = toast.loading('Sending test SMS...');
+                                        try {
+                                          const res = await fetch('/api/test-fast2sms', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ 
+                                              apiKey: settings.fast2smsApiKey,
+                                              phoneNumber: settings.fast2smsTestPhone
+                                            })
+                                          });
+                                          const data = await res.json();
+                                          toast.dismiss(loadingToast);
+                                          
+                                          if (data.success && data.data && data.data.return) {
+                                            toast.success('Test SMS sent successfully! Check your phone. 📲');
+                                          } else {
+                                            // Extract the most useful message
+                                            const apiMessage = data.data?.message || data.details?.message;
+                                            const errorType = data.error || 'Error';
+                                            const statusCode = data.statusCode ? `(${data.statusCode})` : '';
+                                            
+                                            let finalMsg = '';
+                                            if (apiMessage) {
+                                              finalMsg = `${apiMessage} ${statusCode}`;
+                                            } else if (data.data && typeof data.data === 'string') {
+                                              finalMsg = `API returned: ${data.data}`;
+                                            } else {
+                                              finalMsg = `${errorType}: ${JSON.stringify(data.details || data)}`;
+                                            }
+                                              
+                                            toast.error('Failed: ' + finalMsg, {
+                                              duration: 8000
+                                            });
+                                          }
+                                        } catch (e) { 
+                                          toast.dismiss(loadingToast);
+                                          toast.error('Connection failed'); 
+                                        }
+                                      }}
+                                      className="px-6 py-3 bg-ruby text-white rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all shadow-lg shadow-ruby/20"
+                                    >
+                                      Send Test SMS
+                                    </button>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                             <p className="mt-2 text-[9px] font-bold text-ruby uppercase tracking-widest">Note: This will be used for sending real OTPs via SMS.</p>
