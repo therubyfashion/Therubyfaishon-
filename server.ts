@@ -5,25 +5,33 @@ import { Resend } from 'resend';
 import Razorpay from 'razorpay';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, doc, setDoc, getDoc, deleteDoc, query, where } from 'firebase/firestore';
+import admin from 'firebase-admin';
 import fs from 'fs';
 import axios from 'axios';
 
 dotenv.config();
 
-// Initialize Firebase for server-side config loading
+// Initialize Firebase Admin for server-side operations
 let db: any = null;
 try {
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
   if (fs.existsSync(configPath)) {
     const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    const firebaseApp = initializeApp(firebaseConfig);
-    db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
-    console.log("Firebase initialized on server");
+    
+    // Initialize Admin SDK
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        projectId: firebaseConfig.projectId
+      });
+    }
+    db = admin.firestore();
+    if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)') {
+      db = admin.firestore(firebaseConfig.firestoreDatabaseId);
+    }
+    console.log("Firebase Admin initialized on server");
   }
 } catch (err) {
-  console.error("Failed to initialize Firebase on server:", err);
+  console.error("Failed to initialize Firebase Admin on server:", err);
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -60,7 +68,7 @@ async function startServer() {
     let fast2smsKey = process.env.FAST2SMS_API_KEY;
     if (!fast2smsKey && db) {
       try {
-        const settingsSnap = await getDocs(collection(db, 'settings'));
+        const settingsSnap = await db.collection('settings').get();
         if (!settingsSnap.empty) {
           fast2smsKey = settingsSnap.docs[0].data().fast2smsApiKey;
         }
@@ -80,7 +88,7 @@ async function startServer() {
     try {
       // Store OTP in Firestore
       if (db) {
-        await setDoc(doc(db, 'otp_codes', phoneNumber), {
+        await db.collection('otp_codes').doc(phoneNumber).set({
           otp,
           expiry: expiry.toISOString(),
           createdAt: new Date().toISOString()
@@ -118,8 +126,8 @@ async function startServer() {
     try {
       if (!db) throw new Error("Database not initialized");
 
-      const otpDoc = await getDoc(doc(db, 'otp_codes', phoneNumber));
-      if (!otpDoc.exists()) {
+      const otpDoc = await db.collection('otp_codes').doc(phoneNumber).get();
+      if (!otpDoc.exists) {
         return res.status(400).json({ error: "OTP not found or expired" });
       }
 
@@ -128,7 +136,7 @@ async function startServer() {
       const expiry = new Date(data.expiry);
 
       if (now > expiry) {
-        await deleteDoc(doc(db, 'otp_codes', phoneNumber));
+        await db.collection('otp_codes').doc(phoneNumber).delete();
         return res.status(400).json({ error: "OTP expired" });
       }
 
@@ -137,12 +145,10 @@ async function startServer() {
       }
 
       // Success! Delete OTP after verification
-      await deleteDoc(doc(db, 'otp_codes', phoneNumber));
+      await db.collection('otp_codes').doc(phoneNumber).delete();
 
       // Find or create user
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where("phoneNumber", "==", phoneNumber));
-      const querySnapshot = await getDocs(q);
+      const querySnapshot = await db.collection('users').where("phoneNumber", "==", phoneNumber).get();
       
       let userData: any = null;
       if (!querySnapshot.empty) {
@@ -158,7 +164,7 @@ async function startServer() {
           phoneVerified: true,
           createdAt: new Date().toISOString()
         };
-        await setDoc(doc(db, 'users', newUserId), newUser);
+        await db.collection('users').doc(newUserId).set(newUser);
         userData = newUser;
       }
 
@@ -208,7 +214,7 @@ async function startServer() {
     // Fallback to Firestore
     if (!keyId && db) {
       try {
-        const settingsSnap = await getDocs(collection(db, 'settings'));
+        const settingsSnap = await db.collection('settings').get();
         if (!settingsSnap.empty) {
           const settings = settingsSnap.docs[0].data();
           keyId = settings.razorpayKeyId;
@@ -243,7 +249,7 @@ async function startServer() {
     if ((!keyId || !keySecret) && db) {
       try {
         console.log("Keys missing in env, attempting to load from Firestore...");
-        const settingsSnap = await getDocs(collection(db, 'settings'));
+        const settingsSnap = await db.collection('settings').get();
         if (!settingsSnap.empty) {
           const settings = settingsSnap.docs[0].data();
           if (settings.razorpayKeyId && settings.razorpayKeySecret) {
