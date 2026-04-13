@@ -150,7 +150,7 @@ export default function Signup() {
         </html>
       `;
 
-      await fetch('/api/send-email', {
+      const emailResponse = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -159,6 +159,11 @@ export default function Signup() {
           html: emailHtml
         })
       });
+
+      const emailData = await emailResponse.json();
+      if (!emailResponse.ok) {
+        throw new Error(emailData.error || "Failed to send verification email");
+      }
 
       localStorage.removeItem('phone_user');
       await signOut(auth);

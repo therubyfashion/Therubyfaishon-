@@ -247,7 +247,7 @@ export default function VerifyPrompt() {
         </html>
       `;
 
-      await fetch('/api/send-email', {
+      const emailResponse = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -256,6 +256,11 @@ export default function VerifyPrompt() {
           html: emailHtml
         })
       });
+
+      const emailData = await emailResponse.json();
+      if (!emailResponse.ok) {
+        throw new Error(emailData.error || "Failed to resend code");
+      }
 
       toast.success("New verification code sent!");
     } catch (error: any) {

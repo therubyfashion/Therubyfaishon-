@@ -57,7 +57,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
   // API routes
   app.post("/api/config", (req, res) => {
@@ -193,7 +194,7 @@ async function startServer() {
 
     if (!currentResendApiKey) {
       console.warn("RESEND_API_KEY is missing. Email will not be sent.");
-      return res.status(200).json({ message: "Email simulation: API key missing" });
+      return res.status(400).json({ error: "Email service is not configured. Please add RESEND_API_KEY to Secrets." });
     }
 
     try {
