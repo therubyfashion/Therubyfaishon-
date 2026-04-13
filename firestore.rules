@@ -212,7 +212,7 @@ service cloud.firestore {
       
       match /messages/{messageId} {
         allow read: if isAdmin() || isOwner(chatId);
-        allow create: if isAuthenticated() && isOwner(chatId);
+        allow create: if isAdmin() || (isAuthenticated() && isOwner(chatId));
       }
     }
 

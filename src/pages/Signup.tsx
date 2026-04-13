@@ -162,17 +162,25 @@ export default function Signup() {
 
       const emailData = await emailResponse.json();
       if (!emailResponse.ok) {
-        throw new Error(emailData.error || "Failed to send verification email");
+        // If email fails, we still created the user in Auth and Firestore
+        // We should let them know but maybe not throw a hard error that blocks everything
+        console.error("Email send failed:", emailData.error);
+        toast.error(`Account created but email failed: ${emailData.error}`);
+      } else {
+        toast.success("Verification code sent to your email!");
       }
 
       localStorage.removeItem('phone_user');
-      await signOut(auth);
-      toast.success("Verification code sent to your email!");
+      // Keep user signed in so they have permissions to update their profile during verification
       navigate(`/verify-prompt?email=${encodeURIComponent(formData.email)}&uid=${user.uid}`);
     } catch (error: any) {
       console.error("Signup error:", error);
       if (error.code === 'auth/email-already-in-use') {
         toast.error("Email already in use. Please sign in.");
+      } else if (error.code === 'auth/network-request-failed') {
+        toast.error("Network error! Please check your internet connection or disable ad-blockers.");
+      } else if (error.message) {
+        toast.error(error.message);
       } else {
         toast.error("Failed to create account. Please try again.");
       }

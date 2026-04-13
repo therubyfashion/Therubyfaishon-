@@ -218,25 +218,38 @@ async function startServer() {
 
     try {
       const dynamicResend = new Resend(apiKey);
+      // Simple from address to avoid validation issues with display names
+      const defaultFrom = 'onboarding@therubyfashion.shop';
+      
       const emailPayload = {
-        from: from || process.env.RESEND_FROM_EMAIL || 'The Ruby <onboarding@therubyfashion.shop>',
+        from: from || process.env.RESEND_FROM_EMAIL || defaultFrom,
         to: Array.isArray(to) ? to : [to],
         subject: subject,
         html: html,
       };
 
-      console.log("Attempting to send email to:", to);
+      console.log("--- Email Sending Start ---");
+      console.log("To:", to);
+      console.log("From:", emailPayload.from);
+      console.log("API Key Prefix:", apiKey.substring(0, 7) + "...");
+      
       const { data, error } = await dynamicResend.emails.send(emailPayload);
       
       if (error) {
-        console.error("Resend API Error:", error);
+        console.error("Resend API Error Details:", JSON.stringify(error, null, 2));
+        let errorMessage = error.message || "Resend failed to send email";
+        
+        if (errorMessage.includes("domain is not verified")) {
+          errorMessage = "Bhai, Resend keh raha hai domain verify nahi hai, par aapne screenshot dikhaya hai ki verify hai. Ek baar Resend dashboard par 'API Key' check karein ki wo 'Full Access' wali hai ya nahi.";
+        }
+
         return res.status(400).json({ 
-          error: error.message || "Resend failed to send email",
+          error: errorMessage,
           details: error
         });
       }
       
-      console.log("Email sent successfully:", data?.id);
+      console.log("--- Email Sent Successfully ---", data?.id);
       res.json(data);
     } catch (error: any) {
       console.error("Server-side email error:", error);

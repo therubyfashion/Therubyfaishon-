@@ -35,7 +35,17 @@ export default function VerifyPrompt() {
       }
     };
     fetchSettings();
-  }, [location]);
+
+    // Check if user is authenticated
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (!user && uidParam) {
+        toast.error("Please sign in to verify your email.");
+        navigate('/login');
+      }
+    });
+
+    return () => unsubscribe();
+  }, [location, navigate]);
 
   const handleOtpChange = (index: number, value: string) => {
     if (value.length > 1) value = value.slice(-1);
@@ -150,7 +160,7 @@ export default function VerifyPrompt() {
         });
 
         toast.success("Email verified successfully! Welcome email sent.");
-        navigate('/login');
+        navigate('/');
       } else {
         toast.error("Invalid verification code. Please try again.");
       }

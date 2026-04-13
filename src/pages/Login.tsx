@@ -64,7 +64,7 @@ export default function Login() {
         const userEmail = user.email;
         const userUid = user.uid;
         localStorage.removeItem('phone_user');
-        await auth.signOut();
+        // Keep user signed in for verification permissions
         navigate(`/verify-prompt?email=${encodeURIComponent(userEmail || '')}&uid=${userUid}`);
         return;
       }
@@ -75,6 +75,8 @@ export default function Login() {
       console.error("Login error:", error);
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         toast.error("Invalid email or password.");
+      } else if (error.code === 'auth/network-request-failed') {
+        toast.error("Network error! Please check your internet connection.");
       } else {
         toast.error(error.message || "Failed to sign in. Please try again.");
       }
