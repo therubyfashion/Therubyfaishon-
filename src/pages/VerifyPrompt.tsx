@@ -82,7 +82,74 @@ export default function VerifyPrompt() {
           isVerified: true,
           emailOtp: null
         });
-        toast.success("Email verified successfully! You can now login.");
+
+        // Send Welcome Email
+        const welcomeHtml = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Welcome to The Ruby</title>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap" rel="stylesheet">
+          </head>
+          <body style="margin: 0; padding: 0; background-color: #FAFAFA; font-family: 'Inter', sans-serif;">
+            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;">
+              <tr>
+                <td align="center" style="padding: 60px 0;">
+                  <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.05); border: 1px solid #F1F5F9;">
+                    <!-- Brand Header -->
+                    <tr>
+                      <td align="center" style="padding: 50px 40px 30px 40px; background: linear-gradient(to bottom, #FFF1F2 0%, #ffffff 100%);">
+                        ${storeSettings?.storeLogo ? 
+                          `<img src="${storeSettings.storeLogo}" alt="${storeSettings.storeName}" style="max-height: 60px; display: block;">` : 
+                          `<h1 style="margin: 0; color: #1A2C54; font-size: 32px; font-weight: 800; letter-spacing: -1.5px; text-transform: uppercase;">THE <span style="color: #E11D48; font-style: italic;">RUBY</span></h1>`
+                        }
+                      </td>
+                    </tr>
+                    
+                    <!-- Hero Section -->
+                    <tr>
+                      <td style="padding: 20px 60px 40px 60px; text-align: center;">
+                        <div style="font-size: 50px; margin-bottom: 20px;">🎉</div>
+                        <h2 style="margin: 0 0 16px 0; color: #1A2C54; font-size: 28px; font-weight: 700; line-height: 1.2;">You're In, ${userData.firstName || 'Gorgeous'}!</h2>
+                        <p style="margin: 0; color: #64748B; font-size: 16px; line-height: 1.6;">Your account is now verified. Get ready to explore the most curated fashion collections designed just for you.</p>
+                      </td>
+                    </tr>
+
+                    <!-- Action Button -->
+                    <tr>
+                      <td align="center" style="padding: 0 60px 50px 60px;">
+                        <a href="${window.location.origin}" style="display: inline-block; background-color: #1A2C54; color: #ffffff; padding: 20px 45px; border-radius: 18px; text-decoration: none; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; box-shadow: 0 10px 25px rgba(26,44,84,0.2);">Start Shopping Now</a>
+                      </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                      <td style="padding: 50px 60px; background-color: #1A2C54; text-align: center;">
+                        <p style="margin: 0; color: #ffffff; font-size: 14px; font-weight: 600;">Welcome to the Family!</p>
+                        <p style="margin: 10px 0 0 0; color: #FB7185; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Team ${storeSettings?.storeName || 'The Ruby Fashion'}</p>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </body>
+          </html>
+        `;
+
+        await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: userData.email,
+            subject: `Welcome to the Family, ${userData.firstName || ''}! ✨`,
+            html: welcomeHtml
+          })
+        });
+
+        toast.success("Email verified successfully! Welcome email sent.");
         navigate('/login');
       } else {
         toast.error("Invalid verification code. Please try again.");

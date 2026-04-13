@@ -91,54 +91,55 @@ export default function Signup() {
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Your Verification Code</title>
+          <title>Verify Your Account</title>
+          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap" rel="stylesheet">
         </head>
-        <body style="margin: 0; padding: 0; background-color: #f4f4f4; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <body style="margin: 0; padding: 0; background-color: #FAFAFA; font-family: 'Inter', sans-serif;">
           <table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;">
             <tr>
-              <td align="center" style="padding: 40px 0;">
-                <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.05);">
-                  <!-- Header -->
+              <td align="center" style="padding: 60px 0;">
+                <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.05); border: 1px solid #F1F5F9;">
+                  <!-- Brand Header -->
                   <tr>
-                    <td align="center" style="padding: 40px 40px 20px 40px;">
+                    <td align="center" style="padding: 50px 40px 30px 40px; background: linear-gradient(to bottom, #FFF1F2 0%, #ffffff 100%);">
                       ${storeSettings?.storeLogo ? 
-                        `<img src="${storeSettings.storeLogo}" alt="${storeSettings.storeName}" style="max-height: 50px; display: block;">` : 
-                        `<h1 style="margin: 0; color: #E11D48; font-size: 28px; font-weight: 800; letter-spacing: -1px; text-transform: uppercase;">${storeSettings?.storeName || 'THE RUBY'}</h1>`
+                        `<img src="${storeSettings.storeLogo}" alt="${storeSettings.storeName}" style="max-height: 60px; display: block;">` : 
+                        `<h1 style="margin: 0; color: #1A2C54; font-size: 32px; font-weight: 800; letter-spacing: -1.5px; text-transform: uppercase;">THE <span style="color: #E11D48; font-style: italic;">RUBY</span></h1>`
                       }
                     </td>
                   </tr>
                   
-                  <!-- Hero Icon -->
-                  <tr>
-                    <td align="center" style="padding: 20px 40px;">
-                      <div style="width: 80px; height: 80px; background-color: #FFF1F2; border-radius: 24px; display: flex; align-items: center; justify-content: center; margin: 0 auto;">
-                        <span style="font-size: 40px; line-height: 80px;">🔐</span>
-                      </div>
-                    </td>
-                  </tr>
-
-                  <!-- Content -->
+                  <!-- Content Section -->
                   <tr>
                     <td style="padding: 20px 60px 40px 60px; text-align: center;">
-                      <h2 style="margin: 0 0 16px 0; color: #1A2C54; font-size: 24px; font-weight: 700; line-height: 1.2;">Verify Your Account</h2>
-                      <p style="margin: 0; color: #64748B; font-size: 16px; line-height: 1.6;">Welcome, ${formData.firstName}! Use the code below to verify your email address and start shopping.</p>
+                      <div style="display: inline-block; padding: 12px 24px; background-color: #FFF1F2; border-radius: 100px; margin-bottom: 24px;">
+                        <span style="color: #E11D48; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px;">Security Verification</span>
+                      </div>
+                      <h2 style="margin: 0 0 16px 0; color: #1A2C54; font-size: 28px; font-weight: 700; line-height: 1.2;">Welcome, ${formData.firstName}!</h2>
+                      <p style="margin: 0; color: #64748B; font-size: 16px; line-height: 1.6;">To ensure your account's security and provide you with a premium shopping experience, please use the verification code below.</p>
                     </td>
                   </tr>
 
-                  <!-- OTP Box -->
+                  <!-- OTP Display -->
                   <tr>
-                    <td align="center" style="padding: 0 60px 40px 60px;">
-                      <div style="background-color: #F8FAFC; border-radius: 16px; padding: 30px; border: 2px solid #F1F5F9; display: inline-block;">
-                        <span style="font-size: 36px; font-weight: 800; letter-spacing: 12px; color: #1A2C54; font-family: 'Courier New', Courier, monospace;">${otp}</span>
+                    <td align="center" style="padding: 0 60px 50px 60px;">
+                      <div style="background-color: #F8FAFC; border-radius: 24px; padding: 40px; border: 2px solid #F1F5F9; display: inline-block; min-width: 240px;">
+                        <span style="font-size: 48px; font-weight: 800; letter-spacing: 16px; color: #1A2C54; font-family: 'Courier New', Courier, monospace; margin-right: -16px;">${otp}</span>
                       </div>
+                      <p style="margin: 24px 0 0 0; color: #94A3B8; font-size: 13px; font-weight: 500;">This code is valid for the next 10 minutes.</p>
                     </td>
                   </tr>
 
                   <!-- Footer -->
                   <tr>
-                    <td style="padding: 40px 60px; background-color: #1A2C54; text-align: center;">
-                      <p style="margin: 0 0 8px 0; color: #ffffff; font-size: 14px; font-weight: 600;">This code will expire in 10 minutes.</p>
-                      <p style="margin: 0; color: #FB7185; font-size: 12px; font-weight: 700;">Team ${storeSettings?.storeName || 'The Ruby'}</p>
+                    <td style="padding: 50px 60px; background-color: #1A2C54; text-align: center;">
+                      <div style="margin-bottom: 24px;">
+                        <span style="color: #ffffff; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 3px;">The Ruby Premium</span>
+                      </div>
+                      <p style="margin: 0; color: #94A3B8; font-size: 12px; line-height: 1.6;">If you didn't request this code, please ignore this email or contact our support team.</p>
+                      <div style="margin-top: 30px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 30px;">
+                        <p style="margin: 0; color: #FB7185; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">&copy; ${new Date().getFullYear()} ${storeSettings?.storeName || 'The Ruby Fashion'}</p>
+                      </div>
                     </td>
                   </tr>
                 </table>
