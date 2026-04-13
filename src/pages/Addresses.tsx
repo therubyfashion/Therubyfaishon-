@@ -319,7 +319,7 @@ export default function Addresses() {
                         <Edit2 size={16} />
                       </button>
                       <button 
-                        onClick={() => handleDelete(addr)}
+                        onClick={() => handleDelete(addr.id)}
                         className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 hover:text-ruby hover:bg-ruby/5 transition-all"
                       >
                         <Trash2 size={16} />

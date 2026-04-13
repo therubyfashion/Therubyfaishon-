@@ -269,7 +269,7 @@ export default function AddressManager() {
                     <button onClick={() => handleEdit(addr)} className="p-2 text-gray-400 hover:text-ruby transition-colors">
                       <Edit2 size={16} />
                     </button>
-                    <button onClick={() => handleDelete(addr)} className="p-2 text-gray-400 hover:text-ruby transition-colors">
+                    <button onClick={() => handleDelete(addr.id)} className="p-2 text-gray-400 hover:text-ruby transition-colors">
                       <Trash2 size={16} />
                     </button>
                   </div>

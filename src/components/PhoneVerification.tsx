@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Phone, ShieldCheck, X, ArrowRight, RefreshCw, CheckCircle2 } from 'lucide-react';
-import { doc, updateDoc, setDoc } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, getDoc } from 'firebase/firestore';
 import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult, linkWithPhoneNumber } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { toast } from 'sonner';
@@ -112,58 +112,62 @@ export default function PhoneVerification({ onSuccess, onClose, prefillPhone }: 
       return;
     }
 
+    const fullPhone = `+91${cleanPhone}`;
+
     setLoading(true);
     try {
-      const response = await fetch('/api/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber: cleanPhone })
-      });
+      if (!verifierRef.current) {
+        throw new Error("reCAPTCHA not initialized. Please refresh.");
+      }
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Failed to send OTP");
+      const confirmation = await signInWithPhoneNumber(auth, fullPhone, verifierRef.current);
+      setConfirmationResult(confirmation);
 
-      toast.success(`OTP sent to ${cleanPhone}! 📲`);
+      toast.success(`OTP sent to ${fullPhone}! 📲`);
       setStep('otp');
       setTimer(60);
     } catch (error: any) {
-      console.error("OTP Error:", error);
-      toast.error(error.message || "Failed to send OTP. Please check Fast2SMS settings.");
+      console.error("Firebase Phone Auth Error:", error);
+      let msg = "Failed to send OTP. Please try again.";
+      if (error.code === 'auth/too-many-requests') {
+        msg = "Too many requests. Please try again later.";
+      } else if (error.code === 'auth/invalid-phone-number') {
+        msg = "Invalid phone number format.";
+      } else if (error.code === 'auth/captcha-check-failed') {
+        msg = "reCAPTCHA verification failed. Please try again.";
+      }
+      toast.error(msg);
+      
+      // Reset reCAPTCHA on error
+      if (verifierRef.current) {
+        verifierRef.current.clear();
+        verifierRef.current = null;
+        // Re-init will happen on next attempt or we can call it here
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const handleOtpChange = (index: number, value: string) => {
-    // Only allow numbers
-    const cleanValue = value.replace(/\D/g, '');
-    if (!cleanValue && value !== '') return;
-
     const newOtp = [...otp];
-    newOtp[index] = cleanValue.slice(-1); // Take last digit if multiple
+    newOtp[index] = value.slice(-1);
     setOtp(newOtp);
 
-    // Auto focus next input
-    if (cleanValue && index < 5) {
-      const nextInput = document.getElementById(`otp-${index + 1}`);
-      nextInput?.focus();
+    if (value && index < 5) {
+      document.getElementById(`otp-${index + 1}`)?.focus();
     }
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
-    const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
-    if (pastedData) {
-      const newOtp = [...otp];
-      pastedData.split('').forEach((char, idx) => {
-        if (idx < 6) newOtp[idx] = char;
-      });
-      setOtp(newOtp);
-      
-      // Focus last filled or next empty
-      const nextIdx = Math.min(pastedData.length, 5);
-      document.getElementById(`otp-${nextIdx}`)?.focus();
-    }
+    const pasteData = e.clipboardData.getData('text').slice(0, 6).split('');
+    const newOtp = [...otp];
+    pasteData.forEach((char, i) => {
+      if (i < 6) newOtp[i] = char;
+    });
+    setOtp(newOtp);
+    document.getElementById(`otp-${Math.min(pasteData.length, 5)}`)?.focus();
   };
 
   const handleVerifyOtp = async () => {
@@ -173,35 +177,41 @@ export default function PhoneVerification({ onSuccess, onClose, prefillPhone }: 
       return;
     }
 
-    // Clean phone number
-    let cleanPhone = phoneNumber.replace(/\D/g, '');
-    if (cleanPhone.startsWith('91') && cleanPhone.length === 12) {
-      cleanPhone = cleanPhone.slice(2);
+    if (!confirmationResult) {
+      toast.error("No active verification found. Please resend OTP.");
+      setStep('input');
+      return;
     }
 
     setLoading(true);
     try {
-      const response = await fetch('/api/verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber: cleanPhone, otp: enteredOtp })
-      });
+      const result = await confirmationResult.confirm(enteredOtp);
+      const firebaseUser = result.user;
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Verification failed");
-
-      // Store in localStorage for AuthContext fallback
-      localStorage.setItem('phone_user', JSON.stringify(data.user));
+      // Check if user profile exists, if not create it
+      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+      if (!userDoc.exists()) {
+        await setDoc(doc(db, 'users', firebaseUser.uid), {
+          uid: firebaseUser.uid,
+          phoneNumber: firebaseUser.phoneNumber,
+          role: 'client',
+          createdAt: new Date().toISOString(),
+          isVerified: true
+        });
+      }
       
-      toast.success("Phone number verified successfully! 🎉");
-      if (onSuccess) onSuccess(cleanPhone);
+      toast.success("Logged in successfully! 🎉");
+      if (onSuccess) onSuccess(firebaseUser.phoneNumber || '');
       if (onClose) onClose();
       
-      // Refresh to apply auth state
-      window.location.reload();
+      // No need for reload, AuthContext will pick up the change
     } catch (error: any) {
       console.error("Verification error:", error);
-      toast.error(error.message || "Verification failed. Please try again.");
+      let msg = "Invalid OTP code. Please try again.";
+      if (error.code === 'auth/code-expired') {
+        msg = "OTP code has expired. Please resend.";
+      }
+      toast.error(msg);
     } finally {
       setLoading(false);
     }

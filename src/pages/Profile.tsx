@@ -171,7 +171,7 @@ export default function Profile() {
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAFA] pt-24 pb-24 px-4">
+    <div className="min-h-screen bg-[#FAFAFA] pt-12 pb-24 px-4">
       <div className="max-w-2xl mx-auto space-y-8">
         {/* Page Title */}
         <div className="flex items-center justify-between px-2">

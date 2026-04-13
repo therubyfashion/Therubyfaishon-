@@ -34,31 +34,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const userData = userDoc.data() as UserProfile | undefined;
           if (userDoc.exists()) {
             setProfile(userData);
+          } else {
+            // If user exists in Auth but not in Firestore (should not happen with our flow)
+            setProfile(null);
           }
           setLoading(false);
         });
       } else {
-        // Check for phone login fallback
-        const phoneUserJson = localStorage.getItem('phone_user');
-        if (phoneUserJson) {
-          try {
-            const phoneUser = JSON.parse(phoneUserJson);
-            // We don't have a Firebase User object, but we have the profile
-            unsubscribeProfile = onSnapshot(doc(db, 'users', phoneUser.uid), (userDoc) => {
-              if (userDoc.exists()) {
-                setProfile(userDoc.data() as UserProfile);
-              } else {
-                localStorage.removeItem('phone_user');
-                setProfile(null);
-              }
-              setLoading(false);
-            });
-            return;
-          } catch (e) {
-            localStorage.removeItem('phone_user');
-          }
-        }
-        
         setUser(null);
         setProfile(null);
         if (unsubscribeProfile) unsubscribeProfile();

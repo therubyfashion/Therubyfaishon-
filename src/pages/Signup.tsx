@@ -66,10 +66,9 @@ export default function Signup() {
       const fullName = `${formData.firstName} ${formData.lastName}`;
       await updateProfile(user, { displayName: fullName });
 
-      // Generate verification token
-      const verificationToken = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-      const verificationLink = `${window.location.origin}/verify-email?uid=${user.uid}&token=${verificationToken}`;
-
+      // Generate 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      
       // Create Firestore Profile
       await setDoc(doc(db, 'users', user.uid), {
         uid: user.uid,
@@ -81,44 +80,73 @@ export default function Signup() {
         role: 'user',
         isVerified: false,
         phoneVerified: false,
-        verificationToken: verificationToken,
+        emailOtp: otp,
         createdAt: new Date().toISOString()
       });
 
-      // Send Verification Email
+      // Send Verification Email with OTP
       const emailHtml = `
-        <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #FAFAFA; padding: 40px 20px; color: #1A2C54;">
-          <div style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 40px; padding: 60px; box-shadow: 0 20px 50px -20px rgba(0,0,0,0.08); border: 1px solid #F0F0F0;">
-            <div style="text-align: center; margin-bottom: 50px;">
-              ${storeSettings?.storeLogo ? `<img src="${storeSettings.storeLogo}" alt="${storeSettings.storeName}" style="max-height: 60px; margin-bottom: 10px;">` : `<h1 style="font-size: 32px; font-weight: bold; letter-spacing: -1px; margin: 0; color: #E11D48;">${storeSettings?.storeName?.toUpperCase() || 'THE RUBY'}</h1>`}
-            </div>
-            
-            <div style="text-align: center; margin-bottom: 40px;">
-              <div style="display: inline-block; background-color: #FDF2F8; color: #E11D48; padding: 12px 24px; border-radius: 100px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 24px;">Welcome to the Family</div>
-              <h2 style="font-size: 28px; font-weight: bold; margin: 0 0 16px 0; color: #1A2C54;">Welcome, ${formData.firstName}! ✨</h2>
-              <p style="font-size: 16px; color: #666666; line-height: 1.6; margin: 0;">We're thrilled to have you with us. To start your premium shopping experience, please verify your email address by clicking the button below.</p>
-            </div>
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Your Verification Code</title>
+        </head>
+        <body style="margin: 0; padding: 0; background-color: #f4f4f4; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          <table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;">
+            <tr>
+              <td align="center" style="padding: 40px 0;">
+                <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.05);">
+                  <!-- Header -->
+                  <tr>
+                    <td align="center" style="padding: 40px 40px 20px 40px;">
+                      ${storeSettings?.storeLogo ? 
+                        `<img src="${storeSettings.storeLogo}" alt="${storeSettings.storeName}" style="max-height: 50px; display: block;">` : 
+                        `<h1 style="margin: 0; color: #E11D48; font-size: 28px; font-weight: 800; letter-spacing: -1px; text-transform: uppercase;">${storeSettings?.storeName || 'THE RUBY'}</h1>`
+                      }
+                    </td>
+                  </tr>
+                  
+                  <!-- Hero Icon -->
+                  <tr>
+                    <td align="center" style="padding: 20px 40px;">
+                      <div style="width: 80px; height: 80px; background-color: #FFF1F2; border-radius: 24px; display: flex; align-items: center; justify-content: center; margin: 0 auto;">
+                        <span style="font-size: 40px; line-height: 80px;">🔐</span>
+                      </div>
+                    </td>
+                  </tr>
 
-            <div style="text-align: center; margin-bottom: 50px;">
-              <a href="${verificationLink}" style="display: inline-block; background-color: #1A2C54; color: #FFFFFF; padding: 20px 40px; border-radius: 16px; text-decoration: none; font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; box-shadow: 0 10px 20px -5px rgba(26,44,84,0.3);">Verify My Account</a>
-            </div>
+                  <!-- Content -->
+                  <tr>
+                    <td style="padding: 20px 60px 40px 60px; text-align: center;">
+                      <h2 style="margin: 0 0 16px 0; color: #1A2C54; font-size: 24px; font-weight: 700; line-height: 1.2;">Verify Your Account</h2>
+                      <p style="margin: 0; color: #64748B; font-size: 16px; line-height: 1.6;">Welcome, ${formData.firstName}! Use the code below to verify your email address and start shopping.</p>
+                    </td>
+                  </tr>
 
-            <div style="background-color: #F9FAFB; border-radius: 24px; padding: 32px; margin-bottom: 40px; border: 1px solid #F3F4F6; text-align: center;">
-              <p style="font-size: 14px; color: #666666; margin: 0;">If the button doesn't work, you can also copy and paste this link into your browser:</p>
-              <p style="font-size: 12px; color: #9CA3AF; margin: 12px 0 0 0; word-break: break-all;">${verificationLink}</p>
-            </div>
+                  <!-- OTP Box -->
+                  <tr>
+                    <td align="center" style="padding: 0 60px 40px 60px;">
+                      <div style="background-color: #F8FAFC; border-radius: 16px; padding: 30px; border: 2px solid #F1F5F9; display: inline-block;">
+                        <span style="font-size: 36px; font-weight: 800; letter-spacing: 12px; color: #1A2C54; font-family: 'Courier New', Courier, monospace;">${otp}</span>
+                      </div>
+                    </td>
+                  </tr>
 
-            <div style="text-align: center; border-top: 1px solid #F0F0F0; pt-40px;">
-              <p style="font-size: 14px; color: #9CA3AF; margin-bottom: 24px;">This link will expire in 24 hours. If you didn't create an account, you can safely ignore this email.</p>
-              <p style="font-size: 16px; font-weight: bold; color: #1A2C54; margin: 0;">Happy Shopping!</p>
-              <p style="font-size: 14px; color: #E11D48; font-weight: bold; margin: 4px 0 0 0;">Team ${storeSettings?.storeName || 'The Ruby'}</p>
-            </div>
-          </div>
-          
-          <div style="text-align: center; margin-top: 40px;">
-            <p style="font-size: 12px; color: #9CA3AF;">&copy; ${new Date().getFullYear()} ${storeSettings?.storeName || 'The Ruby'}. All rights reserved.</p>
-          </div>
-        </div>
+                  <!-- Footer -->
+                  <tr>
+                    <td style="padding: 40px 60px; background-color: #1A2C54; text-align: center;">
+                      <p style="margin: 0 0 8px 0; color: #ffffff; font-size: 14px; font-weight: 600;">This code will expire in 10 minutes.</p>
+                      <p style="margin: 0; color: #FB7185; font-size: 12px; font-weight: 700;">Team ${storeSettings?.storeName || 'The Ruby'}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+        </html>
       `;
 
       await fetch('/api/send-email', {
@@ -126,14 +154,14 @@ export default function Signup() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: formData.email,
-          subject: 'Welcome to The Ruby - Verify Your Email ✨',
+          subject: `${otp} is your verification code ✨`,
           html: emailHtml
         })
       });
 
       localStorage.removeItem('phone_user');
       await signOut(auth);
-      toast.success("Verification email sent! Please check your inbox.");
+      toast.success("Verification code sent to your email!");
       navigate(`/verify-prompt?email=${encodeURIComponent(formData.email)}&uid=${user.uid}`);
     } catch (error: any) {
       console.error("Signup error:", error);

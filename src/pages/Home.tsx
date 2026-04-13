@@ -157,7 +157,7 @@ export default function Home() {
             <div>
               <p className="text-[12px] text-gray-400 font-medium">Good Morning 👋</p>
               <p className="text-[17px] font-bold text-[#111] leading-tight">
-                {auth.currentUser?.displayName || 'Andrew Ainsley'}
+                {auth.currentUser?.displayName || 'User'}
               </p>
             </div>
           </Link>
@@ -185,7 +185,11 @@ export default function Home() {
       <div className="max-w-7xl mx-auto px-5 pt-6 space-y-8">
         {/* Promo Banner Carousel */}
         <div className="relative overflow-hidden rounded-[2rem] bg-white shadow-sm h-[180px]">
-          {banners.length > 0 ? (
+          {loading ? (
+            <div className="h-full w-full bg-gray-100 animate-pulse flex items-center justify-center">
+              <div className="w-12 h-12 border-4 border-ruby/20 border-t-ruby rounded-full animate-spin" />
+            </div>
+          ) : banners.length > 0 ? (
             <div className="h-full">
               <AnimatePresence mode="wait">
                 <motion.div
@@ -285,22 +289,6 @@ export default function Home() {
             <Link to="/shop" className="text-[13px] font-medium text-gray-600">See All</Link>
           </div>
           
-          <div className="flex space-x-2.5 overflow-x-auto pb-2 scrollbar-hide">
-            {['All', 'Clothes', 'Shoes', 'Bags', 'Electronics'].map((filter) => (
-              <button
-                key={filter}
-                onClick={() => setActiveFilter(filter)}
-                className={`px-5 py-2 rounded-full text-[13px] font-semibold border-2 transition-all whitespace-nowrap ${
-                  activeFilter === filter 
-                    ? 'bg-[#111] text-white border-[#111]' 
-                    : 'bg-white text-[#333] border-gray-200'
-                }`}
-              >
-                {filter}
-              </button>
-            ))}
-          </div>
-
           {loading ? (
             <div className="grid grid-cols-2 gap-4">
               {[1, 2, 3, 4].map(i => <ProductCardSkeleton key={i} />)}

@@ -993,6 +993,7 @@ export default function AdminDashboard() {
   // Orders Tab State
   const [settings, setSettings] = useState({
     storeName: 'The Ruby',
+    storeLogo: '',
     supportEmail: 'support@theruby.com',
     currency: 'INR (₹)',
     razorpayKeyId: '',
@@ -2467,7 +2468,25 @@ export default function AdminDashboard() {
                               <button 
                                 onClick={() => {
                                   setEditingProduct(product);
-                                  setFormData({ ...product });
+                                  setFormData({
+                                    name: product.name,
+                                    description: product.description,
+                                    price: product.price,
+                                    category: product.category,
+                                    sizes: product.sizes,
+                                    images: product.images,
+                                    stock: product.stock,
+                                    comparePrice: product.comparePrice || 0,
+                                    stockStatus: product.stockStatus || 'In Stock',
+                                    seoTitle: product.seoTitle || '',
+                                    seoDescription: product.seoDescription || '',
+                                    weight: product.weight || '',
+                                    dimensions: product.dimensions || '',
+                                    sku: product.sku || '',
+                                    barcode: product.barcode || '',
+                                    isTrending: product.isTrending || false,
+                                    variants: product.variants || []
+                                  });
                                   setShowAddProductPage(true);
                                 }}
                                 className="p-2 text-gray-400 hover:text-ruby transition-colors"
@@ -2608,7 +2627,25 @@ export default function AdminDashboard() {
                             <button 
                               onClick={() => {
                                 setEditingProduct(p);
-                                setFormData({ ...p } as any);
+                                setFormData({
+                                  name: p.name,
+                                  description: p.description,
+                                  price: p.price,
+                                  category: p.category,
+                                  sizes: p.sizes,
+                                  images: p.images,
+                                  stock: p.stock,
+                                  comparePrice: p.comparePrice || 0,
+                                  stockStatus: p.stockStatus || 'In Stock',
+                                  seoTitle: p.seoTitle || '',
+                                  seoDescription: p.seoDescription || '',
+                                  weight: p.weight || '',
+                                  dimensions: p.dimensions || '',
+                                  sku: p.sku || '',
+                                  barcode: p.barcode || '',
+                                  isTrending: p.isTrending || false,
+                                  variants: p.variants || []
+                                });
                                 setShowAddProductPage(true);
                               }}
                               className="p-2 text-gray-400 hover:text-ruby transition-colors"
@@ -2660,7 +2697,25 @@ export default function AdminDashboard() {
                         <button 
                           onClick={() => {
                             setEditingProduct(p);
-                            setFormData({ ...p } as any);
+                            setFormData({
+                              name: p.name,
+                              description: p.description,
+                              price: p.price,
+                              category: p.category,
+                              sizes: p.sizes,
+                              images: p.images,
+                              stock: p.stock,
+                              comparePrice: p.comparePrice || 0,
+                              stockStatus: p.stockStatus || 'In Stock',
+                              seoTitle: p.seoTitle || '',
+                              seoDescription: p.seoDescription || '',
+                              weight: p.weight || '',
+                              dimensions: p.dimensions || '',
+                              sku: p.sku || '',
+                              barcode: p.barcode || '',
+                              isTrending: p.isTrending || false,
+                              variants: p.variants || []
+                            });
                             setShowAddProductPage(true);
                           }}
                           className="p-2 bg-gray-50 text-gray-400 hover:text-ruby rounded-lg transition-colors"
@@ -3251,7 +3306,7 @@ export default function AdminDashboard() {
                 <div className="flex items-center gap-3 md:gap-4 pointer-events-auto w-full md:w-auto justify-between md:justify-end">
                   <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-3 md:p-4 rounded-2xl md:rounded-3xl flex items-center gap-3 md:gap-4 shadow-2xl">
                     <div className="w-8 h-8 md:w-10 md:h-10 rounded-xl md:rounded-2xl bg-ruby/20 flex items-center justify-center text-ruby">
-                      <Users size={16} md:size={20} />
+                      <Users size={20} />
                     </div>
                     <div>
                       <p className="text-[7px] md:text-[8px] font-bold text-white/40 uppercase tracking-widest leading-none mb-1">Live Visitors</p>
@@ -3262,7 +3317,7 @@ export default function AdminDashboard() {
                     onClick={() => setActiveTab('dashboard')}
                     className="p-2 md:p-3 bg-white/10 hover:bg-white/20 text-white rounded-xl md:rounded-2xl border border-white/10 transition-all backdrop-blur-md"
                   >
-                    <X size={18} md:size={20} />
+                    <X size={20} />
                   </button>
                 </div>
               </div>
@@ -4883,86 +4938,6 @@ export default function AdminDashboard() {
                                 />
                               </div>
                             </div>
-                          </div>
-
-                          <div className="pt-4 border-t border-gray-50">
-                            <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-widest mb-4">Fast2SMS Configuration (OTP)</h4>
-                            <div className="grid grid-cols-1 gap-4">
-                              <div>
-                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Fast2SMS API Key</label>
-                                <div className="flex flex-col gap-3">
-                                  <div className="flex gap-2">
-                                    <input 
-                                      type="password" 
-                                      placeholder="Enter your Fast2SMS Authorization Key"
-                                      value={settings.fast2smsApiKey || ''}
-                                      onChange={(e) => setSettings({...settings, fast2smsApiKey: e.target.value})}
-                                      className="flex-1 bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
-                                    />
-                                  </div>
-                                  <div className="flex gap-2 items-center">
-                                    <input 
-                                      type="text" 
-                                      placeholder="Phone number for testing (10 digits)"
-                                      value={settings.fast2smsTestPhone || ''}
-                                      onChange={(e) => setSettings({...settings, fast2smsTestPhone: e.target.value.replace(/\D/g, '').slice(0, 10)})}
-                                      className="flex-1 bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
-                                    />
-                                    <button
-                                      onClick={async () => {
-                                        if (!settings.fast2smsApiKey) return toast.error('Enter API Key first');
-                                        if (!settings.fast2smsTestPhone || settings.fast2smsTestPhone.length !== 10) {
-                                          return toast.error('Enter a valid 10-digit phone number to test');
-                                        }
-                                        
-                                        const loadingToast = toast.loading('Sending test SMS...');
-                                        try {
-                                          const res = await fetch('/api/test-fast2sms', {
-                                            method: 'POST',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ 
-                                              apiKey: settings.fast2smsApiKey,
-                                              phoneNumber: settings.fast2smsTestPhone
-                                            })
-                                          });
-                                          const data = await res.json();
-                                          toast.dismiss(loadingToast);
-                                          
-                                          if (data.success && data.data && data.data.return) {
-                                            toast.success('Test SMS sent successfully! Check your phone. 📲');
-                                          } else {
-                                            // Extract the most useful message
-                                            const apiMessage = data.data?.message || data.details?.message;
-                                            const errorType = data.error || 'Error';
-                                            const statusCode = data.statusCode ? `(${data.statusCode})` : '';
-                                            
-                                            let finalMsg = '';
-                                            if (apiMessage) {
-                                              finalMsg = `${apiMessage} ${statusCode}`;
-                                            } else if (data.data && typeof data.data === 'string') {
-                                              finalMsg = `API returned: ${data.data}`;
-                                            } else {
-                                              finalMsg = `${errorType}: ${JSON.stringify(data.details || data)}`;
-                                            }
-                                              
-                                            toast.error('Failed: ' + finalMsg, {
-                                              duration: 8000
-                                            });
-                                          }
-                                        } catch (e) { 
-                                          toast.dismiss(loadingToast);
-                                          toast.error('Connection failed'); 
-                                        }
-                                      }}
-                                      className="px-6 py-3 bg-ruby text-white rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all shadow-lg shadow-ruby/20"
-                                    >
-                                      Send Test SMS
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                            <p className="mt-2 text-[9px] font-bold text-ruby uppercase tracking-widest">Note: This will be used for sending real OTPs via SMS.</p>
                           </div>
 
                           <div className="pt-4 border-t border-gray-50">

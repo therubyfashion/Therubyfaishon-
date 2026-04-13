@@ -1111,7 +1111,7 @@ export default function Checkout() {
                       Back
                     </button>
                     <button 
-                      onClick={handlePlaceOrder}
+                      onClick={() => handlePlaceOrder()}
                       disabled={isProcessingPayment}
                       className="flex-1 bg-ruby text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95 flex items-center justify-center"
                     >

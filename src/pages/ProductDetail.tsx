@@ -508,9 +508,10 @@ export default function ProductDetail() {
           {/* Product Description */}
           <div className="mb-6">
             <h4 className="text-[13px] font-bold text-gray-600 uppercase tracking-wider mb-3">Product Description</h4>
-            <p className="text-gray-500 text-sm leading-relaxed font-light">
-              {product.description}
-            </p>
+            <div 
+              className="markdown-body text-[14px] leading-relaxed text-gray-500"
+              dangerouslySetInnerHTML={{ __html: product.description }}
+            />
           </div>
 
           <div className="h-[1px] bg-gray-100 my-6" />

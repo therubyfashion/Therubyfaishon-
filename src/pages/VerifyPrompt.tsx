@@ -4,15 +4,17 @@ import { auth, db } from '../firebase';
 import { doc, getDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
-import { Mail, ArrowRight, RefreshCw, LogOut, Sparkles } from 'lucide-react';
+import { Mail, ArrowRight, RefreshCw, LogOut, Sparkles, CheckCircle2 } from 'lucide-react';
 
 export default function VerifyPrompt() {
   const navigate = useNavigate();
   const location = useLocation();
   const [loading, setLoading] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [storeSettings, setStoreSettings] = useState<any>(null);
   const [email, setEmail] = useState('');
   const [uid, setUid] = useState('');
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -35,6 +37,64 @@ export default function VerifyPrompt() {
     fetchSettings();
   }, [location]);
 
+  const handleOtpChange = (index: number, value: string) => {
+    if (value.length > 1) value = value.slice(-1);
+    if (!/^\d*$/.test(value)) return;
+
+    const newOtp = [...otp];
+    newOtp[index] = value;
+    setOtp(newOtp);
+
+    // Auto-focus next input
+    if (value && index < 5) {
+      const nextInput = document.getElementById(`otp-${index + 1}`);
+      nextInput?.focus();
+    }
+  };
+
+  const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
+    if (e.key === 'Backspace' && !otp[index] && index > 0) {
+      const prevInput = document.getElementById(`otp-${index - 1}`);
+      prevInput?.focus();
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    const otpValue = otp.join('');
+    if (otpValue.length !== 6) {
+      toast.error("Please enter the full 6-digit code.");
+      return;
+    }
+
+    setVerifying(true);
+    try {
+      const userDocRef = doc(db, 'users', uid);
+      const userDoc = await getDoc(userDocRef);
+      
+      if (!userDoc.exists()) {
+        toast.error("User not found.");
+        return;
+      }
+
+      const userData = userDoc.data();
+      if (userData.emailOtp === otpValue) {
+        await updateDoc(userDocRef, {
+          isVerified: true,
+          emailOtp: null
+        });
+        toast.success("Email verified successfully! You can now login.");
+        navigate('/login');
+      } else {
+        toast.error("Invalid verification code. Please try again.");
+      }
+    } catch (error: any) {
+      console.error("Verification error:", error);
+      toast.error("Failed to verify code.");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   const handleResendVerification = async () => {
     if (!email || !uid) {
       toast.error("Missing user information. Please try signing up again.");
@@ -52,42 +112,72 @@ export default function VerifyPrompt() {
       }
 
       const userData = userDoc.data();
-      const verificationToken = userData.verificationToken || Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
       
-      if (!userData.verificationToken) {
-        await updateDoc(userDocRef, { verificationToken });
-      }
-
-      const verificationLink = `${window.location.origin}/verify-email?uid=${uid}&token=${verificationToken}`;
+      await updateDoc(userDocRef, { emailOtp: newOtp });
 
       const emailHtml = `
-        <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #FAFAFA; padding: 40px 20px; color: #1A2C54;">
-          <div style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 40px; padding: 60px; box-shadow: 0 20px 50px -20px rgba(0,0,0,0.08); border: 1px solid #F0F0F0;">
-            <div style="text-align: center; margin-bottom: 50px;">
-              ${storeSettings?.storeLogo ? `<img src="${storeSettings.storeLogo}" alt="${storeSettings.storeName}" style="max-height: 60px; margin-bottom: 10px;">` : `<h1 style="font-size: 32px; font-weight: bold; letter-spacing: -1px; margin: 0; color: #E11D48;">${storeSettings?.storeName?.toUpperCase() || 'THE RUBY'}</h1>`}
-            </div>
-            
-            <div style="text-align: center; margin-bottom: 40px;">
-              <div style="display: inline-block; background-color: #FDF2F8; color: #E11D48; padding: 12px 24px; border-radius: 100px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 24px;">Verification Required</div>
-              <h2 style="font-size: 28px; font-weight: bold; margin: 0 0 16px 0; color: #1A2C54;">Verify Your Email ✨</h2>
-              <p style="font-size: 16px; color: #666666; line-height: 1.6; margin: 0;">You requested a new verification link. Please click the button below to verify your account and start shopping.</p>
-            </div>
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Your Verification Code</title>
+        </head>
+        <body style="margin: 0; padding: 0; background-color: #f4f4f4; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          <table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;">
+            <tr>
+              <td align="center" style="padding: 40px 0;">
+                <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.05);">
+                  <!-- Header -->
+                  <tr>
+                    <td align="center" style="padding: 40px 40px 20px 40px;">
+                      ${storeSettings?.storeLogo ? 
+                        `<img src="${storeSettings.storeLogo}" alt="${storeSettings.storeName}" style="max-height: 50px; display: block;">` : 
+                        `<h1 style="margin: 0; color: #E11D48; font-size: 28px; font-weight: 800; letter-spacing: -1px; text-transform: uppercase;">${storeSettings?.storeName || 'THE RUBY'}</h1>`
+                      }
+                    </td>
+                  </tr>
+                  
+                  <!-- Hero Icon -->
+                  <tr>
+                    <td align="center" style="padding: 20px 40px;">
+                      <div style="width: 80px; height: 80px; background-color: #FFF1F2; border-radius: 24px; display: flex; align-items: center; justify-content: center; margin: 0 auto;">
+                        <span style="font-size: 40px; line-height: 80px;">🔐</span>
+                      </div>
+                    </td>
+                  </tr>
 
-            <div style="text-align: center; margin-bottom: 50px;">
-              <a href="${verificationLink}" style="display: inline-block; background-color: #1A2C54; color: #FFFFFF; padding: 20px 40px; border-radius: 16px; text-decoration: none; font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; box-shadow: 0 10px 20px -5px rgba(26,44,84,0.3);">Verify My Account</a>
-            </div>
+                  <!-- Content -->
+                  <tr>
+                    <td style="padding: 20px 60px 40px 60px; text-align: center;">
+                      <h2 style="margin: 0 0 16px 0; color: #1A2C54; font-size: 24px; font-weight: 700; line-height: 1.2;">New Verification Code</h2>
+                      <p style="margin: 0; color: #64748B; font-size: 16px; line-height: 1.6;">You requested a new code. Use the code below to verify your email address.</p>
+                    </td>
+                  </tr>
 
-            <div style="background-color: #F9FAFB; border-radius: 24px; padding: 32px; margin-bottom: 40px; border: 1px solid #F3F4F6; text-align: center;">
-              <p style="font-size: 14px; color: #666666; margin: 0;">If the button doesn't work, you can also copy and paste this link into your browser:</p>
-              <p style="font-size: 12px; color: #9CA3AF; margin: 12px 0 0 0; word-break: break-all;">${verificationLink}</p>
-            </div>
+                  <!-- OTP Box -->
+                  <tr>
+                    <td align="center" style="padding: 0 60px 40px 60px;">
+                      <div style="background-color: #F8FAFC; border-radius: 16px; padding: 30px; border: 2px solid #F1F5F9; display: inline-block;">
+                        <span style="font-size: 36px; font-weight: 800; letter-spacing: 12px; color: #1A2C54; font-family: 'Courier New', Courier, monospace;">${newOtp}</span>
+                      </div>
+                    </td>
+                  </tr>
 
-            <div style="text-align: center; border-top: 1px solid #F0F0F0; pt-40px;">
-              <p style="font-size: 16px; font-weight: bold; color: #1A2C54; margin: 0;">Happy Shopping!</p>
-              <p style="font-size: 14px; color: #E11D48; font-weight: bold; margin: 4px 0 0 0;">Team ${storeSettings?.storeName || 'The Ruby'}</p>
-            </div>
-          </div>
-        </div>
+                  <!-- Footer -->
+                  <tr>
+                    <td style="padding: 40px 60px; background-color: #1A2C54; text-align: center;">
+                      <p style="margin: 0 0 8px 0; color: #ffffff; font-size: 14px; font-weight: 600;">This code will expire in 10 minutes.</p>
+                      <p style="margin: 0; color: #FB7185; font-size: 12px; font-weight: 700;">Team ${storeSettings?.storeName || 'The Ruby'}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+        </html>
       `;
 
       await fetch('/api/send-email', {
@@ -95,15 +185,15 @@ export default function VerifyPrompt() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: email,
-          subject: 'Verify Your Email - The Ruby ✨',
+          subject: `${newOtp} is your new verification code ✨`,
           html: emailHtml
         })
       });
 
-      toast.success("Verification email resent! Please check your inbox.");
+      toast.success("New verification code sent!");
     } catch (error: any) {
       console.error("Resend error:", error);
-      toast.error("Failed to resend verification email.");
+      toast.error("Failed to resend code.");
     } finally {
       setLoading(false);
     }
@@ -133,34 +223,57 @@ export default function VerifyPrompt() {
             Verify Your <span className="text-ruby italic">Email</span>
           </h1>
           <p className="text-sm text-gray-400 font-medium leading-relaxed">
-            We've sent a verification link to <span className="text-[#1A2C54] font-bold">{email}</span>. 
-            Please check your inbox and click the link to activate your account.
+            We've sent a 6-digit code to <span className="text-[#1A2C54] font-bold">{email}</span>. 
+            Enter it below to activate your account.
           </p>
+        </div>
+
+        {/* OTP Input Group */}
+        <div className="flex justify-center gap-2 mb-10">
+          {otp.map((digit, index) => (
+            <input
+              key={index}
+              id={`otp-${index}`}
+              type="text"
+              maxLength={1}
+              value={digit}
+              onChange={(e) => handleOtpChange(index, e.target.value)}
+              onKeyDown={(e) => handleKeyDown(index, e)}
+              className="w-12 h-14 text-center text-xl font-bold bg-gray-50 border border-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-ruby/20 focus:border-ruby transition-all"
+            />
+          ))}
         </div>
 
         <div className="space-y-4">
           <button 
+            onClick={handleVerifyOtp}
+            disabled={verifying}
+            className="w-full bg-[#1A2C54] text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-[0.2em] hover:bg-ruby transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-xl shadow-[#1A2C54]/10 flex items-center justify-center gap-3 disabled:opacity-50"
+          >
+            {verifying ? (
+              <RefreshCw size={18} className="animate-spin" />
+            ) : (
+              <>
+                Verify Code
+                <CheckCircle2 size={18} />
+              </>
+            )}
+          </button>
+
+          <button 
             onClick={handleResendVerification}
             disabled={loading}
-            className="w-full bg-[#1A2C54] text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-[0.2em] hover:bg-ruby transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-xl shadow-[#1A2C54]/10 flex items-center justify-center gap-3 disabled:opacity-50"
+            className="w-full bg-white border border-gray-100 text-[#1A2C54] py-5 rounded-2xl text-sm font-bold uppercase tracking-[0.2em] hover:bg-gray-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
           >
             {loading ? (
               <RefreshCw size={18} className="animate-spin" />
             ) : (
               <>
-                Resend Email
+                Resend Code
                 <RefreshCw size={18} />
               </>
             )}
           </button>
-
-          <Link 
-            to="/login"
-            className="w-full bg-white border border-gray-100 text-[#1A2C54] py-5 rounded-2xl text-sm font-bold uppercase tracking-[0.2em] hover:bg-gray-50 transition-all flex items-center justify-center gap-3"
-          >
-            Back to Login
-            <LogOut size={18} />
-          </Link>
         </div>
 
         <div className="pt-8">

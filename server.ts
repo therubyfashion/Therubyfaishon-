@@ -40,7 +40,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let currentResendApiKey = process.env.RESEND_API_KEY;
-let currentFast2smsKey = process.env.FAST2SMS_API_KEY;
 let resend = new Resend(currentResendApiKey);
 
 let razorpay: Razorpay | null = null;
@@ -60,169 +59,14 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Fast2SMS OTP Endpoints
-  app.post("/api/send-otp", async (req, res) => {
-    const { phoneNumber } = req.body;
-    if (!phoneNumber || phoneNumber.length !== 10) {
-      return res.status(400).json({ error: "Invalid phone number" });
-    }
-
-    // Get Fast2SMS API Key from memory, env or Firestore
-    let fast2smsKey = currentFast2smsKey || process.env.FAST2SMS_API_KEY;
-    
-    if (!fast2smsKey && db) {
-      try {
-        console.log("Attempting to fetch Fast2SMS key from Firestore...");
-        // Try to get from 'settings' collection
-        const settingsSnap = await db.collection('settings').get();
-        console.log(`Settings fetch result: ${settingsSnap.empty ? 'Empty' : 'Found ' + settingsSnap.size + ' docs'}`);
-        
-        if (!settingsSnap.empty) {
-          const settingsData = settingsSnap.docs[0].data();
-          console.log("Settings data keys:", Object.keys(settingsData));
-          fast2smsKey = settingsData.fast2smsApiKey;
-          if (fast2smsKey) {
-            currentFast2smsKey = fast2smsKey; // Cache it
-            console.log("Fast2SMS key successfully loaded and cached from Firestore");
-          } else {
-            console.warn("fast2smsApiKey field is missing in the settings document");
-          }
-        }
-      } catch (err) {
-        console.error("CRITICAL: Error fetching Fast2SMS key from Firestore:", err);
-      }
-    }
-
-    if (!fast2smsKey) {
-      console.error("Fast2SMS is not configured. currentFast2smsKey:", !!currentFast2smsKey, "env:", !!process.env.FAST2SMS_API_KEY, "db:", !!db);
-      return res.status(500).json({ error: "Fast2SMS is not configured. Please add the API key in Admin Settings." });
-    }
-
-    // Generate 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes expiry
-
-    try {
-      // Store OTP in Firestore
-      if (db) {
-        await db.collection('otp_codes').doc(phoneNumber).set({
-          otp,
-          expiry: expiry.toISOString(),
-          createdAt: new Date().toISOString()
-        });
-      }
-
-      // Send via Fast2SMS
-      const trimmedKey = fast2smsKey.trim();
-      console.log(`Sending OTP ${otp} to ${phoneNumber} via Fast2SMS q route`);
-      
-      const params = new URLSearchParams();
-      params.append('route', 'q');
-      params.append('message', `Your OTP for The Ruby is ${otp}. Valid for 5 minutes.`);
-      params.append('numbers', phoneNumber);
-
-      const response = await axios.post('https://www.fast2sms.com/dev/bulkV2', params, {
-        headers: {
-          'authorization': trimmedKey,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
-      });
-      
-      console.log("Fast2SMS Response:", response.data);
-
-      if (response.data && response.data.return === true) {
-        res.json({ success: true, message: "OTP sent successfully" });
-      } else {
-        console.error("Fast2SMS API returned failure:", response.data);
-        res.status(500).json({ 
-          error: response.data?.message || "Failed to send SMS via provider", 
-          details: response.data 
-        });
-      }
-    } catch (error: any) {
-      console.error("Fast2SMS Execution Error:", error.response?.data || error.message);
-      res.status(500).json({ 
-        error: "Failed to send OTP", 
-        details: error.response?.data || error.message 
-      });
-    }
-  });
-
-  app.post("/api/verify-otp", async (req, res) => {
-    const { phoneNumber, otp } = req.body;
-    if (!phoneNumber || !otp) {
-      return res.status(400).json({ error: "Phone number and OTP are required" });
-    }
-
-    try {
-      if (!db) throw new Error("Database not initialized");
-
-      const otpDoc = await db.collection('otp_codes').doc(phoneNumber).get();
-      if (!otpDoc.exists) {
-        return res.status(400).json({ error: "OTP not found or expired" });
-      }
-
-      const data = otpDoc.data();
-      const now = new Date();
-      const expiry = new Date(data.expiry);
-
-      if (now > expiry) {
-        await db.collection('otp_codes').doc(phoneNumber).delete();
-        return res.status(400).json({ error: "OTP expired" });
-      }
-
-      if (data.otp !== otp) {
-        return res.status(400).json({ error: "Invalid OTP" });
-      }
-
-      // Success! Delete OTP after verification
-      await db.collection('otp_codes').doc(phoneNumber).delete();
-
-      // Find or create user
-      const querySnapshot = await db.collection('users').where("phoneNumber", "==", phoneNumber).get();
-      
-      let userData: any = null;
-      if (!querySnapshot.empty) {
-        userData = { id: querySnapshot.docs[0].id, ...querySnapshot.docs[0].data() };
-      } else {
-        // Create new user if not exists
-        const newUserId = `phone_${phoneNumber}`;
-        const newUser = {
-          uid: newUserId,
-          phoneNumber: phoneNumber,
-          role: 'user',
-          isVerified: true,
-          phoneVerified: true,
-          createdAt: new Date().toISOString()
-        };
-        await db.collection('users').doc(newUserId).set(newUser);
-        userData = newUser;
-      }
-
-      res.json({ 
-        success: true, 
-        user: userData,
-        message: "Verified successfully" 
-      });
-    } catch (error: any) {
-      console.error("OTP Verify Error:", error);
-      res.status(500).json({ error: error.message || "Verification failed" });
-    }
-  });
-
   // API routes
   app.post("/api/config", (req, res) => {
-    const { resendApiKey, razorpayKeyId, razorpayKeySecret, fast2smsApiKey } = req.body;
+    const { resendApiKey, razorpayKeyId, razorpayKeySecret } = req.body;
     
     if (resendApiKey) {
       currentResendApiKey = resendApiKey;
       resend = new Resend(currentResendApiKey);
       console.log("Resend API Key updated");
-    }
-
-    if (fast2smsApiKey) {
-      currentFast2smsKey = fast2smsApiKey;
-      console.log("Fast2SMS API Key updated in-memory");
     }
 
     if (razorpayKeyId && razorpayKeySecret) {
@@ -239,57 +83,14 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
-  app.get("/api/debug-otp", (req, res) => {
+  app.get("/api/debug-auth", (req, res) => {
     res.json({
       serverSide: {
         hasDb: !!db,
-        hasInMemKey: !!currentFast2smsKey,
-        hasEnvKey: !!process.env.FAST2SMS_API_KEY,
         projectId: admin.apps.length > 0 ? admin.apps[0].options.projectId : 'not-init',
         nodeEnv: process.env.NODE_ENV
       }
     });
-  });
-
-  app.post("/api/test-fast2sms", async (req, res) => {
-    const { apiKey, phoneNumber } = req.body;
-    if (!apiKey) return res.status(400).json({ error: "API Key is required" });
-    
-    const trimmedKey = apiKey.trim();
-    const testPhone = phoneNumber || '9999999999';
-
-    try {
-      console.log(`Testing Fast2SMS with route q to ${testPhone}`);
-      
-      const params = new URLSearchParams();
-      params.append('route', 'q');
-      params.append('message', `Test OTP from The Ruby: 123456`);
-      params.append('numbers', testPhone);
-
-      const response = await axios.post('https://www.fast2sms.com/dev/bulkV2', params, {
-        headers: {
-          'authorization': trimmedKey,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
-      });
-      
-      console.log("Fast2SMS Test Response:", response.data);
-      
-      if (!response.data || typeof response.data !== 'object') {
-        throw new Error("Empty or invalid response from SMS provider");
-      }
-
-      res.json({ success: true, data: response.data });
-    } catch (error: any) {
-      const errorData = error.response?.data || error.message;
-      const statusCode = error.response?.status;
-      console.error(`Fast2SMS Test Error [${statusCode}]:`, errorData);
-      res.status(500).json({ 
-        error: "API Error", 
-        statusCode,
-        details: errorData 
-      });
-    }
   });
 
   app.get("/api/payment-config", async (req, res) => {
@@ -397,7 +198,7 @@ async function startServer() {
 
     try {
       const emailPayload = {
-        from: from || 'The Ruby <onboarding@resend.dev>',
+        from: from || process.env.RESEND_FROM_EMAIL || 'The Ruby <onboarding@therubyfashion.shop>',
         to: Array.isArray(to) ? to : [to],
         subject: subject,
         html: html,
