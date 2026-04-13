@@ -184,20 +184,40 @@ async function startServer() {
     }
   });
 
-  app.post("/api/send-email", async (req, res) => {
-    const { to, subject, html, from } = req.body;
-    
-    if (!to || !subject || !html) {
-      console.error("Missing required fields for email:", { to, subject, hasHtml: !!html });
-      return res.status(400).json({ error: "Missing required fields: to, subject, or html" });
-    }
-
-    if (!currentResendApiKey) {
-      console.warn("RESEND_API_KEY is missing. Email will not be sent.");
-      return res.status(400).json({ error: "Email service is not configured. Please add RESEND_API_KEY to Secrets." });
+  app.post("/api/delete-user", async (req, res) => {
+    const { uid } = req.body;
+    if (!uid) {
+      return res.status(400).json({ error: "Missing uid" });
     }
 
     try {
+      await admin.auth().deleteUser(uid);
+      res.json({ status: "ok", message: "User deleted from Auth" });
+    } catch (error: any) {
+      console.error("Error deleting user from Auth:", error);
+      res.status(500).json({ error: error.message || "Failed to delete user from Auth" });
+    }
+  });
+
+  app.post("/api/send-email", async (req, res) => {
+    const { to, subject, html, from } = req.body;
+    
+    // Always use the latest API Key from environment
+    const apiKey = process.env.RESEND_API_KEY || currentResendApiKey;
+    
+    if (!to || !subject || !html) {
+      return res.status(400).json({ error: "Missing required fields: to, subject, or html" });
+    }
+
+    if (!apiKey) {
+      console.error("RESEND_API_KEY is missing in environment variables.");
+      return res.status(400).json({ 
+        error: "Email service not configured. Please add RESEND_API_KEY in AI Studio Secrets and click 'Deploy'." 
+      });
+    }
+
+    try {
+      const dynamicResend = new Resend(apiKey);
       const emailPayload = {
         from: from || process.env.RESEND_FROM_EMAIL || 'The Ruby <onboarding@therubyfashion.shop>',
         to: Array.isArray(to) ? to : [to],
@@ -205,21 +225,22 @@ async function startServer() {
         html: html,
       };
 
-      const data = await resend.emails.send(emailPayload);
+      console.log("Attempting to send email to:", to);
+      const { data, error } = await dynamicResend.emails.send(emailPayload);
       
-      if (data.error) {
-        console.error("Resend API error details:", JSON.stringify(data.error, null, 2));
+      if (error) {
+        console.error("Resend API Error:", error);
         return res.status(400).json({ 
-          error: data.error.message || "Validation error", 
-          name: data.error.name,
-          details: data.error
+          error: error.message || "Resend failed to send email",
+          details: error
         });
       }
       
+      console.log("Email sent successfully:", data?.id);
       res.json(data);
     } catch (error: any) {
-      console.error("Email execution error:", error);
-      res.status(500).json({ error: error.message || "Failed to send email" });
+      console.error("Server-side email error:", error);
+      res.status(500).json({ error: error.message || "Internal server error while sending email" });
     }
   });
 

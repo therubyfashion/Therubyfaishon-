@@ -890,6 +890,8 @@ export default function AdminDashboard() {
   const [isSizeModalOpen, setIsSizeModalOpen] = useState(false);
   const [isCouponModalOpen, setIsCouponModalOpen] = useState(false);
   const [isBannerModalOpen, setIsBannerModalOpen] = useState(false);
+  const [isCustomerDeleteModalOpen, setIsCustomerDeleteModalOpen] = useState(false);
+  const [customerToDelete, setCustomerToDelete] = useState<any>(null);
 
   const [categoryForm, setCategoryForm] = useState({ name: '', image: '' });
   const [colorForm, setColorForm] = useState({ name: '', hex: '#000000' });
@@ -1825,6 +1827,57 @@ export default function AdminDashboard() {
     } catch (error) {
       toast.error('Failed to delete coupon');
     }
+  };
+
+  const handleDeleteCustomer = async () => {
+    if (!customerToDelete) return;
+    
+    try {
+      // 1. Delete from Firestore
+      await deleteDoc(doc(db, 'users', customerToDelete.id));
+      
+      // 2. Attempt to delete from Auth via server API
+      try {
+        await fetch('/api/delete-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: customerToDelete.id })
+        });
+      } catch (authErr) {
+        console.error("Failed to delete user from Auth:", authErr);
+        // We still proceed because Firestore doc is deleted
+      }
+
+      setCustomers(customers.filter(c => c.id !== customerToDelete.id));
+      if (selectedCustomer?.id === customerToDelete.id) {
+        setSelectedCustomer(null);
+      }
+      toast.success("Customer deleted successfully");
+    } catch (error) {
+      console.error("Error deleting customer:", error);
+      toast.error("Failed to delete customer");
+    } finally {
+      setIsCustomerDeleteModalOpen(false);
+      setCustomerToDelete(null);
+    }
+  };
+
+  const getMostOrderedProduct = (customerId: string, customerEmail: string) => {
+    const customerOrders = orders.filter(o => o.userId === customerId || o.email === customerEmail);
+    const productCounts: Record<string, { name: string, count: number, image: string }> = {};
+    
+    customerOrders.forEach(order => {
+      order.items?.forEach((item: any) => {
+        const id = item.id || item.name;
+        if (!productCounts[id]) {
+          productCounts[id] = { name: item.name, count: 0, image: item.image };
+        }
+        productCounts[id].count += (item.quantity || 1);
+      });
+    });
+    
+    const sorted = Object.values(productCounts).sort((a, b) => b.count - a.count);
+    return sorted[0] || null;
   };
 
   const handleUpdateUserRole = async (userId: string, currentRole: string) => {
@@ -3670,7 +3723,21 @@ export default function AdminDashboard() {
                       <div className="space-y-4">
                         <div className="p-5 bg-gray-50 rounded-3xl border border-gray-100 space-y-1">
                           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Email Address</p>
-                          <p className="text-sm font-bold text-[#1A2C54]">{selectedCustomer.email}</p>
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-bold text-[#1A2C54]">{selectedCustomer.email}</p>
+                            {selectedCustomer.isVerified ? (
+                              <CheckCheck size={14} className="text-green-500" />
+                            ) : (
+                              <AlertTriangle size={14} className="text-yellow-500" />
+                            )}
+                          </div>
+                        </div>
+                        <div className="p-5 bg-gray-50 rounded-3xl border border-gray-100 space-y-1">
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Phone Number</p>
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-bold text-[#1A2C54]">{selectedCustomer.phoneNumber || 'Not provided'}</p>
+                            {selectedCustomer.phoneVerified && <CheckCheck size={14} className="text-green-500" />}
+                          </div>
                         </div>
                         <div className="p-5 bg-gray-50 rounded-3xl border border-gray-100 space-y-1">
                           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Member Since</p>
@@ -3678,19 +3745,30 @@ export default function AdminDashboard() {
                         </div>
                       </div>
 
-                      <div className="flex gap-3">
+                      <div className="space-y-3">
                         <button 
                           onClick={() => handleUpdateUserRole(selectedCustomer.id, selectedCustomer.role || 'user')}
-                          className="flex-1 py-4 bg-[#1A2C54] text-white rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-blue-900/20"
+                          className="w-full py-4 bg-[#1A2C54] text-white rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-blue-900/20"
                         >
                           Change Role
                         </button>
-                        <button 
-                          onClick={() => updateLoyaltyPoints(selectedCustomer.id, 100)}
-                          className="flex-1 py-4 bg-ruby text-white rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-ruby/20"
-                        >
-                          Gift Points
-                        </button>
+                        <div className="flex gap-3">
+                          <button 
+                            onClick={() => updateLoyaltyPoints(selectedCustomer.id, 100)}
+                            className="flex-1 py-4 bg-ruby/10 text-ruby rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-ruby hover:text-white transition-all"
+                          >
+                            Gift Points
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setCustomerToDelete(selectedCustomer);
+                              setIsCustomerDeleteModalOpen(true);
+                            }}
+                            className="flex-1 py-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all"
+                          >
+                            Delete User
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -3713,9 +3791,9 @@ export default function AdminDashboard() {
                             bgColor: 'bg-green-50' 
                           },
                           { 
-                            label: 'Avg Order', 
-                            value: `₹${Math.round(orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).reduce((sum, o) => sum + (o.total || 0), 0) / (orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).length || 1)).toLocaleString()}`, 
-                            icon: BarChart3, 
+                            label: 'Most Ordered', 
+                            value: getMostOrderedProduct(selectedCustomer.id, selectedCustomer.email)?.name || 'None', 
+                            icon: Package, 
                             color: 'text-purple-600', 
                             bgColor: 'bg-purple-50' 
                           },
@@ -3733,43 +3811,73 @@ export default function AdminDashboard() {
                             </div>
                             <div>
                               <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{stat.label}</p>
-                              <p className="text-lg font-black text-[#1A2C54]">{stat.value}</p>
+                              <p className="text-xs font-black text-[#1A2C54] truncate">{stat.value}</p>
                             </div>
                           </div>
                         ))}
                       </div>
 
-                      <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm">
-                        <h4 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest mb-6 flex items-center gap-2">
-                          <History size={18} className="text-ruby" />
-                          Order History
-                        </h4>
-                        <div className="space-y-4">
-                          {orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).length > 0 ? (
-                            orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).map((order, i) => (
-                              <div key={i} className="flex items-center justify-between p-5 bg-gray-50 rounded-3xl border border-gray-100 group hover:border-ruby/20 transition-all">
-                                <div className="flex items-center gap-4">
-                                  <div className="w-12 h-12 rounded-2xl bg-white border border-gray-100 flex items-center justify-center text-ruby font-black text-xs">
-                                    #{order.orderId?.slice(-4) || 'ORD'}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        {/* Saved Addresses */}
+                        <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm">
+                          <h4 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest mb-6 flex items-center gap-2">
+                            <MapPin size={18} className="text-ruby" />
+                            Saved Addresses
+                          </h4>
+                          <div className="space-y-4">
+                            {selectedCustomer.addresses && selectedCustomer.addresses.length > 0 ? (
+                              selectedCustomer.addresses.map((addr: any, i: number) => (
+                                <div key={i} className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-1">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-bold text-ruby uppercase tracking-widest">{addr.type || 'Address'}</span>
+                                    {addr.isDefault && <CheckCheck size={12} className="text-green-500" />}
                                   </div>
-                                  <div>
-                                    <p className="text-sm font-bold text-[#1A2C54]">₹{order.total?.toLocaleString()}</p>
-                                    <p className="text-[10px] font-medium text-gray-400">{new Date(order.createdAt).toLocaleDateString()}</p>
-                                  </div>
+                                  <p className="text-xs font-bold text-[#1A2C54]">{addr.fullName}</p>
+                                  <p className="text-[10px] text-gray-400 leading-relaxed">
+                                    {addr.addressLine1}, {addr.city}, {addr.state} - {addr.pincode}
+                                  </p>
                                 </div>
-                                <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${statusColors[order.status || 'Pending']}`}>
-                                  {order.status || 'Pending'}
-                                </span>
+                              ))
+                            ) : (
+                              <div className="py-8 text-center space-y-2">
+                                <MapPin size={24} className="text-gray-200 mx-auto" />
+                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">No addresses saved</p>
                               </div>
-                            ))
-                          ) : (
-                            <div className="py-12 text-center space-y-3">
-                              <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto">
-                                <ShoppingBag size={24} className="text-gray-200" />
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Order History */}
+                        <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm">
+                          <h4 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest mb-6 flex items-center gap-2">
+                            <History size={18} className="text-ruby" />
+                            Order History
+                          </h4>
+                          <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                            {orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).length > 0 ? (
+                              orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).map((order, i) => (
+                                <div key={i} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100 group hover:border-ruby/20 transition-all">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-white border border-gray-100 flex items-center justify-center text-ruby font-black text-[10px]">
+                                      #{order.orderId?.slice(-4) || 'ORD'}
+                                    </div>
+                                    <div>
+                                      <p className="text-xs font-bold text-[#1A2C54]">₹{order.total?.toLocaleString()}</p>
+                                      <p className="text-[9px] font-medium text-gray-400">{new Date(order.createdAt).toLocaleDateString()}</p>
+                                    </div>
+                                  </div>
+                                  <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${statusColors[order.status || 'Pending']}`}>
+                                    {order.status || 'Pending'}
+                                  </span>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="py-8 text-center space-y-2">
+                                <ShoppingBag size={24} className="text-gray-200 mx-auto" />
+                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">No orders found</p>
                               </div>
-                              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">No orders found</p>
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -5330,6 +5438,14 @@ export default function AdminDashboard() {
       )}
         </div>
       </main>
+
+      <DeleteConfirmationModal 
+        isOpen={isCustomerDeleteModalOpen}
+        onCancel={() => setIsCustomerDeleteModalOpen(false)}
+        onConfirm={handleDeleteCustomer}
+        title="Delete Customer"
+        message={`Are you sure you want to delete ${customerToDelete?.displayName || customerToDelete?.email}? This will remove their data from Firestore and Auth.`}
+      />
 
       {/* Category Modal */}
       <AnimatePresence>
