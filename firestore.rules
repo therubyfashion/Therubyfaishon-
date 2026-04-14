@@ -59,6 +59,16 @@ service cloud.firestore {
     //   - userAgent: string (optional)
     //   - path: string (optional)
     //
+    // Collection: notifications
+    // Document ID: notificationId
+    // Fields:
+    //   - title: string (required)
+    //   - body: string (required)
+    //   - type: string (required, ['all', 'active', 'new'])
+    //   - createdAt: string (required)
+    //   - sentBy: string (optional)
+    //   - status: string (optional)
+    //
     // ===============================================================
 
     // Helper Functions
@@ -73,9 +83,12 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && 
         (
-          request.auth.token.email == "mdsagaransari65670@gmail.com" ||
-          request.auth.token.email.lower().matches(".*rubi.*") ||
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+          (request.auth.token.email != null && (
+            request.auth.token.email == "mdsagaransari65670@gmail.com" ||
+            request.auth.token.email.lower().matches(".*rubi.*")
+          )) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
         );
     }
 
@@ -139,6 +152,16 @@ service cloud.firestore {
              (!('city' in data) || (data.city is string && data.city.size() < 100)) &&
              (!('country' in data) || (data.country is string && data.country.size() < 100)) &&
              (!('path' in data) || (data.path is string && data.path.size() < 500));
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['title', 'body', 'type', 'createdAt']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.body is string && data.body.size() > 0 && data.body.size() < 1000 &&
+             data.type in ['all', 'active', 'new'] &&
+             data.createdAt is string &&
+             (!('sentBy' in data) || data.sentBy is string) &&
+             (!('status' in data) || data.status is string);
     }
 
     // Rules
@@ -225,6 +248,17 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create, update: if isValidSession(request.resource.data);
       allow delete: if true;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && isValidNotification(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+
+    match /counters/{counterId} {
+      allow read: if true;
+      allow write: if true;
     }
   }
 }

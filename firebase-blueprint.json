@@ -169,6 +169,20 @@
         "path": { "type": "string" }
       },
       "required": ["id", "lastSeen"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Push notification history.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "type": { "type": "string", "enum": ["all", "active", "new"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "sentBy": { "type": "string", "format": "email" },
+        "status": { "type": "string" }
+      },
+      "required": ["title", "body", "type", "createdAt"]
     }
   },
   "firestore": {
@@ -184,6 +198,7 @@
     "/reviews/{reviewId}": { "schema": "Review", "description": "Product reviews" },
     "/carts/{cartId}": { "schema": "Cart", "description": "Shopping carts" },
     "/settings/{settingId}": { "schema": "object", "description": "Global store settings" },
-    "/active_sessions/{sessionId}": { "schema": "ActiveSession", "description": "Live visitor sessions" }
+    "/active_sessions/{sessionId}": { "schema": "ActiveSession", "description": "Live visitor sessions" },
+    "/notifications/{notificationId}": { "schema": "Notification", "description": "Push notification history" }
   }
 }

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
-import { collection, addDoc, getDocs } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, runTransaction, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { toast } from 'sonner';
 import { cn, syncToGoogleSheets } from '../lib/utils';
@@ -259,268 +259,305 @@ export default function Checkout() {
 
     setIsProcessingPayment(true);
     
-    const orderId = `#LF-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
-    const orderData = {
-      orderId,
-      userId: user?.uid || 'guest',
-      items: items.map(item => ({
-        id: item.id ?? null,
-        name: item.name ?? 'Unknown Item',
-        price: item.price ?? 0,
-        quantity: item.quantity ?? 1,
-        selectedSize: item.selectedSize ?? null,
-        selectedColor: item.selectedColor ?? null,
-        image: (item.images && item.images[0]) ?? null
-      })),
-      subtotal: subtotal ?? 0,
-      discount: discount ?? 0,
-      shippingCost: shippingCost ?? 0,
-      total: finalTotal ?? 0,
-      status: 'Confirmed',
-      paymentMethod: selectedPayment.toUpperCase(),
-      shippingMethod: selectedShippingObj?.label || 'Standard Delivery',
-      address: selectedAddrObj ?? null,
-      createdAt: new Date().toISOString(),
-      estimatedDelivery: selectedShippingObj?.time?.replace('Guaranteed in ', '') || '25 days'
-    };
+    try {
+      // Get next order number using transaction
+      const counterRef = doc(db, 'counters', 'orders');
+      const orderNumber = await runTransaction(db, async (transaction) => {
+        const counterDoc = await transaction.get(counterRef);
+        let nextNum = 1;
+        if (counterDoc.exists()) {
+          nextNum = counterDoc.data().count + 1;
+          transaction.update(counterRef, { count: nextNum });
+        } else {
+          transaction.set(counterRef, { count: 1 });
+        }
+        return nextNum;
+      });
 
-    const completeOrder = async (paymentId?: string) => {
-      try {
-        const finalOrderData = {
-          ...orderData,
-          paymentId: paymentId || 'COD',
-          paymentStatus: paymentId ? 'Paid' : 'Pending'
-        };
+      const formattedOrderId = `#${orderNumber.toString().padStart(4, '0')}`;
+      
+      const orderData = {
+        orderId: formattedOrderId,
+        userId: user?.uid || 'guest',
+        items: items.map(item => ({
+          id: item.id ?? null,
+          name: item.name ?? 'Unknown Item',
+          price: item.price ?? 0,
+          quantity: item.quantity ?? 1,
+          selectedSize: item.selectedSize ?? null,
+          selectedColor: item.selectedColor ?? null,
+          image: (item.images && item.images[0]) ?? null
+        })),
+        subtotal: subtotal ?? 0,
+        discount: discount ?? 0,
+        shippingCost: shippingCost ?? 0,
+        total: finalTotal ?? 0,
+        status: 'Confirmed',
+        paymentMethod: selectedPayment.toUpperCase(),
+        shippingMethod: selectedShippingObj?.label || 'Standard Delivery',
+        address: selectedAddrObj ?? null,
+        createdAt: new Date().toISOString(),
+        estimatedDelivery: selectedShippingObj?.time?.replace('Guaranteed in ', '') || '25 days'
+      };
 
-        await addDoc(collection(db, 'orders'), finalOrderData);
-        await syncToGoogleSheets(finalOrderData);
-
-        // Clear checkout state
-        localStorage.removeItem('checkout_step');
-        localStorage.removeItem('selected_address_id');
-
-        // Send Email Notification
+      const completeOrder = async (paymentId?: string) => {
         try {
-          const settingsSnap = await getDocs(collection(db, 'settings'));
-          if (!settingsSnap.empty) {
-            const settingsData = settingsSnap.docs[0].data();
-            if (settingsData.resendApiKey && finalOrderData.address?.email) {
-              const emailHtml = `
-                <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #FAFAFA; padding: 40px 20px; color: #1A2C54;">
-                  <div style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 40px; padding: 60px; box-shadow: 0 20px 50px -20px rgba(0,0,0,0.08); border: 1px solid #F0F0F0;">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 50px;">
-                      <div>
-                        ${settingsData.storeLogo ? `<img src="${settingsData.storeLogo}" alt="${settingsData.storeName}" style="max-height: 50px; margin-bottom: 10px;">` : `<h1 style="font-size: 24px; font-weight: bold; letter-spacing: -1px; margin: 0; color: #E11D48;">${settingsData.storeName?.toUpperCase() || 'THE RUBY'}</h1>`}
+          const finalOrderData = {
+            ...orderData,
+            paymentId: paymentId || 'COD',
+            paymentStatus: paymentId ? 'Paid' : 'Pending'
+          };
+
+          await addDoc(collection(db, 'orders'), finalOrderData);
+          
+          // Trigger Admin Push Notification
+          try {
+            await fetch('/api/send-push', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                title: 'New Order Received! 🛍️',
+                body: `You received order ${finalOrderData.orderId} from ${finalOrderData.address.name}`,
+                url: '/admin'
+              })
+            });
+          } catch (e) {
+            console.error("Failed to send admin push notification:", e);
+          }
+
+          await syncToGoogleSheets(finalOrderData);
+
+          // Clear checkout state
+          localStorage.removeItem('checkout_step');
+          localStorage.removeItem('selected_address_id');
+
+          // Send Email Notification
+          try {
+            const settingsSnap = await getDocs(collection(db, 'settings'));
+            if (!settingsSnap.empty) {
+              const settingsData = settingsSnap.docs[0].data();
+              if (settingsData.resendApiKey && finalOrderData.address?.email) {
+                const emailHtml = `
+                  <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #FAFAFA; padding: 40px 20px; color: #1A2C54;">
+                    <div style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 40px; padding: 60px; box-shadow: 0 20px 50px -20px rgba(0,0,0,0.08); border: 1px solid #F0F0F0;">
+                      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 50px;">
+                        <div>
+                          ${settingsData.storeLogo ? `<img src="${settingsData.storeLogo}" alt="${settingsData.storeName}" style="max-height: 50px; margin-bottom: 10px;">` : `<h1 style="font-size: 24px; font-weight: bold; letter-spacing: -1px; margin: 0; color: #E11D48;">${settingsData.storeName?.toUpperCase() || 'THE RUBY'}</h1>`}
+                        </div>
+                        <div style="text-align: right;">
+                          <h1 style="font-size: 14px; font-weight: bold; color: #9CA3AF; text-transform: uppercase; letter-spacing: 2px; margin: 0;">Tax Invoice</h1>
+                          <p style="font-size: 12px; color: #1A2C54; font-weight: bold; margin: 4px 0 0 0;">#${finalOrderData.orderId}</p>
+                        </div>
                       </div>
-                      <div style="text-align: right;">
-                        <h1 style="font-size: 14px; font-weight: bold; color: #9CA3AF; text-transform: uppercase; letter-spacing: 2px; margin: 0;">Tax Invoice</h1>
-                        <p style="font-size: 12px; color: #1A2C54; font-weight: bold; margin: 4px 0 0 0;">#${finalOrderData.orderId}</p>
+                      
+                      <div style="text-align: center; margin-bottom: 40px;">
+                        <div style="display: inline-block; background-color: #FDF2F8; color: #E11D48; padding: 12px 24px; border-radius: 100px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 24px;">Order Confirmed</div>
+                        <h2 style="font-size: 28px; font-weight: bold; margin: 0 0 16px 0; color: #1A2C54;">Thank you for your order, ${finalOrderData.address.name}!</h2>
+                        <p style="font-size: 16px; color: #666666; line-height: 1.6; margin: 0;">We've received your order and our team is already working on getting it to you. Here's your official tax invoice.</p>
+                      </div>
+
+                      <div style="background-color: #F9FAFB; border-radius: 24px; padding: 32px; margin-bottom: 40px; border: 1px solid #F3F4F6;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 24px; border-bottom: 1px solid #E5E7EB; padding-bottom: 16px;">
+                          <div style="flex: 1;">
+                            <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 8px 0;">Date</p>
+                            <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+                          </div>
+                          <div style="flex: 1; text-align: right;">
+                            <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 8px 0;">Payment Method</p>
+                            <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${finalOrderData.paymentId === 'COD' ? 'Cash on Delivery' : 'Prepaid (Razorpay)'}</p>
+                          </div>
+                        </div>
+
+                        <div style="margin-bottom: 24px;">
+                          <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 12px 0;">Items Summary</p>
+                          ${finalOrderData.items.map((item: any) => `
+                            <div style="display: flex; align-items: center; margin-bottom: 16px;">
+                              <div style="width: 50px; height: 60px; background-color: #FFFFFF; border-radius: 8px; overflow: hidden; margin-right: 16px; border: 1px solid #E5E7EB;">
+                                ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 100%; height: 100%; object-fit: cover;">` : ''}
+                              </div>
+                              <div style="flex: 1;">
+                                <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${item.name}</p>
+                                <p style="font-size: 11px; color: #9CA3AF; margin: 2px 0 0 0;">SKU: ${item.sku || '-'} • Barcode: ${item.barcode || '-'}</p>
+                                <p style="font-size: 12px; color: #666666; margin: 4px 0 0 0;">Size: ${item.selectedSize} • Qty: ${item.quantity}</p>
+                              </div>
+                              <div style="text-align: right;">
+                                <p style="font-size: 14px; font-weight: bold; color: #E11D48; margin: 0;">₹${(item.price * item.quantity).toLocaleString()}</p>
+                              </div>
+                            </div>
+                          `).join('')}
+                        </div>
+
+                        <div style="border-top: 1px solid #E5E7EB; padding-top: 24px;">
+                          <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <p style="font-size: 14px; color: #666666; margin: 0;">Subtotal</p>
+                            <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">₹${finalOrderData.subtotal.toLocaleString()}</p>
+                          </div>
+                          ${finalOrderData.discount > 0 ? `
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                              <p style="font-size: 14px; color: #E11D48; margin: 0;">Discount</p>
+                              <p style="font-size: 14px; font-weight: bold; color: #E11D48; margin: 0;">-₹${finalOrderData.discount.toLocaleString()}</p>
+                            </div>
+                          ` : ''}
+                          <div style="display: flex; justify-content: space-between; margin-bottom: 16px;">
+                            <p style="font-size: 14px; color: #666666; margin: 0;">Shipping</p>
+                            <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${finalOrderData.shippingCost === 0 ? 'FREE' : `₹${finalOrderData.shippingCost.toLocaleString()}`}</p>
+                          </div>
+                          <div style="display: flex; justify-content: space-between; border-top: 2px solid #1A2C54; padding-top: 16px;">
+                            <p style="font-size: 18px; font-weight: bold; color: #1A2C54; margin: 0;">Total Amount</p>
+                            <p style="font-size: 24px; font-weight: bold; color: #E11D48; margin: 0;">₹${finalOrderData.total.toLocaleString()}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style="margin-bottom: 40px;">
+                        <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 12px 0;">Billing & Shipping Address</p>
+                        <p style="font-size: 14px; color: #666666; line-height: 1.6; margin: 0;">
+                          <strong>${finalOrderData.address.name}</strong><br/>
+                          ${finalOrderData.address.address}, ${finalOrderData.address.landmark ? finalOrderData.address.landmark + ', ' : ''}<br/>
+                          ${finalOrderData.address.city}, ${finalOrderData.address.state} - ${finalOrderData.address.pincode}<br/>
+                          Phone: ${finalOrderData.address.number}
+                        </p>
+                      </div>
+
+                      <div style="text-align: center; border-top: 1px solid #F0F0F0; padding-top: 40px;">
+                        <p style="font-size: 14px; color: #9CA3AF; margin-bottom: 24px;">Need help with your order? Reply to this email or visit our support center.</p>
+                        <div style="margin-bottom: 32px;">
+                          <a href="${window.location.origin}/profile" style="display: inline-block; background-color: #1A2C54; color: #FFFFFF; padding: 18px 36px; border-radius: 16px; text-decoration: none; font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; box-shadow: 0 10px 20px -5px rgba(26,44,84,0.3);">Track Your Order</a>
+                        </div>
+                        <p style="font-size: 16px; font-weight: bold; color: #1A2C54; margin: 0;">Happy Shopping!</p>
+                        <p style="font-size: 14px; color: #E11D48; font-weight: bold; margin: 4px 0 0 0;">Team ${settingsData.storeName || 'The Ruby'}</p>
                       </div>
                     </div>
                     
-                    <div style="text-align: center; margin-bottom: 40px;">
-                      <div style="display: inline-block; background-color: #FDF2F8; color: #E11D48; padding: 12px 24px; border-radius: 100px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 24px;">Order Confirmed</div>
-                      <h2 style="font-size: 28px; font-weight: bold; margin: 0 0 16px 0; color: #1A2C54;">Thank you for your order, ${finalOrderData.address.name}!</h2>
-                      <p style="font-size: 16px; color: #666666; line-height: 1.6; margin: 0;">We've received your order and our team is already working on getting it to you. Here's your official tax invoice.</p>
-                    </div>
-
-                    <div style="background-color: #F9FAFB; border-radius: 24px; padding: 32px; margin-bottom: 40px; border: 1px solid #F3F4F6;">
-                      <div style="display: flex; justify-content: space-between; margin-bottom: 24px; border-bottom: 1px solid #E5E7EB; padding-bottom: 16px;">
-                        <div style="flex: 1;">
-                          <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 8px 0;">Date</p>
-                          <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
-                        </div>
-                        <div style="flex: 1; text-align: right;">
-                          <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 8px 0;">Payment Method</p>
-                          <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${finalOrderData.paymentId === 'COD' ? 'Cash on Delivery' : 'Prepaid (Razorpay)'}</p>
-                        </div>
-                      </div>
-
-                      <div style="margin-bottom: 24px;">
-                        <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 12px 0;">Items Summary</p>
-                        ${finalOrderData.items.map((item: any) => `
-                          <div style="display: flex; align-items: center; margin-bottom: 16px;">
-                            <div style="width: 50px; height: 60px; background-color: #FFFFFF; border-radius: 8px; overflow: hidden; margin-right: 16px; border: 1px solid #E5E7EB;">
-                              ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 100%; height: 100%; object-fit: cover;">` : ''}
-                            </div>
-                            <div style="flex: 1;">
-                              <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${item.name}</p>
-                              <p style="font-size: 11px; color: #9CA3AF; margin: 2px 0 0 0;">SKU: ${item.sku || '-'} • Barcode: ${item.barcode || '-'}</p>
-                              <p style="font-size: 12px; color: #666666; margin: 4px 0 0 0;">Size: ${item.selectedSize} • Qty: ${item.quantity}</p>
-                            </div>
-                            <div style="text-align: right;">
-                              <p style="font-size: 14px; font-weight: bold; color: #E11D48; margin: 0;">₹${(item.price * item.quantity).toLocaleString()}</p>
-                            </div>
-                          </div>
-                        `).join('')}
-                      </div>
-
-                      <div style="border-top: 1px solid #E5E7EB; padding-top: 24px;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                          <p style="font-size: 14px; color: #666666; margin: 0;">Subtotal</p>
-                          <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">₹${finalOrderData.subtotal.toLocaleString()}</p>
-                        </div>
-                        ${finalOrderData.discount > 0 ? `
-                          <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                            <p style="font-size: 14px; color: #E11D48; margin: 0;">Discount</p>
-                            <p style="font-size: 14px; font-weight: bold; color: #E11D48; margin: 0;">-₹${finalOrderData.discount.toLocaleString()}</p>
-                          </div>
-                        ` : ''}
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 16px;">
-                          <p style="font-size: 14px; color: #666666; margin: 0;">Shipping</p>
-                          <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${finalOrderData.shippingCost === 0 ? 'FREE' : `₹${finalOrderData.shippingCost.toLocaleString()}`}</p>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; border-top: 2px solid #1A2C54; padding-top: 16px;">
-                          <p style="font-size: 18px; font-weight: bold; color: #1A2C54; margin: 0;">Total Amount</p>
-                          <p style="font-size: 24px; font-weight: bold; color: #E11D48; margin: 0;">₹${finalOrderData.total.toLocaleString()}</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style="margin-bottom: 40px;">
-                      <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 12px 0;">Billing & Shipping Address</p>
-                      <p style="font-size: 14px; color: #666666; line-height: 1.6; margin: 0;">
-                        <strong>${finalOrderData.address.name}</strong><br/>
-                        ${finalOrderData.address.address}, ${finalOrderData.address.landmark ? finalOrderData.address.landmark + ', ' : ''}<br/>
-                        ${finalOrderData.address.city}, ${finalOrderData.address.state} - ${finalOrderData.address.pincode}<br/>
-                        Phone: ${finalOrderData.address.number}
-                      </p>
-                    </div>
-
-                    <div style="text-align: center; border-top: 1px solid #F0F0F0; padding-top: 40px;">
-                      <p style="font-size: 14px; color: #9CA3AF; margin-bottom: 24px;">Need help with your order? Reply to this email or visit our support center.</p>
-                      <div style="margin-bottom: 32px;">
-                        <a href="${window.location.origin}/profile" style="display: inline-block; background-color: #1A2C54; color: #FFFFFF; padding: 18px 36px; border-radius: 16px; text-decoration: none; font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; box-shadow: 0 10px 20px -5px rgba(26,44,84,0.3);">Track Your Order</a>
-                      </div>
-                      <p style="font-size: 16px; font-weight: bold; color: #1A2C54; margin: 0;">Happy Shopping!</p>
-                      <p style="font-size: 14px; color: #E11D48; font-weight: bold; margin: 4px 0 0 0;">Team ${settingsData.storeName || 'The Ruby'}</p>
+                    <div style="text-align: center; margin-top: 40px;">
+                      <p style="font-size: 12px; color: #9CA3AF;">&copy; ${new Date().getFullYear()} ${settingsData.storeName || 'The Ruby'}. All rights reserved.</p>
                     </div>
                   </div>
-                  
-                  <div style="text-align: center; margin-top: 40px;">
-                    <p style="font-size: 12px; color: #9CA3AF;">&copy; ${new Date().getFullYear()} ${settingsData.storeName || 'The Ruby'}. All rights reserved.</p>
-                  </div>
-                </div>
-              `;
-              await fetch('/api/send-email', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  to: finalOrderData.address.email,
-                  from: settingsData.fromEmail || 'The Ruby <onboarding@resend.dev>',
-                  subject: `Order Confirmed! #${finalOrderData.orderId} ✨`,
-                  html: emailHtml
-                })
-              });
+                `;
+                await fetch('/api/send-email', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    to: finalOrderData.address.email,
+                    from: settingsData.fromEmail || 'The Ruby <onboarding@resend.dev>',
+                    subject: `Order Confirmed! #${finalOrderData.orderId} ✨`,
+                    html: emailHtml
+                  })
+                });
+              }
             }
+          } catch (emailError) {
+            console.error('Error sending email notification:', emailError);
           }
-        } catch (emailError) {
-          console.error('Error sending email notification:', emailError);
-        }
 
-        setIsProcessingPayment(false);
-        navigate('/order-success', {
-          state: {
-            ...finalOrderData,
-            deliveryDate: `Apr ${new Date().getDate() + (selectedShipping === 'standard' ? 25 : selectedShipping === 'express' ? 7 : 15)}, 2025`
-          }
-        });
-        toast.success('Order placed successfully!');
-        clearCart();
-      } catch (error) {
-        console.error("Error completing order:", error);
-        toast.error("Failed to place order. Please try again.");
-        setIsProcessingPayment(false);
-      }
-    };
-
-    if (selectedPayment === 'upi') {
-      let razorpayKey = (import.meta as any).env.VITE_RAZORPAY_KEY_ID;
-      
-      // If not in env, try to fetch from server
-      if (!razorpayKey) {
-        try {
-          const configRes = await fetch('/api/payment-config');
-          const configData = await configRes.json();
-          razorpayKey = configData.razorpayKeyId;
-          
-          if (!razorpayKey) {
-            const { diagnostics } = configData;
-            let errorMsg = 'Razorpay Key ID is missing.';
-            
-            if (!diagnostics?.serverHasViteKey && !diagnostics?.serverHasSecretKey) {
-              errorMsg += ' Server sees NO Razorpay keys. Did you click DEPLOY after adding Secrets?';
-            } else if (!diagnostics?.serverHasSecretKey) {
-              errorMsg += ' Key ID found, but Secret Key is missing on server.';
-            }
-            
-            toast.error(errorMsg, { duration: 6000 });
-            setIsProcessingPayment(false);
-            return;
-          }
-        } catch (err) {
-          console.error("Failed to fetch payment config:", err);
-        }
-      }
-
-      try {
-        // Create order on server first
-        const orderResponse = await fetch('/api/create-razorpay-order', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            amount: Math.round(finalTotal * 100),
-            currency: 'INR',
-            receipt: orderId
-          })
-        });
-
-        const orderData = await orderResponse.json();
-
-        if (!orderResponse.ok) {
-          throw new Error(orderData.error || 'Failed to create order');
-        }
-
-        const options = {
-          key: razorpayKey,
-          amount: orderData.amount,
-          currency: orderData.currency,
-          name: storeSettings?.storeName || 'The Ruby',
-          description: `Order ${orderId}`,
-          image: storeSettings?.storeLogo || 'https://cdn-icons-png.flaticon.com/512/2909/2909813.png',
-          order_id: orderData.id,
-          handler: async function (response: any) {
-            await completeOrder(response.razorpay_payment_id);
-          },
-          prefill: {
-            name: selectedAddrObj?.name,
-            email: selectedAddrObj?.email,
-            contact: selectedAddrObj?.number,
-          },
-          theme: {
-            color: '#E11D48',
-          },
-          modal: {
-            ondismiss: function() {
-              setIsProcessingPayment(false);
-            }
-          }
-        };
-
-        const rzp = new (window as any).Razorpay(options);
-        rzp.on('payment.failed', function (response: any) {
-          toast.error(response.error.description);
           setIsProcessingPayment(false);
-        });
-        rzp.open();
-      } catch (e: any) {
-        console.error('Razorpay initialization failed:', e);
-        toast.error(e.message || 'Failed to initialize payment gateway. Please try again.');
-        setIsProcessingPayment(false);
+          navigate('/order-success', {
+            state: {
+              ...finalOrderData,
+              deliveryDate: `Apr ${new Date().getDate() + (selectedShipping === 'standard' ? 25 : selectedShipping === 'express' ? 7 : 15)}, 2025`
+            }
+          });
+          toast.success('Order placed successfully!');
+          clearCart();
+        } catch (error) {
+          console.error("Error completing order:", error);
+          toast.error("Failed to place order. Please try again.");
+          setIsProcessingPayment(false);
+        }
+      };
+
+      if (selectedPayment === 'upi') {
+        let razorpayKey = (import.meta as any).env.VITE_RAZORPAY_KEY_ID;
+        
+        // If not in env, try to fetch from server
+        if (!razorpayKey) {
+          try {
+            const configRes = await fetch('/api/payment-config');
+            const configData = await configRes.json();
+            razorpayKey = configData.razorpayKeyId;
+            
+            if (!razorpayKey) {
+              const { diagnostics } = configData;
+              let errorMsg = 'Razorpay Key ID is missing.';
+              
+              if (!diagnostics?.serverHasViteKey && !diagnostics?.serverHasSecretKey) {
+                errorMsg += ' Server sees NO Razorpay keys. Did you click DEPLOY after adding Secrets?';
+              } else if (!diagnostics?.serverHasSecretKey) {
+                errorMsg += ' Key ID found, but Secret Key is missing on server.';
+              }
+              
+              toast.error(errorMsg, { duration: 6000 });
+              setIsProcessingPayment(false);
+              return;
+            }
+          } catch (err) {
+            console.error("Failed to fetch payment config:", err);
+          }
+        }
+
+        try {
+          // Create order on server first
+          const orderResponse = await fetch('/api/create-razorpay-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              amount: Math.round(finalTotal * 100),
+              currency: 'INR',
+              receipt: formattedOrderId
+            })
+          });
+
+          const orderData = await orderResponse.json();
+
+          if (!orderResponse.ok) {
+            throw new Error(orderData.error || 'Failed to create order');
+          }
+
+          const options = {
+            key: razorpayKey,
+            amount: orderData.amount,
+            currency: orderData.currency,
+            name: storeSettings?.storeName || 'The Ruby',
+            description: `Order ${formattedOrderId}`,
+            image: storeSettings?.storeLogo || 'https://cdn-icons-png.flaticon.com/512/2909/2909813.png',
+            order_id: orderData.id,
+            handler: async function (response: any) {
+              await completeOrder(response.razorpay_payment_id);
+            },
+            prefill: {
+              name: selectedAddrObj?.name,
+              email: selectedAddrObj?.email,
+              contact: selectedAddrObj?.number,
+            },
+            theme: {
+              color: '#E11D48',
+            },
+            modal: {
+              ondismiss: function() {
+                setIsProcessingPayment(false);
+              }
+            }
+          };
+
+          const rzp = new (window as any).Razorpay(options);
+          rzp.on('payment.failed', function (response: any) {
+            toast.error(response.error.description);
+            setIsProcessingPayment(false);
+          });
+          rzp.open();
+        } catch (e: any) {
+          console.error('Razorpay initialization failed:', e);
+          toast.error(e.message || 'Failed to initialize payment gateway. Please try again.');
+          setIsProcessingPayment(false);
+        }
+      } else {
+        // Cash on Delivery
+        await completeOrder();
       }
-    } else {
-      // Cash on Delivery
-      await completeOrder();
+    } catch (error) {
+      console.error("Error generating order ID:", error);
+      toast.error("Failed to generate order ID. Please try again.");
+      setIsProcessingPayment(false);
     }
   };
 

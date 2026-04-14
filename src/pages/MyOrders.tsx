@@ -127,7 +127,7 @@ export default function MyOrders() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-6 border-b border-gray-50">
                     <div className="space-y-1">
                       <div className="flex items-center space-x-3">
-                        <span className="text-xs font-bold text-ruby uppercase tracking-widest">Order #{order.id.slice(-8).toUpperCase()}</span>
+                        <span className="text-xs font-bold text-ruby uppercase tracking-widest">Order {order.orderId || `#${order.id.slice(-8).toUpperCase()}`}</span>
                         <span className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full ${
                           order.status === 'Delivered' ? 'bg-green-50 text-green-600' :
                           order.status === 'Cancelled' ? 'bg-red-50 text-red-600' :

@@ -282,6 +282,67 @@ async function startServer() {
     }
   });
 
+  app.post("/api/send-push", async (req, res) => {
+    const { title, body, icon, url } = req.body;
+    
+    if (!db) {
+      return res.status(500).json({ error: "Firebase Admin not initialized" });
+    }
+
+    try {
+      // Get all admin push tokens
+      const tokensSnap = await db.collection('admin_configs').doc('push_tokens').get();
+      if (!tokensSnap.exists) {
+        return res.status(404).json({ error: "No admin push tokens found" });
+      }
+      
+      const data = tokensSnap.data();
+      const tokens = data?.tokens || [];
+      
+      if (tokens.length === 0) {
+        return res.status(404).json({ error: "No tokens registered" });
+      }
+
+      const message = {
+        notification: {
+          title,
+          body,
+        },
+        webpush: {
+          notification: {
+            icon: icon || '/favicon.ico',
+            click_action: url || '/',
+          }
+        },
+        tokens: tokens,
+      };
+
+      const response = await admin.messaging().sendEachForMulticast(message);
+      console.log("Push notifications sent:", response.successCount);
+      
+      // Cleanup invalid tokens
+      if (response.failureCount > 0) {
+        const failedTokens: string[] = [];
+        response.responses.forEach((resp, idx) => {
+          if (!resp.success) {
+            failedTokens.push(tokens[idx]);
+          }
+        });
+        
+        if (failedTokens.length > 0) {
+          await db.collection('admin_configs').doc('push_tokens').update({
+            tokens: admin.firestore.FieldValue.arrayRemove(...failedTokens)
+          });
+        }
+      }
+
+      res.json({ success: true, count: response.successCount });
+    } catch (error: any) {
+      console.error("Push notification error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
