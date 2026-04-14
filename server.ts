@@ -218,11 +218,21 @@ async function startServer() {
 
     try {
       const dynamicResend = new Resend(apiKey);
-      // Simple from address to avoid validation issues with display names
-      const defaultFrom = 'onboarding@therubyfashion.shop';
       
+      // Get store settings for the 'from' name
+      let fromName = 'The Ruby';
+      try {
+        const settingsSnap = await db.collection('settings').limit(1).get();
+        if (!settingsSnap.empty) {
+          const settings = settingsSnap.docs[0].data();
+          if (settings.storeName) fromName = settings.storeName;
+        }
+      } catch (e) {
+        console.error("Error fetching settings for email name:", e);
+      }
+
       const emailPayload = {
-        from: from || process.env.RESEND_FROM_EMAIL || defaultFrom,
+        from: from || process.env.RESEND_FROM_EMAIL || `"${fromName}" <onboarding@therubyfashion.shop>`,
         to: Array.isArray(to) ? to : [to],
         subject: subject,
         html: html,
@@ -231,7 +241,6 @@ async function startServer() {
       console.log("--- Email Sending Start ---");
       console.log("To:", to);
       console.log("From:", emailPayload.from);
-      console.log("API Key Prefix:", apiKey.substring(0, 7) + "...");
       
       const { data, error } = await dynamicResend.emails.send(emailPayload);
       

@@ -61,28 +61,34 @@ export default function Signup() {
     }
     setLoading(true);
     try {
-      const { user } = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+      // Parallelize settings fetch and user creation
+      const settingsPromise = storeSettings ? Promise.resolve(storeSettings) : 
+        getDocs(collection(db, 'settings')).then(snap => snap.empty ? null : snap.docs[0].data());
+      
+      const authPromise = createUserWithEmailAndPassword(auth, formData.email, formData.password);
+      
+      const [currentSettings, { user }] = await Promise.all([settingsPromise, authPromise]);
       
       const fullName = `${formData.firstName} ${formData.lastName}`;
-      await updateProfile(user, { displayName: fullName });
-
-      // Generate 6-digit OTP
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      
-      // Create Firestore Profile
-      await setDoc(doc(db, 'users', user.uid), {
-        uid: user.uid,
-        email: formData.email,
-        displayName: fullName,
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        phoneNumber: formData.phone,
-        role: 'user',
-        isVerified: false,
-        phoneVerified: false,
-        emailOtp: otp,
-        createdAt: new Date().toISOString()
-      });
+
+      // Parallelize profile updates
+      await Promise.all([
+        updateProfile(user, { displayName: fullName }),
+        setDoc(doc(db, 'users', user.uid), {
+          uid: user.uid,
+          email: formData.email,
+          displayName: fullName,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          phoneNumber: formData.phone,
+          role: 'user',
+          isVerified: false,
+          phoneVerified: false,
+          emailOtp: otp,
+          createdAt: new Date().toISOString()
+        })
+      ]);
 
       // Send Verification Email with OTP
       const emailHtml = `
@@ -102,8 +108,8 @@ export default function Signup() {
                   <!-- Brand Header -->
                   <tr>
                     <td align="center" style="padding: 50px 40px 30px 40px; background: linear-gradient(to bottom, #FFF1F2 0%, #ffffff 100%);">
-                      ${storeSettings?.storeLogo ? 
-                        `<img src="${storeSettings.storeLogo}" alt="${storeSettings.storeName}" style="max-height: 60px; display: block;">` : 
+                      ${currentSettings?.storeLogo ? 
+                        `<img src="${currentSettings.storeLogo}" alt="${currentSettings.storeName}" style="max-height: 60px; display: block;">` : 
                         `<h1 style="margin: 0; color: #1A2C54; font-size: 32px; font-weight: 800; letter-spacing: -1.5px; text-transform: uppercase;">THE <span style="color: #E11D48; font-style: italic;">RUBY</span></h1>`
                       }
                     </td>
@@ -134,11 +140,11 @@ export default function Signup() {
                   <tr>
                     <td style="padding: 50px 60px; background-color: #1A2C54; text-align: center;">
                       <div style="margin-bottom: 24px;">
-                        <span style="color: #ffffff; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 3px;">The Ruby Premium</span>
+                        <span style="color: #ffffff; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 3px;">${currentSettings?.storeName || 'The Ruby'} Premium</span>
                       </div>
                       <p style="margin: 0; color: #94A3B8; font-size: 12px; line-height: 1.6;">If you didn't request this code, please ignore this email or contact our support team.</p>
                       <div style="margin-top: 30px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 30px;">
-                        <p style="margin: 0; color: #FB7185; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">&copy; ${new Date().getFullYear()} ${storeSettings?.storeName || 'The Ruby Fashion'}</p>
+                        <p style="margin: 0; color: #FB7185; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">&copy; ${new Date().getFullYear()} ${currentSettings?.storeName || 'The Ruby Fashion'}</p>
                       </div>
                     </td>
                   </tr>

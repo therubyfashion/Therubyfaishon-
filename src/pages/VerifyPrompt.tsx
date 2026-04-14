@@ -78,6 +78,15 @@ export default function VerifyPrompt() {
 
     setVerifying(true);
     try {
+      // Fetch fresh settings to ensure correct branding in email
+      let currentSettings = storeSettings;
+      if (!currentSettings) {
+        const settingsSnap = await getDocs(collection(db, 'settings'));
+        if (!settingsSnap.empty) {
+          currentSettings = settingsSnap.docs[0].data();
+        }
+      }
+
       const userDocRef = doc(db, 'users', uid);
       const userDoc = await getDoc(userDocRef);
       
@@ -100,7 +109,7 @@ export default function VerifyPrompt() {
           <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Welcome to The Ruby</title>
+            <title>Welcome to ${currentSettings?.storeName || 'The Ruby'}</title>
             <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap" rel="stylesheet">
           </head>
           <body style="margin: 0; padding: 0; background-color: #FAFAFA; font-family: 'Inter', sans-serif;">
@@ -111,8 +120,8 @@ export default function VerifyPrompt() {
                     <!-- Brand Header -->
                     <tr>
                       <td align="center" style="padding: 50px 40px 30px 40px; background: linear-gradient(to bottom, #FFF1F2 0%, #ffffff 100%);">
-                        ${storeSettings?.storeLogo ? 
-                          `<img src="${storeSettings.storeLogo}" alt="${storeSettings.storeName}" style="max-height: 60px; display: block;">` : 
+                        ${currentSettings?.storeLogo ? 
+                          `<img src="${currentSettings.storeLogo}" alt="${currentSettings.storeName}" style="max-height: 60px; display: block;">` : 
                           `<h1 style="margin: 0; color: #1A2C54; font-size: 32px; font-weight: 800; letter-spacing: -1.5px; text-transform: uppercase;">THE <span style="color: #E11D48; font-style: italic;">RUBY</span></h1>`
                         }
                       </td>
@@ -138,7 +147,7 @@ export default function VerifyPrompt() {
                     <tr>
                       <td style="padding: 50px 60px; background-color: #1A2C54; text-align: center;">
                         <p style="margin: 0; color: #ffffff; font-size: 14px; font-weight: 600;">Welcome to the Family!</p>
-                        <p style="margin: 10px 0 0 0; color: #FB7185; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Team ${storeSettings?.storeName || 'The Ruby Fashion'}</p>
+                        <p style="margin: 10px 0 0 0; color: #FB7185; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Team ${currentSettings?.storeName || 'The Ruby Fashion'}</p>
                       </td>
                     </tr>
                   </table>
@@ -180,6 +189,15 @@ export default function VerifyPrompt() {
 
     setLoading(true);
     try {
+      // Fetch fresh settings to ensure correct branding in email
+      let currentSettings = storeSettings;
+      if (!currentSettings) {
+        const settingsSnap = await getDocs(collection(db, 'settings'));
+        if (!settingsSnap.empty) {
+          currentSettings = settingsSnap.docs[0].data();
+        }
+      }
+
       const userDocRef = doc(db, 'users', uid);
       const userDoc = await getDoc(userDocRef);
       
@@ -209,9 +227,9 @@ export default function VerifyPrompt() {
                   <!-- Header -->
                   <tr>
                     <td align="center" style="padding: 40px 40px 20px 40px;">
-                      ${storeSettings?.storeLogo ? 
-                        `<img src="${storeSettings.storeLogo}" alt="${storeSettings.storeName}" style="max-height: 50px; display: block;">` : 
-                        `<h1 style="margin: 0; color: #E11D48; font-size: 28px; font-weight: 800; letter-spacing: -1px; text-transform: uppercase;">${storeSettings?.storeName || 'THE RUBY'}</h1>`
+                      ${currentSettings?.storeLogo ? 
+                        `<img src="${currentSettings.storeLogo}" alt="${currentSettings.storeName}" style="max-height: 50px; display: block;">` : 
+                        `<h1 style="margin: 0; color: #E11D48; font-size: 28px; font-weight: 800; letter-spacing: -1px; text-transform: uppercase;">${currentSettings?.storeName || 'THE RUBY'}</h1>`
                       }
                     </td>
                   </tr>
@@ -246,7 +264,7 @@ export default function VerifyPrompt() {
                   <tr>
                     <td style="padding: 40px 60px; background-color: #1A2C54; text-align: center;">
                       <p style="margin: 0 0 8px 0; color: #ffffff; font-size: 14px; font-weight: 600;">This code will expire in 10 minutes.</p>
-                      <p style="margin: 0; color: #FB7185; font-size: 12px; font-weight: 700;">Team ${storeSettings?.storeName || 'The Ruby'}</p>
+                      <p style="margin: 0; color: #FB7185; font-size: 12px; font-weight: 700;">Team ${currentSettings?.storeName || 'The Ruby'}</p>
                     </td>
                   </tr>
                 </table>
