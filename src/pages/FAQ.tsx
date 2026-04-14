@@ -124,8 +124,8 @@ const FAQ = () => {
   let globalIndex = 0;
 
   return (
-    <div className="min-h-screen bg-[#FAFAFA]">
-      <Navbar />
+    <div className="min-h-screen bg-[#FAFAFA] pt-20">
+      <Navbar solid />
       
       {/* Hero Section */}
       <div className="bg-[#1A2C54] py-20 relative overflow-hidden">

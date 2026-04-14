@@ -8,7 +8,7 @@ import { auth, db } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 
-export default function Navbar() {
+export default function Navbar({ solid = false }: { solid?: boolean }) {
   const { user, isAdmin } = useAuth();
   const { itemCount } = useCart();
   const { items: wishlistItems } = useWishlist();
@@ -46,10 +46,12 @@ export default function Navbar() {
     { name: 'FAQ', path: '/faq' },
   ];
 
+  const isSolid = solid || isScrolled;
+
   return (
     <nav 
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
-        isScrolled 
+        isSolid 
           ? 'bg-white/80 backdrop-blur-lg shadow-sm py-3' 
           : 'bg-transparent py-6'
       }`}
@@ -60,7 +62,7 @@ export default function Navbar() {
           <div className="flex md:hidden">
             <button 
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className={`${isScrolled ? 'text-gray-900' : 'text-white'} p-2`}
+              className={`${isSolid ? 'text-gray-900' : 'text-white'} p-2`}
             >
               {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
             </button>
@@ -81,7 +83,7 @@ export default function Navbar() {
               </div>
             )}
             <span className={`text-xl font-serif font-bold tracking-tighter ${
-              isScrolled ? 'text-gray-900' : 'text-white'
+              isSolid ? 'text-gray-900' : 'text-white'
             }`}>
               {storeSettings?.storeName || 'The Ruby'}
             </span>
@@ -94,7 +96,7 @@ export default function Navbar() {
                 key={link.name}
                 to={link.path}
                 className={`text-[10px] font-bold uppercase tracking-[0.2em] transition-all hover:text-ruby relative group ${
-                  isScrolled ? 'text-gray-600' : 'text-white/80'
+                  isSolid ? 'text-gray-600' : 'text-white/80'
                 }`}
               >
                 {link.name}
@@ -107,11 +109,11 @@ export default function Navbar() {
 
           {/* Icons */}
           <div className="flex items-center space-x-2 md:space-x-6">
-            <Link to="/search" className={`p-2 transition-colors ${isScrolled ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
+            <Link to="/search" className={`p-2 transition-colors ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
               <Search size={20} />
             </Link>
             
-            <Link to="/wishlist" className={`p-2 transition-colors relative group ${isScrolled ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
+            <Link to="/wishlist" className={`p-2 transition-colors relative group ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
               <Heart size={20} />
               {wishlistItems.length > 0 && (
                 <span className="absolute top-0 right-0 bg-ruby text-white text-[8px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 border-white">
@@ -120,7 +122,7 @@ export default function Navbar() {
               )}
             </Link>
 
-            <Link to="/cart" className={`p-2 transition-colors relative group ${isScrolled ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
+            <Link to="/cart" className={`p-2 transition-colors relative group ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
               <ShoppingBag size={20} />
               {itemCount > 0 && (
                 <span className="absolute top-0 right-0 bg-ruby text-white text-[8px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 border-white">
@@ -134,7 +136,7 @@ export default function Navbar() {
             {user ? (
               <div className="flex items-center space-x-4">
                 {isAdmin && (
-                  <Link to="/admin" className={`p-2 transition-colors ${isScrolled ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
+                  <Link to="/admin" className={`p-2 transition-colors ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
                     <Settings size={20} className="animate-spin-slow" />
                   </Link>
                 )}
@@ -150,7 +152,7 @@ export default function Navbar() {
               <Link 
                 to="/login" 
                 className={`text-[10px] font-bold uppercase tracking-widest px-6 py-2.5 rounded-full transition-all ${
-                  isScrolled 
+                  isSolid 
                     ? 'bg-black text-white hover:bg-ruby' 
                     : 'bg-white text-black hover:bg-ruby hover:text-white'
                 }`}
