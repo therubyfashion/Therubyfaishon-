@@ -78,20 +78,18 @@ export default function VerifyPrompt() {
 
     setVerifying(true);
     try {
-      // Fetch fresh settings to ensure correct branding in email
-      let currentSettings = storeSettings;
-      if (!currentSettings) {
-        const settingsSnap = await getDocs(collection(db, 'settings'));
-        if (!settingsSnap.empty) {
-          currentSettings = settingsSnap.docs[0].data();
-        }
-      }
-
+      // Parallelize settings fetch and user doc fetch
+      const settingsPromise = storeSettings ? Promise.resolve(storeSettings) : 
+        getDocs(collection(db, 'settings')).then(snap => snap.empty ? null : snap.docs[0].data());
+      
       const userDocRef = doc(db, 'users', uid);
-      const userDoc = await getDoc(userDocRef);
+      const userDocPromise = getDoc(userDocRef);
+      
+      const [currentSettings, userDoc] = await Promise.all([settingsPromise, userDocPromise]);
       
       if (!userDoc.exists()) {
         toast.error("User not found.");
+        setVerifying(false);
         return;
       }
 
@@ -163,6 +161,7 @@ export default function VerifyPrompt() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             to: userData.email,
+            fromName: currentSettings?.storeName || 'The Ruby',
             subject: `Welcome to the Family, ${userData.firstName || ''}! ✨`,
             html: welcomeHtml
           })
@@ -189,27 +188,24 @@ export default function VerifyPrompt() {
 
     setLoading(true);
     try {
-      // Fetch fresh settings to ensure correct branding in email
-      let currentSettings = storeSettings;
-      if (!currentSettings) {
-        const settingsSnap = await getDocs(collection(db, 'settings'));
-        if (!settingsSnap.empty) {
-          currentSettings = settingsSnap.docs[0].data();
-        }
-      }
-
-      const userDocRef = doc(db, 'users', uid);
-      const userDoc = await getDoc(userDocRef);
+      // Parallelize settings fetch and user doc fetch
+      const settingsPromise = storeSettings ? Promise.resolve(storeSettings) : 
+        getDocs(collection(db, 'settings')).then(snap => snap.empty ? null : snap.docs[0].data());
+      
+      const userDocPromise = getDoc(doc(db, 'users', uid));
+      
+      const [currentSettings, userDoc] = await Promise.all([settingsPromise, userDocPromise]);
       
       if (!userDoc.exists()) {
         toast.error("User not found.");
+        setLoading(false);
         return;
       }
 
       const userData = userDoc.data();
       const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
       
-      await updateDoc(userDocRef, { emailOtp: newOtp });
+      await updateDoc(doc(db, 'users', uid), { emailOtp: newOtp });
 
       const emailHtml = `
         <!DOCTYPE html>
@@ -280,6 +276,7 @@ export default function VerifyPrompt() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: email,
+          fromName: currentSettings?.storeName || 'The Ruby',
           subject: `${newOtp} is your new verification code ✨`,
           html: emailHtml
         })
@@ -293,7 +290,7 @@ export default function VerifyPrompt() {
       toast.success("New verification code sent!");
     } catch (error: any) {
       console.error("Resend error:", error);
-      toast.error("Failed to resend code.");
+      toast.error(error.message || "Failed to resend code.");
     } finally {
       setLoading(false);
     }

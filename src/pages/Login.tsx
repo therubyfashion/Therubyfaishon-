@@ -55,8 +55,10 @@ export default function Login() {
     try {
       const { user } = await signInWithEmailAndPassword(auth, email, password);
       
-      // Check custom verification flag in Firestore
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      // Parallelize fetching user data and any other initial checks
+      const userDocPromise = getDoc(doc(db, 'users', user.uid));
+      
+      const userDoc = await userDocPromise;
       const userData = userDoc.data();
 
       if (userData && !userData.isVerified) {

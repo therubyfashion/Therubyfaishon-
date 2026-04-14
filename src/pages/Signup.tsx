@@ -161,6 +161,7 @@ export default function Signup() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: formData.email,
+          fromName: currentSettings?.storeName || 'The Ruby',
           subject: `${otp} is your verification code ✨`,
           html: emailHtml
         })

@@ -20,21 +20,26 @@ try {
     const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     
     // Initialize Admin SDK
-    const app = !admin.apps.length 
+    const adminApp = !admin.apps.length 
       ? admin.initializeApp({ projectId: firebaseConfig.projectId })
       : admin.app();
 
-    // Use getFirestore from firebase-admin/firestore
+    // Use getFirestore from firebase-admin/firestore with the app instance
     if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)') {
-      db = getFirestore(firebaseConfig.firestoreDatabaseId);
+      db = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
     } else {
-      db = getFirestore();
+      db = getFirestore(adminApp);
     }
     console.log("Firebase Admin initialized on server");
   }
 } catch (err) {
   console.error("Failed to initialize Firebase Admin on server:", err);
 }
+
+// Cache for store settings to avoid frequent Firestore calls
+let cachedSettings: any = null;
+let lastSettingsFetch = 0;
+const SETTINGS_CACHE_TTL = 60000; // 1 minute
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -200,9 +205,7 @@ async function startServer() {
   });
 
   app.post("/api/send-email", async (req, res) => {
-    const { to, subject, html, from } = req.body;
-    
-    // Always use the latest API Key from environment
+    const { to, subject, html, from, fromName: providedFromName } = req.body;
     const apiKey = process.env.RESEND_API_KEY || currentResendApiKey;
     
     if (!to || !subject || !html) {
@@ -210,25 +213,31 @@ async function startServer() {
     }
 
     if (!apiKey) {
-      console.error("RESEND_API_KEY is missing in environment variables.");
-      return res.status(400).json({ 
-        error: "Email service not configured. Please add RESEND_API_KEY in AI Studio Secrets and click 'Deploy'." 
-      });
+      return res.status(400).json({ error: "Email service not configured." });
     }
 
     try {
       const dynamicResend = new Resend(apiKey);
       
-      // Get store settings for the 'from' name
-      let fromName = 'The Ruby';
-      try {
-        const settingsSnap = await db.collection('settings').limit(1).get();
-        if (!settingsSnap.empty) {
-          const settings = settingsSnap.docs[0].data();
-          if (settings.storeName) fromName = settings.storeName;
+      // Use provided fromName or fallback to cached/default
+      let fromName = providedFromName || 'The Ruby';
+      
+      if (!providedFromName) {
+        try {
+          const now = Date.now();
+          if (!cachedSettings || (now - lastSettingsFetch > SETTINGS_CACHE_TTL)) {
+            if (db) {
+              const settingsSnap = await db.collection('settings').limit(1).get();
+              if (!settingsSnap.empty) {
+                cachedSettings = settingsSnap.docs[0].data();
+                lastSettingsFetch = now;
+              }
+            }
+          }
+          if (cachedSettings?.storeName) fromName = cachedSettings.storeName;
+        } catch (e) {
+          console.error("Silent error fetching settings:", e);
         }
-      } catch (e) {
-        console.error("Error fetching settings for email name:", e);
       }
 
       const emailPayload = {
@@ -242,14 +251,21 @@ async function startServer() {
       console.log("To:", to);
       console.log("From:", emailPayload.from);
       
+      if (!apiKey || apiKey.trim() === '') {
+        console.error("RESEND_API_KEY is empty or invalid.");
+        return res.status(400).json({ error: "Email API key is not configured correctly." });
+      }
+
       const { data, error } = await dynamicResend.emails.send(emailPayload);
       
       if (error) {
         console.error("Resend API Error Details:", JSON.stringify(error, null, 2));
         let errorMessage = error.message || "Resend failed to send email";
         
-        if (errorMessage.includes("domain is not verified")) {
-          errorMessage = "Bhai, Resend keh raha hai domain verify nahi hai, par aapne screenshot dikhaya hai ki verify hai. Ek baar Resend dashboard par 'API Key' check karein ki wo 'Full Access' wali hai ya nahi.";
+        if (errorMessage.includes("domain is not verified") || errorMessage.includes("Sender not authorized")) {
+          errorMessage = `Bhai, Resend keh raha hai ki "${emailPayload.from}" authorized nahi hai. 
+          1. Check karein ki aapne Resend mein domain verify kiya hai.
+          2. AI Studio Secrets mein "RESEND_FROM_EMAIL" add karein (e.g., info@yourdomain.com).`;
         }
 
         return res.status(400).json({ 

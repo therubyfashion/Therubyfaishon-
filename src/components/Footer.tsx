@@ -101,7 +101,7 @@ export default function Footer() {
                 {[
                   { label: 'Track Order', path: '/my-orders' },
                   { label: 'Returns', path: '/returns' },
-                  { label: 'Size Guide', path: '/size-guide' },
+                  { label: 'FAQ', path: '/faq' },
                   { label: 'Contact Us', path: '/contact' }
                 ].map((item) => (
                   <li key={item.label}>

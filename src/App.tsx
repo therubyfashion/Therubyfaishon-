@@ -32,6 +32,7 @@ const Addresses = React.lazy(() => import('./pages/Addresses'));
 const VerifyEmail = React.lazy(() => import('./pages/VerifyEmail'));
 const VerifyPrompt = React.lazy(() => import('./pages/VerifyPrompt'));
 const InfoPage = React.lazy(() => import('./pages/InfoPage'));
+const FAQ = React.lazy(() => import('./pages/FAQ'));
 
 const ScrollToTop = () => {
   const location = useLocation();
@@ -148,6 +149,7 @@ function AppContent() {
             <Route path="/addresses" element={<Addresses />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/verify-prompt" element={<VerifyPrompt />} />
+            <Route path="/faq" element={<FAQ />} />
             <Route path="/:slug" element={<InfoPage />} />
             <Route 
               path="/admin/*" 
