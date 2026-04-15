@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy, limit, onSnapshot, serverTimestamp, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy, limit, onSnapshot, serverTimestamp, setDoc, arrayUnion, arrayRemove, runTransaction } from 'firebase/firestore';
 import { db, auth, messaging } from '../firebase';
 import { getToken } from 'firebase/messaging';
 import { Product, Category } from '../types';
@@ -1017,7 +1017,8 @@ export default function AdminDashboard() {
     fromEmail: 'The Ruby <onboarding@resend.dev>',
     fast2smsApiKey: '',
     fast2smsTestPhone: '',
-    fcmVapidKey: '',
+    oneSignalAppId: '',
+    oneSignalRestApiKey: '',
     footerSocials: {
       instagram: '',
       x: '',
@@ -1161,28 +1162,84 @@ export default function AdminDashboard() {
     // @ts-ignore
     const OneSignal = window.OneSignal;
     
-    if (!OneSignal) {
-      toast.error("OneSignal is not loaded yet. Please refresh the page.");
+    // @ts-ignore
+    if (!OneSignal && !window.OneSignalDeferred) {
+      toast.error("OneSignal script is not loaded. Please check your internet or disable adblockers.");
       return;
     }
 
     setIsSubscribingPush(true);
+
+    // Safety timeout to prevent button from being stuck forever
+    const timeoutId = setTimeout(() => {
+      if (isSubscribingPush) {
+        setIsSubscribingPush(false);
+        toast.error("OneSignal initialization timed out. Please make sure your App ID is correct and you are not in an iframe.");
+      }
+    }, 10000);
+
     try {
       console.log("OneSignal Button Clicked. Requesting permission...");
-      await OneSignal.Notifications.requestPermission();
       
-      const isSubscribed = OneSignal.User.PushSubscription.optedIn;
-      console.log("OneSignal Subscription status:", isSubscribed);
-      
-      if (isSubscribed) {
-        toast.success("Push Notifications Enabled via OneSignal! 🔔");
-      } else {
-        toast.info("Please allow notifications in your browser to receive updates.");
-      }
+      // @ts-ignore
+      window.OneSignalDeferred = window.OneSignalDeferred || [];
+      // @ts-ignore
+      window.OneSignalDeferred.push(async (OS) => {
+        clearTimeout(timeoutId);
+        try {
+          // Check if initialized
+          if (!OS.Notifications) {
+            // Try to initialize if not already done (using settings)
+            if (settings.oneSignalAppId) {
+              await OS.init({
+                appId: settings.oneSignalAppId,
+                safari_web_id: "web.onesignal.auto.40e188d7-5f7a-4af3-8ac5-05427adc97a7",
+                allowLocalhostAsSecureOrigin: true,
+              });
+            } else {
+              toast.error("OneSignal App ID is missing in settings.");
+              setIsSubscribingPush(false);
+              return;
+            }
+          }
+
+          // Check current permission
+          const permission = await OS.Notifications.permission;
+          if (permission === 'denied') {
+            toast.error("Notifications are blocked. Please enable them in your browser settings.");
+            setIsSubscribingPush(false);
+            return;
+          }
+
+          // Iframe check - OneSignal usually fails in iframes
+          if (window.self !== window.top) {
+            toast.warning("Push notifications might not work inside an iframe. Please open the app in a new tab.");
+          }
+
+          await OS.Notifications.requestPermission();
+          
+          // Wait a bit for subscription to update
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          const isSubscribed = OS.User.PushSubscription.optedIn;
+          console.log("OneSignal Subscription status:", isSubscribed);
+          
+          if (isSubscribed) {
+            toast.success("Push Notifications Enabled! 🔔 You will now receive order alerts.");
+          } else {
+            toast.info("Please make sure to 'Allow' notifications in the browser prompt.");
+          }
+        } catch (innerError: any) {
+          console.error("OneSignal Inner Error:", innerError);
+          toast.error("OneSignal Error: " + innerError.message);
+        } finally {
+          setIsSubscribingPush(false);
+        }
+      });
     } catch (error: any) {
+      clearTimeout(timeoutId);
       console.error("Error enabling push:", error);
       toast.error(error.message || "Failed to enable push notifications");
-    } finally {
       setIsSubscribingPush(false);
     }
   };
@@ -1221,7 +1278,9 @@ export default function AdminDashboard() {
           resendApiKey: settings.resendApiKey,
           razorpayKeyId: settings.razorpayKeyId,
           razorpayKeySecret: settings.razorpayKeySecret,
-          fast2smsApiKey: settings.fast2smsApiKey
+          fast2smsApiKey: settings.fast2smsApiKey,
+          oneSignalAppId: settings.oneSignalAppId,
+          oneSignalRestApiKey: settings.oneSignalRestApiKey
         })
       });
       
@@ -1532,7 +1591,8 @@ export default function AdminDashboard() {
       // Send OneSignal notification to customer
       if (order && order.userId && order.userId !== 'guest') {
         try {
-          await fetch('/api/send-user-push', {
+          // Push
+          fetch('/api/send-user-push', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1542,8 +1602,29 @@ export default function AdminDashboard() {
               url: '/my-orders'
             })
           });
+
+          // Email
+          if (order.address?.email) {
+            fetch('/api/send-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                to: order.address.email,
+                subject: `Order Update: ${order.orderId} is ${newStatus} 📦`,
+                html: `
+                  <div style="font-family: sans-serif; padding: 20px; color: #1A2C54;">
+                    <h1 style="color: #E11D48;">Order Status Update</h1>
+                    <p>Hi ${order.address.name},</p>
+                    <p>Good news! The status of your order <strong>${order.orderId}</strong> has been updated to <strong>${newStatus}</strong>.</p>
+                    <p>You can track your order details in your account.</p>
+                    <a href="${window.location.origin}/my-orders" style="display: inline-block; background: #1A2C54; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 20px;">View Order</a>
+                  </div>
+                `
+              })
+            });
+          }
         } catch (e) {
-          console.error("Failed to send customer push notification:", e);
+          console.error("Failed to send customer notifications:", e);
         }
       }
 
@@ -1560,28 +1641,41 @@ export default function AdminDashboard() {
 
   const handleAddOrder = async () => {
     try {
-      const orderId = `#LF-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
+      // Get next order number using transaction
+      const counterRef = doc(db, 'counters', 'orders');
+      const orderNumber = await runTransaction(db, async (transaction) => {
+        const counterDoc = await transaction.get(counterRef);
+        let nextNum = 1;
+        if (counterDoc.exists()) {
+          nextNum = counterDoc.data().count + 1;
+          transaction.update(counterRef, { count: nextNum });
+        } else {
+          transaction.set(counterRef, { count: 1 });
+        }
+        return nextNum;
+      });
+
+      const orderId = `#${orderNumber.toString().padStart(4, '0')}`;
       const newOrder = {
         orderId,
         address: {
-          name: 'Test Customer',
-          email: 'test@example.com',
-          address: '123 Test Street',
-          city: 'Test City',
-          state: 'Test State',
-          pincode: '123456',
-          number: '9876543210'
+          name: 'Manual Order',
+          email: 'admin@theruby.com',
+          address: 'Store Pickup',
+          city: 'Store City',
+          state: 'Store State',
+          pincode: '000000',
+          number: '0000000000'
         },
         status: 'Pending',
-        total: Math.floor(Math.random() * 5000) + 500,
+        total: 0,
         createdAt: new Date().toISOString(),
         items: [],
         paymentMethod: 'COD',
-        shippingMethod: 'Standard Delivery'
+        shippingMethod: 'Store Pickup'
       };
-      const docRef = await addDoc(collection(db, 'orders'), newOrder);
-      // No need to manually update state as onSnapshot will handle it
-      toast.success('Order added successfully');
+      await addDoc(collection(db, 'orders'), newOrder);
+      toast.success(`Order ${orderId} added successfully`);
     } catch (error) {
       console.error('Error adding order:', error);
       toast.error('Failed to add order');
@@ -1646,6 +1740,48 @@ export default function AdminDashboard() {
           ...formData,
           createdAt: new Date().toISOString()
         });
+
+        // Send broadcast notification for new product
+        try {
+          fetch('/api/send-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: 'New Arrival! 👗',
+              body: `Check out our new ${formData.name}. Shop now!`,
+              url: '/',
+              type: 'all'
+            })
+          });
+
+          // Send Newsletter Emails
+          const newsletterSnap = await getDocs(collection(db, 'newsletter'));
+          const emails = newsletterSnap.docs.map(doc => doc.data().email).filter(Boolean);
+          
+          if (emails.length > 0) {
+            fetch('/api/send-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                to: emails,
+                subject: `New Arrival: ${formData.name} is here! 👗`,
+                html: `
+                  <div style="font-family: sans-serif; padding: 20px; color: #1A2C54;">
+                    <h1 style="color: #E11D48;">New Arrival at The Ruby!</h1>
+                    <p>Hi there,</p>
+                    <p>We've just added a stunning new piece to our collection: <strong>${formData.name}</strong>.</p>
+                    <p>${formData.description}</p>
+                    <p>Price: ₹${formData.price}</p>
+                    <a href="${window.location.origin}" style="display: inline-block; background: #E11D48; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 20px;">Shop Now</a>
+                  </div>
+                `
+              })
+            });
+          }
+        } catch (e) {
+          console.error("Newsletter notification error:", e);
+        }
+
         toast.success("Product added successfully");
       }
       setShowAddProductPage(false);
@@ -1931,6 +2067,48 @@ export default function AdminDashboard() {
         active: true,
         createdAt: new Date().toISOString() 
       });
+
+      // Send broadcast notification for new coupon
+      try {
+        fetch('/api/send-push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: 'New Discount Coupon! 🎟️',
+            body: `Use code ${couponForm.code.toUpperCase()} to get ${couponForm.discount}${couponForm.type === 'percentage' ? '%' : ' OFF'} on your next order!`,
+            url: '/',
+            type: 'all'
+          })
+        });
+
+        // Send Newsletter Emails
+        const newsletterSnap = await getDocs(collection(db, 'newsletter'));
+        const emails = newsletterSnap.docs.map(doc => doc.data().email).filter(Boolean);
+        
+        if (emails.length > 0) {
+          fetch('/api/send-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              to: emails,
+              subject: `New Discount Coupon: ${couponForm.code.toUpperCase()} 🎟️`,
+              html: `
+                <div style="font-family: sans-serif; padding: 20px; color: #1A2C54;">
+                  <h1 style="color: #E11D48;">Special Discount for You!</h1>
+                  <p>Hi there,</p>
+                  <p>We've just released a new discount coupon for our loyal subscribers!</p>
+                  <p>Use code <strong>${couponForm.code.toUpperCase()}</strong> to get <strong>${couponForm.discount}${couponForm.type === 'percentage' ? '%' : ' OFF'}</strong> on your next order.</p>
+                  <p>Hurry up and shop now!</p>
+                  <a href="${window.location.origin}" style="display: inline-block; background: #E11D48; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 20px;">Shop Now</a>
+                </div>
+              `
+            })
+          });
+        }
+      } catch (e) {
+        console.error("Newsletter notification error:", e);
+      }
+
       toast.success('Coupon added');
       setIsCouponModalOpen(false);
       fetchDashboardData();
@@ -2363,7 +2541,7 @@ export default function AdminDashboard() {
                             </div>
                             <div className="space-y-1">
                               <p className="text-xs font-bold text-[#1A2C54]">New Order Received!</p>
-                              <p className="text-[10px] text-gray-400">Order #{notif.orderId || notif.id?.slice(-6)} by {notif.address?.name || 'Guest'}</p>
+                              <p className="text-[10px] text-gray-400">Order {notif.orderId?.startsWith('#') ? notif.orderId : `#${notif.orderId || notif.id?.slice(-6)}`} by {notif.address?.name || 'Guest'}</p>
                               <p className="text-[9px] font-bold text-ruby uppercase tracking-widest">₹{(notif.total || 0).toLocaleString()}</p>
                             </div>
                           </button>
@@ -3160,7 +3338,7 @@ export default function AdminDashboard() {
                             />
                           </td>
                           <td className="py-4 px-6 font-bold text-[#1A2C54]">
-                            {order.orderId || `#${order.id?.slice(-6) || 'N/A'}`}
+                            {order.orderId?.startsWith('#') ? order.orderId : `#${order.orderId || order.id?.slice(-6) || 'N/A'}`}
                           </td>
                           <td className="py-4 px-6">
                             <button 
@@ -3430,7 +3608,7 @@ export default function AdminDashboard() {
                         </div>
                         <span className="text-[10px] font-bold text-ruby uppercase tracking-widest">Order ID</span>
                       </div>
-                      <span className="text-xs font-black text-ruby">#{viewingCustomer.orderId || viewingCustomer.id.substring(0, 8)}</span>
+                      <span className="text-xs font-black text-ruby">{viewingCustomer.orderId?.startsWith('#') ? viewingCustomer.orderId : `#${viewingCustomer.orderId || viewingCustomer.id.substring(0, 8)}`}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-2">
@@ -4439,7 +4617,7 @@ export default function AdminDashboard() {
                           <div className="space-y-1 min-w-0 flex-grow">
                             <h4 className="text-xs md:text-sm font-bold text-[#1A2C54] truncate">New Order Received!</h4>
                             <p className="text-[10px] md:text-xs text-gray-500 leading-relaxed">
-                              Order <span className="font-bold text-ruby">#{notif.orderId || notif.id?.slice(-6)}</span> was placed by <span className="font-bold text-[#1A2C54]">{notif.address?.name || 'Guest'}</span>.
+                              Order <span className="font-bold text-ruby">{notif.orderId?.startsWith('#') ? notif.orderId : `#${notif.orderId || notif.id?.slice(-6)}`}</span> was placed by <span className="font-bold text-[#1A2C54]">{notif.address?.name || 'Guest'}</span>.
                             </p>
                             <div className="flex flex-wrap items-center gap-2 pt-1">
                               <span className="text-[9px] md:text-[10px] font-bold text-ruby uppercase tracking-widest">₹{(notif.total || 0).toLocaleString()}</span>

@@ -38,7 +38,7 @@ export const generateShippingLabel = async (order: any, settings?: any) => {
       </div>
 
       <div style="margin-bottom: 20px;">
-        <div style="font-size: 24px; font-weight: 900; margin-bottom: 15px; border-bottom: 2px solid #000; padding-bottom: 5px;">Order #${order.orderId || '1001'}</div>
+        <div style="font-size: 24px; font-weight: 900; margin-bottom: 15px; border-bottom: 2px solid #000; padding-bottom: 5px;">Order ${order.orderId?.startsWith('#') ? order.orderId : `#${order.orderId || '1001'}`}</div>
         
         <div style="margin-bottom: 15px;">
           <div style="font-weight: 900; font-size: 16px; margin-bottom: 5px;">Ship To:</div>
@@ -54,7 +54,7 @@ export const generateShippingLabel = async (order: any, settings?: any) => {
 
       <div style="border-top: 2px solid #000; border-bottom: 2px solid #000; padding: 15px 0; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
         <div>
-          <div style="font-weight: bold; font-size: 16px;">Order #${order.orderId || '1001'}</div>
+          <div style="font-weight: bold; font-size: 16px;">Order ${order.orderId?.startsWith('#') ? order.orderId : `#${order.orderId || '1001'}`}</div>
         </div>
         <div style="text-align: right;">
           <div style="font-weight: 900; font-size: 20px;">${isCOD ? 'COD' : 'PAID'} ₹${order.total?.toLocaleString()}</div>

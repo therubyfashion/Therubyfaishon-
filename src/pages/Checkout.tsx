@@ -346,7 +346,7 @@ export default function Checkout() {
                         </div>
                         <div style="text-align: right;">
                           <h1 style="font-size: 14px; font-weight: bold; color: #9CA3AF; text-transform: uppercase; letter-spacing: 2px; margin: 0;">Tax Invoice</h1>
-                          <p style="font-size: 12px; color: #1A2C54; font-weight: bold; margin: 4px 0 0 0;">#${finalOrderData.orderId}</p>
+                          <p style="font-size: 12px; color: #1A2C54; font-weight: bold; margin: 4px 0 0 0;">${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`}</p>
                         </div>
                       </div>
                       
@@ -440,7 +440,7 @@ export default function Checkout() {
                   body: JSON.stringify({
                     to: finalOrderData.address.email,
                     from: settingsData.fromEmail || 'The Ruby <onboarding@resend.dev>',
-                    subject: `Order Confirmed! #${finalOrderData.orderId} ✨`,
+                    subject: `Order Confirmed! ${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`} ✨`,
                     html: emailHtml
                   })
                 });

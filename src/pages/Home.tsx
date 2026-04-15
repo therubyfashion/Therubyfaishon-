@@ -6,7 +6,7 @@ import {
   Search, Bell, Heart, User, Filter, ChevronRight, Package,
   Shirt, Smartphone, Watch, Laptop, ShoppingCart, Gem, Utensils, ToyBrick
 } from 'lucide-react';
-import { collection, getDocs, query, where, limit, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, where, limit, orderBy, addDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Product, Category } from '../types';
 import ProductCard from '../components/ProductCard';
@@ -117,12 +117,30 @@ export default function Home() {
     return () => clearInterval(timer);
   }, [banners.length]);
 
-  const handleNewsletterSubmit = (e: React.FormEvent) => {
+  const handleNewsletterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (email) {
-      // In a real app, you'd save this to Firestore
-      toast.success("Welcome to the Ruby Circle! 💎");
-      setEmail('');
+      try {
+        // Save to Firestore
+        await addDoc(collection(db, 'newsletter'), {
+          email,
+          createdAt: new Date().toISOString(),
+          userId: auth.currentUser?.uid || 'guest'
+        });
+
+        // Tag in OneSignal
+        // @ts-ignore
+        if (window.OneSignal) {
+          // @ts-ignore
+          await window.OneSignal.User.addTag("newsletter_subscriber", "true");
+        }
+
+        toast.success("Welcome to the Ruby Circle! 💎");
+        setEmail('');
+      } catch (error) {
+        console.error("Newsletter error:", error);
+        toast.error("Failed to subscribe. Please try again.");
+      }
     }
   };
 

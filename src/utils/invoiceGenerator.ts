@@ -49,7 +49,8 @@ export const generateInvoice = (order: any, settings?: any) => {
   
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(`#${order.orderId}`, pageWidth - 20, 42, { align: 'right' });
+  const displayOrderId = order.orderId?.startsWith('#') ? order.orderId : `#${order.orderId}`;
+  doc.text(displayOrderId, pageWidth - 20, 42, { align: 'right' });
 
   // Content Container
   const startY = 75;

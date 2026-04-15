@@ -168,6 +168,23 @@ export default function VerifyPrompt() {
         });
 
         toast.success("Email verified successfully! Welcome email sent.");
+
+        // Trigger Welcome Push Notification
+        try {
+          fetch('/api/send-user-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: uid,
+              title: `Welcome to the Family! ✨`,
+              body: `Hi ${userData.firstName || 'Gorgeous'}, we're so glad you're here!`,
+              url: '/'
+            })
+          });
+        } catch (e) {
+          console.error("Welcome push error:", e);
+        }
+
         navigate('/');
       } else {
         toast.error("Invalid verification code. Please try again.");

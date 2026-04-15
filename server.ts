@@ -14,10 +14,35 @@ import * as OneSignal from 'onesignal-node';
 dotenv.config();
 
 // Initialize OneSignal
-const oneSignalClient = new OneSignal.Client(
+let oneSignalClient = new OneSignal.Client(
   process.env.ONESIGNAL_APP_ID || '',
   process.env.ONESIGNAL_REST_API_KEY || ''
 );
+
+async function getOneSignalClient() {
+  const appId = process.env.ONESIGNAL_APP_ID;
+  const restKey = process.env.ONESIGNAL_REST_API_KEY;
+
+  if (appId && restKey) {
+    return oneSignalClient;
+  }
+
+  // Fallback to Firestore
+  if (db) {
+    try {
+      const settingsSnap = await db.collection('settings').limit(1).get();
+      if (!settingsSnap.empty) {
+        const settings = settingsSnap.docs[0].data();
+        if (settings.oneSignalAppId && settings.oneSignalRestApiKey) {
+          return new OneSignal.Client(settings.oneSignalAppId, settings.oneSignalRestApiKey);
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching OneSignal settings:", err);
+    }
+  }
+  return oneSignalClient;
+}
 
 // Initialize Firebase Admin for server-side operations
 let db: any = null;
@@ -78,7 +103,7 @@ async function startServer() {
 
   // API routes
   app.post("/api/config", (req, res) => {
-    const { resendApiKey, razorpayKeyId, razorpayKeySecret } = req.body;
+    const { resendApiKey, razorpayKeyId, razorpayKeySecret, oneSignalAppId, oneSignalRestApiKey } = req.body;
     
     if (resendApiKey) {
       currentResendApiKey = resendApiKey;
@@ -95,6 +120,13 @@ async function startServer() {
       process.env.VITE_RAZORPAY_KEY_ID = razorpayKeyId.trim();
       process.env.RAZORPAY_KEY_SECRET = razorpayKeySecret.trim();
       console.log("Razorpay Keys updated via Admin Panel");
+    }
+
+    if (oneSignalAppId && oneSignalRestApiKey) {
+      oneSignalClient = new OneSignal.Client(oneSignalAppId.trim(), oneSignalRestApiKey.trim());
+      process.env.ONESIGNAL_APP_ID = oneSignalAppId.trim();
+      process.env.ONESIGNAL_REST_API_KEY = oneSignalRestApiKey.trim();
+      console.log("OneSignal Keys updated via Admin Panel");
     }
 
     res.json({ status: "ok" });
@@ -298,6 +330,7 @@ async function startServer() {
     
     try {
       console.log("OneSignal: Sending broadcast notification...");
+      const client = await getOneSignalClient();
       
       const notification = {
         contents: {
@@ -310,7 +343,7 @@ async function startServer() {
         included_segments: type === 'all' ? ['All'] : (type === 'active' ? ['Active Users'] : ['Subscribed Users']),
       };
 
-      const response = await oneSignalClient.createNotification(notification);
+      const response = await client.createNotification(notification);
       console.log("OneSignal notification sent:", response.body);
       res.json({ success: true, id: response.body.id });
     } catch (error: any) {
@@ -328,6 +361,7 @@ async function startServer() {
     
     try {
       console.log(`OneSignal: Sending notification to user ${userId}...`);
+      const client = await getOneSignalClient();
       
       const notification = {
         contents: {
@@ -342,7 +376,7 @@ async function startServer() {
         ],
       };
 
-      const response = await oneSignalClient.createNotification(notification);
+      const response = await client.createNotification(notification);
       res.json({ success: true, id: response.body.id });
     } catch (error: any) {
       console.error("OneSignal user notification error:", error);
@@ -356,6 +390,7 @@ async function startServer() {
     
     try {
       console.log("OneSignal: Sending notification to admins...");
+      const client = await getOneSignalClient();
       
       const notification = {
         contents: {
@@ -370,7 +405,7 @@ async function startServer() {
         ],
       };
 
-      const response = await oneSignalClient.createNotification(notification);
+      const response = await client.createNotification(notification);
       res.json({ success: true, id: response.body.id });
     } catch (error: any) {
       console.error("OneSignal admin notification error:", error);

@@ -77,6 +77,7 @@ function AppContent() {
   // Initialize OneSignal
   React.useEffect(() => {
     const initOneSignal = async () => {
+      // @ts-ignore
       const appId = import.meta.env.VITE_ONESIGNAL_APP_ID;
       if (!appId) return;
 
@@ -88,12 +89,15 @@ function AppContent() {
           appId: appId,
           safari_web_id: "web.onesignal.auto.40e188d7-5f7a-4af3-8ac5-05427adc97a7",
           allowLocalhostAsSecureOrigin: true,
+          serviceWorkerParam: { scope: '/' },
+          serviceWorkerPath: 'OneSignalSDKWorker.js',
         });
 
         // Tag user for targeted notifications
         if (user) {
           await OneSignal.User.addTag("userId", user.uid);
           await OneSignal.User.addTag("role", isAdmin ? 'admin' : 'customer');
+          await OneSignal.User.addTag("email", user.email);
         }
       });
     };
