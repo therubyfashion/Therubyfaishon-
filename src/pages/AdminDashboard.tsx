@@ -1142,7 +1142,8 @@ export default function AdminDashboard() {
         body: JSON.stringify({
           title: pushNotification.title,
           body: pushNotification.body,
-          url: '/admin'
+          url: '/',
+          type: pushNotification.type
         })
       });
 
@@ -1157,46 +1158,26 @@ export default function AdminDashboard() {
   };
 
   const requestNotificationPermission = async () => {
-    if (!messaging) {
-      toast.error("Push messaging is not supported in this browser or environment.");
+    // @ts-ignore
+    const OneSignal = window.OneSignal;
+    
+    if (!OneSignal) {
+      toast.error("OneSignal is not loaded yet. Please refresh the page.");
       return;
     }
 
     setIsSubscribingPush(true);
     try {
-      if (Notification.permission === 'denied') {
-        toast.error("Notification permission is blocked. Please click the lock icon in your browser's address bar and reset the notification permission to 'Allow'.", {
-          duration: 6000
-        });
-        setIsSubscribingPush(false);
-        return;
-      }
-
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        // Note: In a real app, you'd get the VAPID key from Firebase Console
-        const vapidKey = settings.fcmVapidKey || 'BD_S5_E_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X_X';
-        
-        const token = await getToken(messaging, {
-          vapidKey: vapidKey
-        }).catch(err => {
-          console.error("FCM Token Error:", err);
-          throw new Error("Please configure your FCM VAPID key in the code to enable push notifications.");
-        });
-        
-        if (token) {
-          const tokenRef = doc(db, 'admin_configs', 'push_tokens');
-          try {
-            await updateDoc(tokenRef, {
-              tokens: arrayUnion(token)
-            });
-          } catch (e) {
-            await setDoc(tokenRef, { tokens: [token] });
-          }
-          toast.success("Mobile Push Notifications Enabled! 🔔");
-        }
+      console.log("OneSignal Button Clicked. Requesting permission...");
+      await OneSignal.Notifications.requestPermission();
+      
+      const isSubscribed = OneSignal.User.PushSubscription.optedIn;
+      console.log("OneSignal Subscription status:", isSubscribed);
+      
+      if (isSubscribed) {
+        toast.success("Push Notifications Enabled via OneSignal! 🔔");
       } else {
-        toast.error("Notification permission denied.");
+        toast.info("Please allow notifications in your browser to receive updates.");
       }
     } catch (error: any) {
       console.error("Error enabling push:", error);
@@ -1546,6 +1527,26 @@ export default function AdminDashboard() {
   const handleUpdateOrderStatus = async (orderId: string, newStatus: string) => {
     try {
       await updateDoc(doc(db, 'orders', orderId), { status: newStatus });
+      const order = orders.find(o => o.id === orderId);
+      
+      // Send OneSignal notification to customer
+      if (order && order.userId && order.userId !== 'guest') {
+        try {
+          await fetch('/api/send-user-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: order.userId,
+              title: 'Order Status Updated! 📦',
+              body: `Your order ${order.orderId} is now ${newStatus}.`,
+              url: '/my-orders'
+            })
+          });
+        } catch (e) {
+          console.error("Failed to send customer push notification:", e);
+        }
+      }
+
       setOrders(orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
       if (viewingCustomer && viewingCustomer.id === orderId) {
         setViewingCustomer({ ...viewingCustomer, status: newStatus });
@@ -5281,22 +5282,32 @@ export default function AdminDashboard() {
                           </div>
 
                           <div className="pt-4 border-t border-gray-50">
-                            <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-widest mb-4">Push Notification Settings</h4>
-                            <div className="space-y-4">
+                            <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-widest mb-4">OneSignal Push Settings</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <div>
-                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">FCM VAPID Key (Web Push Certificate)</label>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">OneSignal App ID</label>
                                 <input 
                                   type="text" 
-                                  placeholder="Paste your VAPID key from Firebase Console"
-                                  value={settings.fcmVapidKey || ''}
-                                  onChange={(e) => setSettings({...settings, fcmVapidKey: e.target.value})}
+                                  placeholder="Enter OneSignal App ID"
+                                  value={settings.oneSignalAppId || ''}
+                                  onChange={(e) => setSettings({...settings, oneSignalAppId: e.target.value})}
                                   className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
                                 />
-                                <p className="text-[10px] text-gray-400 mt-2 leading-relaxed">
-                                  Found in Firebase Console &gt; Project Settings &gt; Cloud Messaging &gt; Web configuration &gt; Web Push certificates.
-                                </p>
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">OneSignal REST API Key</label>
+                                <input 
+                                  type="password" 
+                                  placeholder="Enter REST API Key"
+                                  value={settings.oneSignalRestApiKey || ''}
+                                  onChange={(e) => setSettings({...settings, oneSignalRestApiKey: e.target.value})}
+                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                />
                               </div>
                             </div>
+                            <p className="text-[10px] text-gray-400 mt-2 leading-relaxed italic">
+                              Get these from OneSignal Dashboard &gt; Settings &gt; Keys & IDs.
+                            </p>
                           </div>
 
                           <div className="pt-4 border-t border-gray-50">

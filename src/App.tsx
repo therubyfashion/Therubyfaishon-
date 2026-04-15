@@ -72,6 +72,35 @@ function AppContent() {
   // Track live visitors
   useVisitorTracking();
 
+  const { user, isAdmin } = useAuth();
+
+  // Initialize OneSignal
+  React.useEffect(() => {
+    const initOneSignal = async () => {
+      const appId = import.meta.env.VITE_ONESIGNAL_APP_ID;
+      if (!appId) return;
+
+      // @ts-ignore
+      window.OneSignalDeferred = window.OneSignalDeferred || [];
+      // @ts-ignore
+      window.OneSignalDeferred.push(async (OneSignal) => {
+        await OneSignal.init({
+          appId: appId,
+          safari_web_id: "web.onesignal.auto.40e188d7-5f7a-4af3-8ac5-05427adc97a7",
+          allowLocalhostAsSecureOrigin: true,
+        });
+
+        // Tag user for targeted notifications
+        if (user) {
+          await OneSignal.User.addTag("userId", user.uid);
+          await OneSignal.User.addTag("role", isAdmin ? 'admin' : 'customer');
+        }
+      });
+    };
+
+    initOneSignal();
+  }, [user, isAdmin]);
+
   React.useEffect(() => {
     const timer = setTimeout(() => {
       setShowSplash(false);

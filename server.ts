@@ -9,8 +9,15 @@ import admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 import axios from 'axios';
+import * as OneSignal from 'onesignal-node';
 
 dotenv.config();
+
+// Initialize OneSignal
+const oneSignalClient = new OneSignal.Client(
+  process.env.ONESIGNAL_APP_ID || '',
+  process.env.ONESIGNAL_REST_API_KEY || ''
+);
 
 // Initialize Firebase Admin for server-side operations
 let db: any = null;
@@ -21,8 +28,12 @@ try {
     
     // Initialize Admin SDK
     const adminApp = !admin.apps.length 
-      ? admin.initializeApp({ projectId: firebaseConfig.projectId })
+      ? admin.initializeApp({ 
+          projectId: firebaseConfig.projectId 
+        })
       : admin.app();
+
+    console.log("Firebase Admin initialized with Project ID:", adminApp.options.projectId);
 
     // Use getFirestore from firebase-admin/firestore with the app instance
     if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)') {
@@ -283,78 +294,87 @@ async function startServer() {
   });
 
   app.post("/api/send-push", async (req, res) => {
-    const { title, body, icon, url } = req.body;
+    const { title, body, url, type } = req.body;
     
-    if (!db) {
-      console.error("Push Error: Firebase Admin (db) is null");
-      return res.status(500).json({ error: "Firebase Admin not initialized" });
-    }
-
     try {
-      console.log("Push Notification Request: Attempting to fetch tokens from Firestore...");
-      // Get all admin push tokens
-      const tokensSnap = await db.collection('admin_configs').doc('push_tokens').get();
+      console.log("OneSignal: Sending broadcast notification...");
       
-      if (!tokensSnap.exists) {
-        console.warn("Push Warning: No 'admin_configs/push_tokens' document found");
-        return res.status(404).json({ error: "No admin push tokens found" });
-      }
-      
-      const data = tokensSnap.data();
-      const tokens = data?.tokens || [];
-      
-      if (tokens.length === 0) {
-        console.warn("Push Warning: Tokens array is empty");
-        return res.status(404).json({ error: "No tokens registered" });
-      }
-
-      console.log(`Push Notification Request: Found ${tokens.length} tokens. Sending via FCM...`);
-
-      const message = {
-        notification: {
-          title,
-          body,
+      const notification = {
+        contents: {
+          en: body,
         },
-        webpush: {
-          notification: {
-            icon: icon || '/favicon.ico',
-            click_action: url || '/',
-          }
+        headings: {
+          en: title,
         },
-        tokens: tokens,
+        url: url || '/',
+        included_segments: type === 'all' ? ['All'] : (type === 'active' ? ['Active Users'] : ['Subscribed Users']),
       };
 
-      // Use the adminApp instance if available
-      const adminApp = admin.apps[0];
-      const response = await admin.messaging(adminApp).sendEachForMulticast(message);
-      console.log("Push notifications sent successfully:", response.successCount);
-      
-      // Cleanup invalid tokens
-      if (response.failureCount > 0) {
-        const failedTokens: string[] = [];
-        response.responses.forEach((resp, idx) => {
-          if (!resp.success) {
-            console.error(`Push Token Failure [${idx}]:`, resp.error);
-            failedTokens.push(tokens[idx]);
-          }
-        });
-        
-        if (failedTokens.length > 0) {
-          console.log(`Cleaning up ${failedTokens.length} failed tokens...`);
-          await db.collection('admin_configs').doc('push_tokens').update({
-            tokens: admin.firestore.FieldValue.arrayRemove(...failedTokens)
-          });
-        }
-      }
-
-      res.json({ success: true, count: response.successCount });
+      const response = await oneSignalClient.createNotification(notification);
+      console.log("OneSignal notification sent:", response.body);
+      res.json({ success: true, id: response.body.id });
     } catch (error: any) {
-      console.error("CRITICAL Push notification error:", error);
+      console.error("OneSignal error:", error);
       res.status(500).json({ 
         error: error.message,
-        code: error.code,
-        details: "Bhai, yeh error aksar tab aata hai jab Firebase Admin ko permissions nahi milti. Agar yeh remixed app hai, toh please Firebase setup fir se karein."
+        details: "Bhai, OneSignal App ID aur API Key check karein settings mein."
       });
+    }
+  });
+
+  // Send notification to specific user (for order updates)
+  app.post("/api/send-user-push", async (req, res) => {
+    const { userId, title, body, url } = req.body;
+    
+    try {
+      console.log(`OneSignal: Sending notification to user ${userId}...`);
+      
+      const notification = {
+        contents: {
+          en: body,
+        },
+        headings: {
+          en: title,
+        },
+        url: url || '/',
+        filters: [
+          { field: "tag", key: "userId", relation: "=", value: userId }
+        ],
+      };
+
+      const response = await oneSignalClient.createNotification(notification);
+      res.json({ success: true, id: response.body.id });
+    } catch (error: any) {
+      console.error("OneSignal user notification error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Send notification to admins (for new orders)
+  app.post("/api/send-admin-push", async (req, res) => {
+    const { title, body, url } = req.body;
+    
+    try {
+      console.log("OneSignal: Sending notification to admins...");
+      
+      const notification = {
+        contents: {
+          en: body,
+        },
+        headings: {
+          en: title,
+        },
+        url: url || '/',
+        filters: [
+          { field: "tag", key: "role", relation: "=", value: "admin" }
+        ],
+      };
+
+      const response = await oneSignalClient.createNotification(notification);
+      res.json({ success: true, id: response.body.id });
+    } catch (error: any) {
+      console.error("OneSignal admin notification error:", error);
+      res.status(500).json({ error: error.message });
     }
   });
 

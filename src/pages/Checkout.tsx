@@ -310,9 +310,9 @@ export default function Checkout() {
 
           await addDoc(collection(db, 'orders'), finalOrderData);
           
-          // Trigger Admin Push Notification
+          // Trigger Admin Push Notification via OneSignal
           try {
-            await fetch('/api/send-push', {
+            await fetch('/api/send-admin-push', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
