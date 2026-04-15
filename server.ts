@@ -286,13 +286,17 @@ async function startServer() {
     const { title, body, icon, url } = req.body;
     
     if (!db) {
+      console.error("Push Error: Firebase Admin (db) is null");
       return res.status(500).json({ error: "Firebase Admin not initialized" });
     }
 
     try {
+      console.log("Push Notification Request: Attempting to fetch tokens from Firestore...");
       // Get all admin push tokens
       const tokensSnap = await db.collection('admin_configs').doc('push_tokens').get();
+      
       if (!tokensSnap.exists) {
+        console.warn("Push Warning: No 'admin_configs/push_tokens' document found");
         return res.status(404).json({ error: "No admin push tokens found" });
       }
       
@@ -300,8 +304,11 @@ async function startServer() {
       const tokens = data?.tokens || [];
       
       if (tokens.length === 0) {
+        console.warn("Push Warning: Tokens array is empty");
         return res.status(404).json({ error: "No tokens registered" });
       }
+
+      console.log(`Push Notification Request: Found ${tokens.length} tokens. Sending via FCM...`);
 
       const message = {
         notification: {
@@ -317,19 +324,23 @@ async function startServer() {
         tokens: tokens,
       };
 
-      const response = await admin.messaging().sendEachForMulticast(message);
-      console.log("Push notifications sent:", response.successCount);
+      // Use the adminApp instance if available
+      const adminApp = admin.apps[0];
+      const response = await admin.messaging(adminApp).sendEachForMulticast(message);
+      console.log("Push notifications sent successfully:", response.successCount);
       
       // Cleanup invalid tokens
       if (response.failureCount > 0) {
         const failedTokens: string[] = [];
         response.responses.forEach((resp, idx) => {
           if (!resp.success) {
+            console.error(`Push Token Failure [${idx}]:`, resp.error);
             failedTokens.push(tokens[idx]);
           }
         });
         
         if (failedTokens.length > 0) {
+          console.log(`Cleaning up ${failedTokens.length} failed tokens...`);
           await db.collection('admin_configs').doc('push_tokens').update({
             tokens: admin.firestore.FieldValue.arrayRemove(...failedTokens)
           });
@@ -338,8 +349,12 @@ async function startServer() {
 
       res.json({ success: true, count: response.successCount });
     } catch (error: any) {
-      console.error("Push notification error:", error);
-      res.status(500).json({ error: error.message });
+      console.error("CRITICAL Push notification error:", error);
+      res.status(500).json({ 
+        error: error.message,
+        code: error.code,
+        details: "Bhai, yeh error aksar tab aata hai jab Firebase Admin ko permissions nahi milti. Agar yeh remixed app hai, toh please Firebase setup fir se karein."
+      });
     }
   });
 

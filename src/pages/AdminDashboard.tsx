@@ -1164,6 +1164,14 @@ export default function AdminDashboard() {
 
     setIsSubscribingPush(true);
     try {
+      if (Notification.permission === 'denied') {
+        toast.error("Notification permission is blocked. Please click the lock icon in your browser's address bar and reset the notification permission to 'Allow'.", {
+          duration: 6000
+        });
+        setIsSubscribingPush(false);
+        return;
+      }
+
       const permission = await Notification.requestPermission();
       if (permission === 'granted') {
         // Note: In a real app, you'd get the VAPID key from Firebase Console
