@@ -256,6 +256,10 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    match /admin_configs/{configId} {
+      allow read, write: if isAdmin();
+    }
+
     match /counters/{counterId} {
       allow read: if true;
       allow write: if true;
