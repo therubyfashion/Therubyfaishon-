@@ -222,29 +222,6 @@ export default function Profile() {
           </div>
         </motion.div>
 
-        {/* Orders Quick Access */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          onClick={() => navigate('/my-orders')}
-          className="bg-[#1A2C54] p-8 rounded-[2.5rem] shadow-xl shadow-[#1A2C54]/20 text-white flex items-center justify-between group cursor-pointer overflow-hidden relative"
-        >
-          <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full blur-3xl -mr-16 -mt-16 group-hover:bg-ruby/10 transition-colors" />
-          <div className="flex items-center gap-6 relative z-10">
-            <div className="w-16 h-16 bg-white/10 rounded-[1.5rem] flex items-center justify-center group-hover:scale-110 transition-transform">
-              <ShoppingBag size={32} className="text-ruby" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-xl font-bold">My Orders</h3>
-              <p className="text-xs text-white/50 font-medium">Track, return or buy things again</p>
-            </div>
-          </div>
-          <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center group-hover:bg-ruby transition-all relative z-10">
-            <ChevronRight size={24} className="group-hover:translate-x-1 transition-transform" />
-          </div>
-        </motion.div>
-
         {/* Edit Profile Modal */}
         <AnimatePresence>
           {isEditing && (

@@ -14,34 +14,42 @@ import * as OneSignal from 'onesignal-node';
 dotenv.config();
 
 // Initialize OneSignal
-let oneSignalClient = new OneSignal.Client(
-  process.env.ONESIGNAL_APP_ID || '',
-  process.env.ONESIGNAL_REST_API_KEY || ''
-);
+let oneSignalClient: OneSignal.Client | null = null;
 
-async function getOneSignalClient() {
-  const appId = process.env.ONESIGNAL_APP_ID;
-  const restKey = process.env.ONESIGNAL_REST_API_KEY;
+// Helper to send OneSignal notifications via axios
+async function sendOneSignalNotification(notification: any) {
+  const appId = (process.env.ONESIGNAL_APP_ID || '').trim();
+  const restKey = (process.env.ONESIGNAL_REST_API_KEY || '').trim();
 
-  if (appId && restKey) {
-    return oneSignalClient;
-  }
-
-  // Fallback to Firestore
-  if (db) {
-    try {
-      const settingsSnap = await db.collection('settings').limit(1).get();
-      if (!settingsSnap.empty) {
-        const settings = settingsSnap.docs[0].data();
-        if (settings.oneSignalAppId && settings.oneSignalRestApiKey) {
-          return new OneSignal.Client(settings.oneSignalAppId, settings.oneSignalRestApiKey);
+  if (!appId || !restKey || appId === 'dummy-id') {
+    // Try to fetch from Firestore if not in memory
+    if (db) {
+      try {
+        const settingsSnap = await db.collection('settings').limit(1).get();
+        if (!settingsSnap.empty) {
+          const settings = settingsSnap.docs[0].data();
+          if (settings.oneSignalAppId && settings.oneSignalRestApiKey) {
+            const id = settings.oneSignalAppId.trim();
+            const key = settings.oneSignalRestApiKey.trim();
+            process.env.ONESIGNAL_APP_ID = id;
+            process.env.ONESIGNAL_REST_API_KEY = key;
+            return await axios.post('https://onesignal.com/api/v1/notifications', 
+              { ...notification, app_id: id },
+              { headers: { 'Authorization': `Basic ${key}`, 'Content-Type': 'application/json' } }
+            );
+          }
         }
+      } catch (e) {
+        console.error("Failed to fetch OneSignal settings from DB:", e);
       }
-    } catch (err) {
-      console.error("Error fetching OneSignal settings:", err);
     }
+    throw new Error("OneSignal is not configured. Please check Admin Settings.");
   }
-  return oneSignalClient;
+
+  return await axios.post('https://onesignal.com/api/v1/notifications', 
+    { ...notification, app_id: appId },
+    { headers: { 'Authorization': `Basic ${restKey}`, 'Content-Type': 'application/json' } }
+  );
 }
 
 // Initialize Firebase Admin for server-side operations
@@ -58,15 +66,19 @@ try {
         })
       : admin.app();
 
-    console.log("Firebase Admin initialized with Project ID:", adminApp.options.projectId);
+    console.log("Firebase Admin initialized with Project ID:", firebaseConfig.projectId);
 
     // Use getFirestore from firebase-admin/firestore with the app instance
+    // If named database is provided, use it, otherwise use default
     if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)') {
       db = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
     } else {
       db = getFirestore(adminApp);
     }
-    console.log("Firebase Admin initialized on server");
+  } else {
+    // Fallback for environments without config file
+    if (!admin.apps.length) admin.initializeApp();
+    db = getFirestore();
   }
 } catch (err) {
   console.error("Failed to initialize Firebase Admin on server:", err);
@@ -102,6 +114,16 @@ async function startServer() {
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
   // API routes
+  app.get("/api/firebase-status", async (req, res) => {
+    try {
+      if (!db) throw new Error("Firebase Admin not initialized");
+      await db.collection('settings').limit(1).get();
+      res.json({ success: true, status: "Connected" });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   app.post("/api/config", (req, res) => {
     const { resendApiKey, razorpayKeyId, razorpayKeySecret, oneSignalAppId, oneSignalRestApiKey } = req.body;
     
@@ -330,7 +352,6 @@ async function startServer() {
     
     try {
       console.log("OneSignal: Sending broadcast notification...");
-      const client = await getOneSignalClient();
       
       const notification = {
         contents: {
@@ -343,11 +364,11 @@ async function startServer() {
         included_segments: type === 'all' ? ['All'] : (type === 'active' ? ['Active Users'] : ['Subscribed Users']),
       };
 
-      const response = await client.createNotification(notification);
-      console.log("OneSignal notification sent:", response.body);
-      res.json({ success: true, id: response.body.id });
+      const response = await sendOneSignalNotification(notification);
+      console.log("OneSignal notification sent:", response.data);
+      res.json({ success: true, id: response.data.id });
     } catch (error: any) {
-      console.error("OneSignal error:", error);
+      console.error("OneSignal error:", error.response?.data || error.message);
       res.status(500).json({ 
         error: error.message,
         details: "Bhai, OneSignal App ID aur API Key check karein settings mein."
@@ -361,7 +382,6 @@ async function startServer() {
     
     try {
       console.log(`OneSignal: Sending notification to user ${userId}...`);
-      const client = await getOneSignalClient();
       
       const notification = {
         contents: {
@@ -376,10 +396,10 @@ async function startServer() {
         ],
       };
 
-      const response = await client.createNotification(notification);
-      res.json({ success: true, id: response.body.id });
+      const response = await sendOneSignalNotification(notification);
+      res.json({ success: true, id: response.data.id });
     } catch (error: any) {
-      console.error("OneSignal user notification error:", error);
+      console.error("OneSignal user notification error:", error.response?.data || error.message);
       res.status(500).json({ error: error.message });
     }
   });
@@ -390,7 +410,6 @@ async function startServer() {
     
     try {
       console.log("OneSignal: Sending notification to admins...");
-      const client = await getOneSignalClient();
       
       const notification = {
         contents: {
@@ -405,11 +424,54 @@ async function startServer() {
         ],
       };
 
-      const response = await client.createNotification(notification);
-      res.json({ success: true, id: response.body.id });
+      const response = await sendOneSignalNotification(notification);
+      res.json({ success: true, id: response.data.id });
     } catch (error: any) {
-      console.error("OneSignal admin notification error:", error);
+      console.error("OneSignal admin notification error:", error.response?.data || error.message);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/test-onesignal", async (req, res) => {
+    try {
+      // Get keys from request body or env
+      const appId = (req.body.appId || process.env.ONESIGNAL_APP_ID)?.trim();
+      const restKey = (req.body.restKey || process.env.ONESIGNAL_REST_API_KEY)?.trim();
+
+      if (!appId || !restKey || appId === 'dummy-id') {
+        return res.status(400).json({ 
+          success: false, 
+          error: "OneSignal App ID or REST API Key is missing.",
+          details: "Bhai, App ID aur REST API Key enter karein, phir test karein."
+        });
+      }
+
+      console.log(`Testing OneSignal with App ID: ${appId}`);
+
+      // Direct axios call to verify keys
+      const response = await axios.get(`https://onesignal.com/api/v1/players?app_id=${appId}&limit=1`, {
+        headers: {
+          'Authorization': `Basic ${restKey}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      res.json({ 
+        success: true, 
+        message: "OneSignal configuration is valid! ✅", 
+        data: response.data 
+      });
+    } catch (error: any) {
+      console.error("OneSignal test error:", error.response?.data || error.message);
+      
+      const apiErrors = error.response?.data?.errors;
+      const errorMessage = Array.isArray(apiErrors) ? apiErrors[0] : (error.response?.data?.error || error.message);
+      
+      res.status(500).json({ 
+        success: false, 
+        error: errorMessage || "Unknown error",
+        details: "Bhai, OneSignal REST API Key ya App ID galat ho sakti hai. Please check karein."
+      });
     }
   });
 

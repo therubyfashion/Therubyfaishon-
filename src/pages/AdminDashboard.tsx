@@ -1260,6 +1260,92 @@ export default function AdminDashboard() {
 
   const COLORS = ['#22C55E', '#F59E0B', '#3B82F6', '#EF4444'];
 
+  const [isTestingOneSignal, setIsTestingOneSignal] = useState(false);
+  const [isSendingTestPush, setIsSendingTestPush] = useState(false);
+
+  const [firebaseStatus, setFirebaseStatus] = useState<string>('Checking...');
+
+  useEffect(() => {
+    const checkFirebaseStatus = async () => {
+      try {
+        const response = await fetch('/api/firebase-status');
+        const data = await response.json();
+        if (data.success) {
+          setFirebaseStatus('Connected ✅');
+        } else {
+          setFirebaseStatus('Error ❌');
+        }
+      } catch (error) {
+        setFirebaseStatus('Offline ❌');
+      }
+    };
+    checkFirebaseStatus();
+  }, []);
+
+  const handleTestOneSignal = async () => {
+    setIsTestingOneSignal(true);
+    try {
+      const response = await fetch('/api/test-onesignal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appId: settings.oneSignalAppId,
+          restKey: settings.oneSignalRestApiKey
+        })
+      });
+      const data = await response.json();
+      if (data.success) {
+        toast.success("OneSignal configuration is valid! ✅");
+      } else {
+        toast.error(data.error || "OneSignal test failed");
+      }
+    } catch (error) {
+      console.error("Error testing OneSignal:", error);
+      toast.error("Failed to test OneSignal configuration");
+    } finally {
+      setIsTestingOneSignal(false);
+    }
+  };
+
+  const handleSendTestPush = async () => {
+    if (!settings.oneSignalAppId || !settings.oneSignalRestApiKey) {
+      toast.error("Please configure and save OneSignal keys first");
+      return;
+    }
+    setIsSendingTestPush(true);
+    try {
+      const response = await fetch('/api/send-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: "Test Notification",
+          body: "Bhai, agar ye message dikh raha hai toh OneSignal sahi se kaam kar raha hai! 🚀",
+          type: 'all'
+        })
+      });
+      const data = await response.json();
+      if (data.success) {
+        toast.success("Test push sent! Check your device.");
+      } else {
+        toast.error(data.error || "Failed to send test push");
+      }
+    } catch (error) {
+      console.error("Error sending test push:", error);
+      toast.error("Failed to send test push");
+    } finally {
+      setIsSendingTestPush(false);
+    }
+  };
+
+  const handlePromptPermission = () => {
+    const OneSignal = (window as any).OneSignal;
+    if (OneSignal) {
+      OneSignal.Notifications.requestPermission();
+    } else {
+      toast.error("OneSignal SDK not loaded yet. Please refresh.");
+    }
+  };
+
   const handleSaveSettings = async () => {
     try {
       // Save to Firestore
@@ -1394,6 +1480,11 @@ export default function AdminDashboard() {
     isTrending: false,
     variants: [] as { size: string; color: string; stock: number }[]
   });
+
+  useEffect(() => {
+    console.log("AdminDashboard mounted");
+    return () => console.log("AdminDashboard unmounted");
+  }, []);
 
   useEffect(() => {
     fetchDashboardData();
@@ -2245,7 +2336,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const menuItems = [
+  const menuItems = React.useMemo(() => [
     { id: 'home', label: 'Home', icon: Home },
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'products', label: 'Products', icon: Package },
@@ -2263,7 +2354,7 @@ export default function AdminDashboard() {
     { id: 'abandoned', label: 'Abandoned Carts', icon: ShoppingCart },
     { id: 'insights', label: 'Product Insights', icon: BarChart3 },
     { id: 'settings', label: 'Settings', icon: Settings },
-  ];
+  ], []);
 
   const statusColors: Record<string, string> = {
     Delivered: 'bg-[#22C55E]/10 text-[#22C55E] border border-[#22C55E]/20',
@@ -5460,7 +5551,31 @@ export default function AdminDashboard() {
                           </div>
 
                           <div className="pt-4 border-t border-gray-50">
-                            <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-widest mb-4">OneSignal Push Settings</h4>
+                            <div className="flex items-center justify-between mb-4">
+                              <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-widest">OneSignal Push Settings</h4>
+                              <div className="flex gap-2">
+                                <button 
+                                  onClick={handlePromptPermission}
+                                  className="px-3 py-1.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded-lg hover:bg-blue-200 transition-colors uppercase tracking-wider"
+                                >
+                                  Enable Notifications
+                                </button>
+                                <button 
+                                  onClick={handleSendTestPush}
+                                  disabled={isSendingTestPush}
+                                  className="px-3 py-1.5 bg-green-100 text-green-700 text-[10px] font-bold rounded-lg hover:bg-green-200 transition-colors uppercase tracking-wider disabled:opacity-50"
+                                >
+                                  {isSendingTestPush ? 'Sending...' : 'Send Test Push'}
+                                </button>
+                                <button 
+                                  onClick={handleTestOneSignal}
+                                  disabled={isTestingOneSignal}
+                                  className="px-3 py-1.5 bg-ruby/10 text-ruby text-[10px] font-bold rounded-lg hover:bg-ruby/20 transition-colors uppercase tracking-wider disabled:opacity-50"
+                                >
+                                  {isTestingOneSignal ? 'Testing...' : 'Test Configuration'}
+                                </button>
+                              </div>
+                            </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <div>
                                 <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">OneSignal App ID</label>
@@ -5486,6 +5601,43 @@ export default function AdminDashboard() {
                             <p className="text-[10px] text-gray-400 mt-2 leading-relaxed italic">
                               Get these from OneSignal Dashboard &gt; Settings &gt; Keys & IDs.
                             </p>
+                            
+                            {/* Diagnostic Section */}
+                            <div className="mt-4 p-3 bg-blue-50 rounded-xl border border-blue-100">
+                              <h5 className="text-[10px] font-bold text-blue-700 uppercase tracking-widest mb-2">OneSignal Diagnostics</h5>
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between text-[10px]">
+                                  <span className="text-blue-600">SDK Loaded:</span>
+                                  <span className={(window as any).OneSignal ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
+                                    {(window as any).OneSignal ? "Yes" : "No"}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px]">
+                                  <span className="text-blue-600">App ID Configured:</span>
+                                  <span className={settings.oneSignalAppId ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
+                                    {settings.oneSignalAppId ? "Yes" : "No"}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px]">
+                                  <span className="text-blue-600">REST API Key Configured:</span>
+                                  <span className={settings.oneSignalRestApiKey ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
+                                    {settings.oneSignalRestApiKey ? "Yes" : "No"}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px]">
+                                  <span className="text-blue-600">Browser Permission:</span>
+                                  <span className={(window as any).OneSignal?.Notifications?.permission === 'granted' ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
+                                    {(window as any).OneSignal?.Notifications?.permission || 'Not Prompted'}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px] pt-1 border-t border-blue-100 mt-1">
+                                  <span className="text-blue-600">Firebase Server Connection:</span>
+                                  <span className={firebaseStatus.includes('Connected') ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
+                                    {firebaseStatus}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
                           </div>
 
                           <div className="pt-4 border-t border-gray-50">

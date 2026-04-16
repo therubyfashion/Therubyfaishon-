@@ -77,29 +77,52 @@ function AppContent() {
   // Initialize OneSignal
   React.useEffect(() => {
     const initOneSignal = async () => {
-      // @ts-ignore
-      const appId = import.meta.env.VITE_ONESIGNAL_APP_ID;
-      if (!appId) return;
-
-      // @ts-ignore
-      window.OneSignalDeferred = window.OneSignalDeferred || [];
-      // @ts-ignore
-      window.OneSignalDeferred.push(async (OneSignal) => {
-        await OneSignal.init({
-          appId: appId,
-          safari_web_id: "web.onesignal.auto.40e188d7-5f7a-4af3-8ac5-05427adc97a7",
-          allowLocalhostAsSecureOrigin: true,
-          serviceWorkerParam: { scope: '/' },
-          serviceWorkerPath: 'OneSignalSDKWorker.js',
-        });
-
-        // Tag user for targeted notifications
-        if (user) {
-          await OneSignal.User.addTag("userId", user.uid);
-          await OneSignal.User.addTag("role", isAdmin ? 'admin' : 'customer');
-          await OneSignal.User.addTag("email", user.email);
+      try {
+        // @ts-ignore
+        let appId = import.meta.env.VITE_ONESIGNAL_APP_ID;
+        
+        // If not in env, try to fetch from Firestore
+        if (!appId) {
+          console.log("OneSignal App ID not found in env, fetching from Firestore...");
+          const settingsSnap = await getDocs(query(collection(db, 'settings'), limit(1)));
+          if (!settingsSnap.empty) {
+            const settingsData = settingsSnap.docs[0].data();
+            appId = settingsData.oneSignalAppId;
+          }
         }
-      });
+
+        if (!appId) {
+          console.warn("OneSignal App ID is missing. Push notifications will not work.");
+          return;
+        }
+
+        console.log("Initializing OneSignal with App ID:", appId);
+
+        // @ts-ignore
+        window.OneSignalDeferred = window.OneSignalDeferred || [];
+        // @ts-ignore
+        window.OneSignalDeferred.push(async (OneSignal) => {
+          await OneSignal.init({
+            appId: appId,
+            safari_web_id: "web.onesignal.auto.40e188d7-5f7a-4af3-8ac5-05427adc97a7",
+            allowLocalhostAsSecureOrigin: true,
+            serviceWorkerParam: { scope: '/' },
+            serviceWorkerPath: 'OneSignalSDKWorker.js',
+          });
+
+          console.log("OneSignal initialized successfully");
+
+          // Tag user for targeted notifications
+          if (user) {
+            await OneSignal.User.addTag("userId", user.uid);
+            await OneSignal.User.addTag("role", isAdmin ? 'admin' : 'customer');
+            await OneSignal.User.addTag("email", user.email);
+            console.log("OneSignal user tags added:", user.uid);
+          }
+        });
+      } catch (error) {
+        console.error("Error initializing OneSignal:", error);
+      }
     };
 
     initOneSignal();
