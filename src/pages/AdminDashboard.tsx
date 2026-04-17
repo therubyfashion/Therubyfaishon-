@@ -1533,7 +1533,7 @@ export default function AdminDashboard() {
       // Notify customer
       try {
         if (order.userId && order.userId !== 'guest') {
-          fetch('/api/send-user-push', {
+          await fetch('/api/send-user-push', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1542,12 +1542,12 @@ export default function AdminDashboard() {
               body: `Your order ${order.orderId} has been successfully delivered. Enjoy!`,
               url: '/my-orders'
             })
-          });
+          }).catch(e => console.error("Push failed:", e));
         }
 
-        const targetEmail = order.address?.email || order.email;
+        const targetEmail = order.address?.email || order.email || order.customerEmail || order.userEmail;
         if (targetEmail) {
-          fetch('/api/send-email', {
+          const emailRes = await fetch('/api/send-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1572,6 +1572,7 @@ export default function AdminDashboard() {
               `
             })
           });
+          if (!emailRes.ok) console.error("Email API failed for delivery notification");
         }
       } catch (e) {
         console.error("Failed to send delivery notifications:", e);
@@ -1613,7 +1614,7 @@ export default function AdminDashboard() {
         try {
           // Push (only for logged in users)
           if (order.userId && order.userId !== 'guest') {
-            fetch('/api/send-user-push', {
+            await fetch('/api/send-user-push', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -1622,15 +1623,17 @@ export default function AdminDashboard() {
                 body: `Good news! Your order ${order.orderId} has been shipped.`,
                 url: '/my-orders'
               })
-            });
+            }).catch(e => console.error("Push failed:", e));
           }
 
           // Email (to anyone who provided an email)
-          const targetEmail = order.address?.email || order.email;
+          const targetEmail = order.address?.email || order.email || order.customerEmail || order.userEmail;
+          console.log(`Fulfillment notification target email for ${order.id}:`, targetEmail);
+          
           if (targetEmail) {
             const itemsHtml = (order.items || []).map((item: any) => `
               <div style="display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid #f0f0f0;">
-                <img src="${item.image}" width="50" height="50" style="border-radius: 8px; object-cover: cover;" />
+                <img src="${item.image}" width="50" height="50" style="border-radius: 8px; object-fit: cover;" />
                 <div style="flex: 1;">
                   <p style="margin: 0; font-size: 14px; font-weight: bold;">${item.name}</p>
                   <p style="margin: 0; font-size: 12px; color: #666;">Qty: ${item.quantity} · Size: ${item.selectedSize || 'N/A'}</p>
@@ -1641,11 +1644,12 @@ export default function AdminDashboard() {
               </div>
             `).join('');
 
-            fetch('/api/send-email', {
+            const emailRes = await fetch('/api/send-email', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 to: targetEmail,
+                from: settings.fromEmail || 'The Ruby <onboarding@resend.dev>',
                 subject: `Order Shipped: ${order.orderId} is on its way! 📦`,
                 html: `
                   <div style="font-family: sans-serif; padding: 20px; color: #1A2C54; max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 20px;">
@@ -1668,7 +1672,7 @@ export default function AdminDashboard() {
                     <div style="background: #f6f6f7; padding: 20px; border-radius: 12px; margin: 20px 0; border: 1px solid #e1e3e5; text-align: center;">
                       <p style="margin: 0 0 10px 0; font-size: 12px; color: #6d7175; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">Live Tracking</p>
                       <p style="margin: 0 0 15px 0; font-size: 14px; color: #1A2C54;">You can track your order status in real-time using the button below:</p>
-                      <a href="${window.location.origin}/track/${order.orderId}" style="display: inline-block; background: #e11d48; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px;">Track My Order</a>
+                      <a href="${window.location.origin}/track/${order.orderId}?email=${encodeURIComponent(targetEmail)}" style="display: inline-block; background: #e11d48; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px;">Track My Order</a>
                     </div>
                     ${updateData.trackingNumber ? `
                       <p style="font-size: 13px; color: #6d7175; text-align: center;">Carrier: <strong>${updateData.carrier}</strong> | AWB: <strong>${updateData.trackingNumber}</strong></p>
@@ -1678,9 +1682,14 @@ export default function AdminDashboard() {
                 `
               })
             });
+            if (!emailRes.ok) throw new Error("Email API responded with error");
+          } else {
+            console.warn("No target email found for order fulfillment notification");
+            toast.error("Bhai, order mein customer ka email nahi mila, isliye email send nahi ho paya.");
           }
         } catch (e) {
           console.error("Failed to send shipment notifications:", e);
+          toast.warning("Shipment updated, but failed to send notifications. Check your Email/OneSignal settings.");
         }
       }
 
@@ -4305,7 +4314,9 @@ export default function AdminDashboard() {
                         </div>
                         <div className="flex justify-between items-start">
                           <span className="text-[13px] text-shop-text-muted font-[500]">Email</span>
-                          <span className="text-[13px] text-blue-600 font-[600] hover:underline cursor-pointer break-all text-right ml-4">{viewingCustomer.address?.email || viewingCustomer.email || 'N/A'}</span>
+                          <span className="text-[13px] text-blue-600 font-[600] hover:underline cursor-pointer break-all text-right ml-4">
+                            {viewingCustomer.address?.email || viewingCustomer.email || viewingCustomer.customerEmail || viewingCustomer.userEmail || (viewingCustomer.userId && viewingCustomer.userId !== 'guest' ? 'Logged-in User' : 'N/A')}
+                          </span>
                         </div>
                         <div className="flex justify-between items-start">
                           <span className="text-[13px] text-shop-text-muted font-[500]">Phone</span>

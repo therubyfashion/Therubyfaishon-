@@ -113,12 +113,15 @@ function AppContent() {
 
           console.log("OneSignal initialized successfully");
 
-          // Tag user for targeted notifications
+          // modern login for targeted notifications (much more reliable)
           if (user) {
-            await OneSignal.User.addTag("userId", user.uid);
+            await OneSignal.login(user.uid);
             await OneSignal.User.addTag("role", isAdmin ? 'admin' : 'customer');
             await OneSignal.User.addTag("email", user.email);
-            console.log("OneSignal user tags added:", user.uid);
+            console.log("OneSignal user identified:", user.uid);
+          } else {
+            // Logout when no user to prevent cross-account notifications
+            await OneSignal.logout();
           }
         });
       } catch (error) {

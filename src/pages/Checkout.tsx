@@ -295,6 +295,8 @@ export default function Checkout() {
         status: 'Confirmed',
         paymentMethod: selectedPayment.toUpperCase(),
         shippingMethod: selectedShippingObj?.label || 'Standard Delivery',
+        email: selectedAddrObj?.email || user?.email || '',
+        customerName: selectedAddrObj?.name || user?.displayName || 'Customer',
         address: selectedAddrObj ?? null,
         createdAt: new Date().toISOString(),
         estimatedDelivery: selectedShippingObj?.time?.replace('Guaranteed in ', '') || '25 days'

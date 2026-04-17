@@ -63,49 +63,30 @@ async function sendOneSignalNotification(notification: any) {
   let appId = (process.env.ONESIGNAL_APP_ID || process.env.VITE_ONESIGNAL_APP_ID || '').trim();
   let restKey = (process.env.ONESIGNAL_REST_API_KEY || '').trim();
 
-  const isPlaceholder = (val: string) => !val || val === 'dummy-id' || val === 'YOUR_ONESIGNAL_APP_ID' || val === 'placeholder';
+  const isPlaceholder = (val: string) => !val || val === 'dummy-id' || val === 'YOUR_ONESIGNAL_APP_ID' || val === 'placeholder' || val.length < 10;
 
   // If not in env or seems to be a placeholder, try to fetch from Firestore
   if (isPlaceholder(appId) || isPlaceholder(restKey)) {
     if (db) {
       try {
-        console.log("OneSignal configuration missing in env, attempting to fetch from Firestore 'settings'...");
+        console.log("OneSignal configuration missing or invalid in env, attempting to fetch from Firestore 'settings'...");
         const settingsSnap = await db.collection('settings').limit(1).get();
         if (!settingsSnap.empty) {
           const settings = settingsSnap.docs[0].data();
           if (settings.oneSignalAppId && settings.oneSignalRestApiKey) {
-            appId = settings.oneSignalAppId.trim();
-            restKey = settings.oneSignalRestApiKey.trim();
+            appId = String(settings.oneSignalAppId).trim();
+            restKey = String(settings.oneSignalRestApiKey).trim();
             console.log("OneSignal config successfully loaded from Firestore.");
           }
-        } else {
-          console.warn("OneSignal config fetch: 'settings' collection found but is empty.");
         }
       } catch (e: any) {
         console.error("Failed to fetch OneSignal settings from DB:", e.message);
-        if (e.message.includes('permission') || e.message.includes('7')) {
-          console.warn("Detected permission issue. This often happens if the project ID in firebase-applet-config.json is stale or if the service account lacks access to the named database.");
-          // Attempt a one-time fallback to default database if we were using a named one
-          try {
-             console.log("Attempting fallback to default Firestore database...");
-             const defaultDb = getFirestore();
-             const fallbackSnap = await defaultDb.collection('settings').limit(1).get();
-             if (!fallbackSnap.empty) {
-                const settings = fallbackSnap.docs[0].data();
-                appId = settings.oneSignalAppId?.trim() || appId;
-                restKey = settings.oneSignalRestApiKey?.trim() || restKey;
-                console.log("OneSignal config loaded from default database fallback.");
-             }
-          } catch (fallbackErr: any) {
-             console.error("Fallback attempt failed:", fallbackErr.message);
-          }
-        }
       }
     }
   }
 
   if (isPlaceholder(appId) || isPlaceholder(restKey)) {
-    throw new Error("OneSignal is not configured. Please add ONESIGNAL_APP_ID and ONESIGNAL_REST_API_KEY to 'Secrets' in AI Studio Settings, or configure them in the Admin Panel.");
+    throw new Error("OneSignal is not configured. Bhai, Admin Panel -> Settings mein 'OneSignal App ID' aur 'REST API Key' sahi se enter karein.");
   }
 
   return await axios.post('https://onesignal.com/api/v1/notifications', 
@@ -336,31 +317,37 @@ async function startServer() {
       }
 
       const emailPayload = {
-        from: from || process.env.RESEND_FROM_EMAIL || `"${fromName}" <onboarding@therubyfashion.shop>`,
+        from: from || process.env.RESEND_FROM_EMAIL || `"${fromName}" <onboarding@resend.dev>`,
         to: Array.isArray(to) ? to : [to],
         subject: subject,
         html: html,
       };
 
-      console.log("--- Email Sending Start ---");
-      console.log("To:", to);
+      console.log("--- Email Sending Attempt ---");
+      console.log("To:", JSON.stringify(to));
       console.log("From:", emailPayload.from);
       
       if (!apiKey || apiKey.trim() === '') {
-        console.error("RESEND_API_KEY is empty or invalid.");
-        return res.status(400).json({ error: "Email API key is not configured correctly." });
+        console.error("RESEND_API_KEY is empty or missing in environment/settings.");
+        return res.status(400).json({ 
+          error: "Bhai, settings mein 'Resend API Key' save nahi hai ya galat hai. Pehle settings check karein." 
+        });
+      }
+
+      if (!to || (Array.isArray(to) && to.length === 0) || to === '') {
+        console.error("Recipient email is missing.");
+        return res.status(400).json({ error: "Customer ka email missing hai order mein." });
       }
 
       const { data, error } = await dynamicResend.emails.send(emailPayload);
       
       if (error) {
-        console.error("Resend API Error Details:", JSON.stringify(error, null, 2));
+        console.error("Resend API Error:", JSON.stringify(error, null, 2));
         let errorMessage = error.message || "Resend failed to send email";
         
-        if (errorMessage.includes("domain is not verified") || errorMessage.includes("Sender not authorized")) {
-          errorMessage = `Bhai, Resend keh raha hai ki "${emailPayload.from}" authorized nahi hai. 
-          1. Check karein ki aapne Resend mein domain verify kiya hai.
-          2. AI Studio Secrets mein "RESEND_FROM_EMAIL" add karein (e.g., info@yourdomain.com).`;
+        if (errorMessage.includes("domain is not verified") || errorMessage.includes("onboarding") || errorMessage.includes("Sender not authorized")) {
+          errorMessage = `Bhai, Resend error: "${errorMessage}".
+          Note: Agar aap test kar rahe hain toh "onboarding@resend.dev" hi use karein. Apne domain se send karne ke liye Resend mein domain verify karna padta hai.`;
         }
 
         return res.status(400).json({ 
@@ -385,23 +372,30 @@ async function startServer() {
       
       const notification = {
         contents: {
-          en: body,
+          en: body || "New update from the store!",
         },
         headings: {
-          en: title,
+          en: title || "Store Update",
         },
         url: url || '/',
-        included_segments: type === 'all' ? ['All'] : (type === 'active' ? ['Active Users'] : ['Subscribed Users']),
+        included_segments: type === 'all' ? ['Subscribed Users'] : (type === 'active' ? ['Active Users'] : ['Subscribed Users']),
       };
 
       const response = await sendOneSignalNotification(notification);
       console.log("OneSignal notification sent:", response.data);
       res.json({ success: true, id: response.data.id });
     } catch (error: any) {
-      console.error("OneSignal error:", error.response?.data || error.message);
+      const errorData = error.response?.data;
+      console.error("OneSignal Broadcast Error Detail:", JSON.stringify(errorData || error.message, null, 2));
+      
+      let userFriendlyError = "Broadcast notification fail ho gaya.";
+      if (errorData?.errors) {
+        userFriendlyError = `OneSignal Error: ${errorData.errors.join(', ')}`;
+      }
+
       res.status(500).json({ 
-        error: error.message,
-        details: "Bhai, OneSignal App ID aur API Key check karein settings mein."
+        error: userFriendlyError,
+        details: errorData || error.message
       });
     }
   });
@@ -413,24 +407,36 @@ async function startServer() {
     try {
       console.log(`OneSignal: Sending notification to user ${userId}...`);
       
+      if (!userId) {
+        return res.status(400).json({ error: "OneSignal error: userId is required for targeted push." });
+      }
+
       const notification = {
         contents: {
-          en: body,
+          en: body || "Your order status has been updated.",
         },
         headings: {
-          en: title,
+          en: title || "Order Update",
         },
         url: url || '/',
-        filters: [
-          { field: "tag", key: "userId", relation: "=", value: userId }
-        ],
+        include_external_user_ids: [String(userId)],
       };
 
       const response = await sendOneSignalNotification(notification);
       res.json({ success: true, id: response.data.id });
     } catch (error: any) {
-      console.error("OneSignal user notification error:", error.response?.data || error.message);
-      res.status(500).json({ error: error.message });
+      const errorData = error.response?.data;
+      console.error("OneSignal User Push Error Detail:", JSON.stringify(errorData || error.message, null, 2));
+      
+      let userFriendlyError = "Push notification fail ho gaya.";
+      if (errorData?.errors) {
+        userFriendlyError = `OneSignal Error: ${errorData.errors.join(', ')}`;
+      }
+
+      res.status(500).json({ 
+        error: userFriendlyError,
+        details: errorData || error.message
+      });
     }
   });
 
@@ -443,10 +449,10 @@ async function startServer() {
       
       const notification = {
         contents: {
-          en: body,
+          en: body || "New order received!",
         },
         headings: {
-          en: title,
+          en: title || "New Order",
         },
         url: url || '/',
         filters: [
@@ -457,8 +463,18 @@ async function startServer() {
       const response = await sendOneSignalNotification(notification);
       res.json({ success: true, id: response.data.id });
     } catch (error: any) {
-      console.error("OneSignal admin notification error:", error.response?.data || error.message);
-      res.status(500).json({ error: error.message });
+      const errorData = error.response?.data;
+      console.error("OneSignal Admin Push Error Detail:", JSON.stringify(errorData || error.message, null, 2));
+      
+      let userFriendlyError = "Admin notification fail ho gaya.";
+      if (errorData?.errors) {
+        userFriendlyError = `OneSignal Error: ${errorData.errors.join(', ')}`;
+      }
+
+      res.status(500).json({ 
+        error: userFriendlyError,
+        details: errorData || error.message
+      });
     }
   });
 

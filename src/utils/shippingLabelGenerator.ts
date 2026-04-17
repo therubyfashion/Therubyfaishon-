@@ -3,82 +3,86 @@ import html2canvas from 'html2canvas';
 
 export const generateShippingLabel = async (order: any, settings?: any) => {
   const labelElement = document.createElement('div');
-  labelElement.style.width = '400px';
-  labelElement.style.padding = '20px';
+  labelElement.style.width = '380px';
+  labelElement.style.padding = '24px';
   labelElement.style.background = 'white';
-  labelElement.style.color = 'black';
-  labelElement.style.fontFamily = 'Arial, sans-serif';
-  labelElement.style.border = '1px solid #000';
-  labelElement.style.borderRadius = '12px';
+  labelElement.style.color = '#1A2C54';
+  labelElement.style.fontFamily = 'Inter, ui-sans-serif, system-ui, sans-serif';
+  labelElement.style.border = '1px solid #E5E7EB';
+  labelElement.style.borderRadius = '16px';
   labelElement.style.position = 'absolute';
   labelElement.style.left = '-9999px';
   labelElement.style.boxSizing = 'border-box';
+  labelElement.style.overflow = 'hidden';
   
   const isCOD = order.paymentMethod === 'Cash on Delivery' || order.paymentMethod === 'COD';
+  const trackingNumber = order.trackingNumber || '';
   
   labelElement.innerHTML = `
-    <div style="border: 2px solid #000; padding: 15px; border-radius: 10px; box-sizing: border-box;">
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 15px; box-sizing: border-box;">
-        <div style="display: flex; align-items: center; gap: 15px;">
-          <div style="width: 50px; height: 50px; border: 3px solid #000; display: flex; items-center; justify-content: center; font-size: 32px; font-weight: 900;">F</div>
-          <div>
-            <div style="font-weight: 900; font-size: 18px;">Swift Couriers</div>
-            <div style="font-size: 12px; color: #666;">Shipping for E-commerce</div>
-            <div style="font-size: 14px; font-weight: bold; margin-top: 2px;">${order.orderId?.substring(0, 8) || '82937456'}</div>
-            <div style="font-size: 12px; font-weight: bold;">PIN ${order.address?.pincode || '110005'}</div>
-          </div>
+    <div style="position: relative; padding: 24px; box-sizing: border-box; background: white; height: 100%;">
+      <!-- FROM Section -->
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+        <div style="flex: 1;">
+          <p style="font-size: 10px; color: #6B7280; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 6px 0;">FROM</p>
+          <p style="font-size: 16px; font-weight: 800; color: #1A2C54; margin: 0;">${settings?.storeName || 'THE RUBY'}</p>
+          <p style="font-size: 11px; color: #4B5563; margin: 4px 0 0 0; line-height: 1.4;">
+            ${settings?.footerContact?.address || 'Mumbai, MH 400001'}
+          </p>
         </div>
-        <div style="text-align: right;">
-          <div style="border: 2px solid #000; padding: 4px 8px; font-weight: 900; font-size: 12px; margin-bottom: 10px;">
-            ${isCOD ? 'CASH ON DELIVERY' : 'PREPAID'}
-          </div>
-          <div style="width: 70px; height: 70px; border: 1px solid #000; padding: 2px;">
-            <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${order.id}" style="width: 100%; height: 100%;" />
-          </div>
+        <div style="width: 50px; height: 50px; background-color: #FFF7ED; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+           <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#EA580C" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
         </div>
       </div>
 
-      <div style="margin-bottom: 20px; box-sizing: border-box;">
-        <div style="font-size: 24px; font-weight: 900; margin-bottom: 15px; border-bottom: 2px solid #000; padding-bottom: 5px; box-sizing: border-box;">Order ${order.orderId?.startsWith('#') ? order.orderId : `#${order.orderId || '1001'}`}</div>
-        
-        <div style="margin-bottom: 15px; box-sizing: border-box;">
-          <div style="font-weight: 900; font-size: 16px; margin-bottom: 5px; box-sizing: border-box;">Ship To:</div>
-          <div style="font-weight: 900; font-size: 18px; box-sizing: border-box;">${order.address?.name || order.customerName}</div>
-          <div style="font-size: 14px; line-height: 1.4; box-sizing: border-box;">
-            ${order.address?.address}<br/>
-            ${order.address?.city}, ${order.address?.state} ${order.address?.pincode}<br/>
-            India<br/>
-            <span style="font-weight: bold; font-size: 16px; margin-top: 5px; display: block; box-sizing: border-box;">+91 ${order.address?.number || order.phone}</span>
+      <!-- Divider -->
+      <div style="border-top: 1.5px dashed #D1D5DB; margin-bottom: 24px;"></div>
+
+      <!-- TO Section -->
+      <div style="margin-bottom: 32px;">
+        <p style="font-size: 10px; color: #6B7280; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 8px 0;">TO (DELIVERY TO)</p>
+        <p style="font-size: 20px; font-weight: 900; color: #1A2C54; text-transform: uppercase; margin: 0 0 8px 0;">${order.address?.name || order.customerName || 'CUSTOMER'}</p>
+        <div style="font-size: 13px; color: #4B5563; line-height: 1.6; font-weight: 500;">
+          ${order.address?.address || order.shippingAddress?.line1}<br/>
+          ${order.address?.landmark ? order.address?.landmark + '<br/>' : ''}
+          ${order.address?.city || order.shippingAddress?.city}, ${order.address?.state || order.shippingAddress?.state} – ${order.address?.pincode || '400058'}
+        </div>
+        <p style="font-size: 14px; font-weight: 800; color: #1A2C54; margin: 12px 0 0 0; display: flex; align-items: center;">
+          <span style="font-size: 10px; color: #6B7280; margin-right: 6px;">TEL:</span>
+          ${order.address?.phone || order.address?.number || '+91 98765 43210'}
+        </p>
+      </div>
+
+      <!-- Barcode / Tracking Section -->
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 32px;">
+        ${trackingNumber ? `
+          <div style="background: white; padding: 10px; border: 1px solid #F3F4F6; border-radius: 8px; margin-bottom: 12px; width: 100%; display: flex; flex-direction: column; align-items: center;">
+            <!-- Stylized Barcode Stripes -->
+            <div style="width: 280px; height: 75px; background: repeating-linear-gradient(90deg, #1A2C54, #1A2C54 3px, transparent 3px, transparent 5px, #1A2C54 5px, #1A2C54 6px, transparent 6px, transparent 8px); box-sizing: border-box;"></div>
+            <p style="font-size: 12px; font-family: 'Courier New', Courier, monospace; font-weight: bold; color: #1A2C54; letter-spacing: 0.5em; text-transform: uppercase; margin: 12px 0 0 0;">${trackingNumber}</p>
           </div>
+        ` : `
+          <div style="padding: 30px; text-align: center; font-size: 13px; color: #9CA3AF; background-color: #F9FAFB; border: 2px dashed #E5E7EB; border-radius: 16px; width: 100%;">
+            <p style="margin: 0; font-weight: 600;">TRACKING DETAILS PENDING</p>
+            <p style="margin: 4px 0 0 0; font-size: 11px;">Assign carrier & AWB in dashboard</p>
+          </div>
+        `}
+      </div>
+
+      <!-- Footer Info -->
+      <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto; border-top: 1px solid #F3F4F6; padding-top: 20px;">
+        <div>
+           <p style="font-size: 11px; color: #6B7280; font-weight: 700; margin: 0;">Order: ${order.orderId || order.id || 'NEW'}</p>
+           <p style="font-size: 11px; color: #6B7280; font-weight: 700; margin: 4px 0 0 0;">Date: ${new Date().toLocaleDateString('en-IN')}</p>
+        </div>
+        <div style="padding: 6px 14px; background-color: ${isCOD ? '#FEF2F2' : '#F0FDF4'}; border-radius: 8px; border: 1px solid ${isCOD ? '#FEE2E2' : '#DCFCE7'}; text-align: right;">
+           <p style="font-size: 10px; color: ${isCOD ? '#EF4444' : '#16A34A'}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 2px 0;">Payment</p>
+           <p style="font-size: 14px; font-weight: 900; color: ${isCOD ? '#EF4444' : '#16A34A'}; margin: 0;">${isCOD ? 'COD: ₹' + order.total?.toLocaleString() : 'PREPAID'}</p>
         </div>
       </div>
 
-      <div style="border-top: 2px solid #000; border-bottom: 2px solid #000; padding: 15px 0; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; box-sizing: border-box;">
-        <div style="box-sizing: border-box;">
-          <div style="font-weight: bold; font-size: 16px; box-sizing: border-box;">Order ${order.orderId?.startsWith('#') ? order.orderId : `#${order.orderId || '1001'}`}</div>
-        </div>
-        <div style="text-align: right; box-sizing: border-box;">
-          <div style="font-weight: 900; font-size: 20px; box-sizing: border-box;">${isCOD ? 'COD' : 'PAID'} ₹${order.total?.toLocaleString()}</div>
-          <div style="font-size: 12px; color: #666; box-sizing: border-box;">${isCOD ? `Collect ₹${order.total?.toLocaleString()} on delivery` : 'No collection required'}</div>
-        </div>
-      </div>
-
-      <div style="margin-bottom: 20px; font-size: 12px; line-height: 1.4; box-sizing: border-box;">
-        <div style="font-weight: bold; margin-bottom: 4px; box-sizing: border-box;">From:</div>
-        <div style="font-weight: bold; box-sizing: border-box;">${settings?.storeName || 'The Ruby'}</div>
-        <div style="box-sizing: border-box;">${settings?.footerContact?.address || '456 Business Lane, Mumbai, Maharashtra 400001'}</div>
-        <div style="box-sizing: border-box;">+91 ${settings?.footerSocials?.whatsapp || '9876543210'}</div>
-      </div>
-
-      <div style="border-top: 1px solid #eee; padding-top: 15px; text-align: center; box-sizing: border-box;">
-        <div style="font-weight: bold; font-size: 12px; margin-bottom: 5px; box-sizing: border-box;">${settings?.storeName || 'The Ruby'}</div>
-        <div style="font-size: 10px; color: #666; box-sizing: border-box;">${settings?.footerContact?.address || '456 Business Lane, Mumbai, Maharashtra 400001'}</div>
-        <div style="font-size: 10px; color: #666; box-sizing: border-box;">+91 ${settings?.footerSocials?.whatsapp || '9876543210'}</div>
-        
-        <div style="margin-top: 15px; display: flex; flex-direction: column; align-items: center; box-sizing: border-box;">
-          <div style="width: 100%; height: 40px; background: repeating-linear-gradient(90deg, #000, #000 2px, transparent 2px, transparent 4px); box-sizing: border-box;"></div>
-          <div style="font-size: 12px; font-weight: bold; margin-top: 5px; box-sizing: border-box;">*${order.orderId || '82937456'} ${order.address?.pincode || '10005'} 0309 3140*</div>
-        </div>
+      <!-- Watermark -->
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-15deg); font-size: 48px; font-weight: 900; color: rgba(26, 44, 84, 0.04); white-space: nowrap; pointer-events: none; z-index: 0; text-transform: uppercase;">
+        ${settings?.storeName || 'THE RUBY'}
       </div>
     </div>
   `;

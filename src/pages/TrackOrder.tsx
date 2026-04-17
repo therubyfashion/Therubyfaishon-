@@ -97,10 +97,18 @@ export default function TrackOrder() {
   };
 
   React.useEffect(() => {
-    if (id && emailInput) {
+    const params = new URLSearchParams(window.location.search);
+    const emailParam = params.get('email');
+    
+    if (emailParam) {
+      setEmailInput(emailParam);
+      if (id) {
+        fetchOrder(id, emailParam);
+      }
+    } else if (id && emailInput) {
       fetchOrder(id, emailInput);
     }
-  }, []);
+  }, [id]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
