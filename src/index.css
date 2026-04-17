@@ -1,17 +1,27 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Inter:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
   --color-ruby: #9b111e;
   --color-ruby-dark: #7a0d18;
   --color-ruby-light: #c41e3a;
+
+  --color-shop-green: #008060;
+  --color-shop-green-light: #e8f5f0;
+  --color-shop-green-dark: #005c44;
+  --color-shop-bg: #f1f1f1;
+  --color-shop-border: #e1e3e5;
+  --color-shop-text: #202223;
+  --color-shop-text-muted: #6d7175;
   
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-syne: "Syne", sans-serif;
   --font-serif: "Playfair Display", serif;
 }
 
 @layer base {
   body {
-    @apply bg-white text-black font-sans;
+    @apply bg-gray-50 text-slate-900 font-sans antialiased;
   }
   
   h1, h2, h3, h4, h5, h6 {
@@ -27,26 +37,15 @@
   @apply bg-white/80 backdrop-blur-md border border-white/20;
 }
 
-.markdown-body {
-  @apply text-sm leading-relaxed text-gray-500 font-light;
+.card-shadow {
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
 }
 
-.markdown-body p {
-  @apply mb-4;
+.timeline-line::before {
+  content: "";
+  @apply absolute left-[11px] top-6 bottom-0 w-px bg-gray-200;
 }
 
-.markdown-body ul, .markdown-body ol {
-  @apply mb-4 ml-6 list-disc;
-}
-
-.markdown-body li {
-  @apply mb-1;
-}
-
-.markdown-body strong {
-  @apply font-bold text-[#1A2C54];
-}
-
-.markdown-body h1, .markdown-body h2, .markdown-body h3 {
-  @apply font-bold text-[#1A2C54] mt-6 mb-2;
+.timeline-item:last-child .timeline-line::before {
+  display: none;
 }

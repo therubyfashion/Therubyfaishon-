@@ -11,19 +11,31 @@ export default function Shop() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeCategory, setActiveCategory] = useState<Category | 'All'>(
-    (searchParams.get('category') as Category) || 'All'
+  const [categories, setCategories] = useState<string[]>(['All']);
+  const [activeCategory, setActiveCategory] = useState<string>(
+    searchParams.get('category') || 'All'
   );
   const [sortBy, setSortBy] = useState<'newest' | 'price-low' | 'price-high'>('newest');
   const [showSortMenu, setShowSortMenu] = useState(false);
-
-  const categories: (Category | 'All')[] = ['All', 'Women', 'Men', 'New Arrivals'];
 
   const sortOptions = [
     { id: 'newest', label: 'Newest' },
     { id: 'price-low', label: 'Price: Low to High' },
     { id: 'price-high', label: 'Price: High to Low' },
   ];
+
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'categories'));
+        const catNames = snapshot.docs.map(doc => doc.data().name);
+        setCategories(['All', ...catNames]);
+      } catch (error) {
+        console.error("Error fetching categories:", error);
+      }
+    };
+    fetchCategories();
+  }, []);
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -45,7 +57,7 @@ export default function Shop() {
           ...(doc.data() as Omit<Product, 'id'>)
         })) as Product[];
         
-        // Client-side sorting for flexibility and to avoid index issues
+        // Client-side sorting
         fetchedProducts.sort((a, b) => {
           if (sortBy === 'newest') {
             return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
@@ -70,7 +82,7 @@ export default function Shop() {
     fetchProducts();
   }, [activeCategory, sortBy]);
 
-  const handleCategoryChange = (cat: Category | 'All') => {
+  const handleCategoryChange = (cat: string) => {
     setActiveCategory(cat);
     if (cat === 'All') {
       searchParams.delete('category');

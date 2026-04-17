@@ -25,6 +25,7 @@ const About = React.lazy(() => import('./pages/About'));
 const Contact = React.lazy(() => import('./pages/Contact'));
 const MyOrders = React.lazy(() => import('./pages/MyOrders'));
 const OrderSuccess = React.lazy(() => import('./pages/OrderSuccess'));
+const TrackOrder = React.lazy(() => import('./pages/TrackOrder'));
 const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
 const Search = React.lazy(() => import('./pages/Search'));
 const Profile = React.lazy(() => import('./pages/Profile'));
@@ -200,6 +201,8 @@ function AppContent() {
             <Route path="/contact" element={<Contact />} />
             <Route path="/my-orders" element={<MyOrders />} />
             <Route path="/order-success" element={<OrderSuccess />} />
+            <Route path="/track" element={<TrackOrder />} />
+            <Route path="/track/:id" element={<TrackOrder />} />
             <Route path="/search" element={<Search />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/addresses" element={<Addresses />} />

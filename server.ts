@@ -14,74 +14,104 @@ import * as OneSignal from 'onesignal-node';
 dotenv.config();
 
 // Initialize OneSignal
-let oneSignalClient: OneSignal.Client | null = null;
+let oneSignalClient: any = null;
+
+// Initialize Firebase Admin for server-side operations
+let db: any = null;
+try {
+  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+  let firestoreDatabaseId = '(default)';
+
+  if (fs.existsSync(configPath)) {
+    try {
+      const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || firestoreDatabaseId;
+    } catch (e) {
+      console.warn("Could not parse firebase-applet-config.json:", e);
+    }
+  }
+    
+  // Initialize Admin SDK
+  // In AI Studio/Cloud Run, calling initializeApp() without arguments is the most reliable way 
+  // to use the environment's default service account and project ID.
+  const adminApp = !admin.apps.length ? admin.initializeApp() : admin.app();
+  const actualProjectId = adminApp.options.projectId || process.env.PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
+
+  console.log("Firebase Admin initialized. Project:", actualProjectId, "DB ID:", firestoreDatabaseId);
+
+  // Use getFirestore from firebase-admin/firestore with the app instance
+  try {
+    if (firestoreDatabaseId && firestoreDatabaseId !== '(default)') {
+      db = getFirestore(adminApp, firestoreDatabaseId);
+    } else {
+      db = getFirestore(adminApp);
+    }
+    // Verify connection immediately
+    db.collection('settings').limit(1).get()
+      .then(() => console.log("Successfully connected to Firestore collection 'settings'"))
+      .catch((e: any) => console.warn("Initial Firestore test failed (this is normal if collection is empty or if still provisioning):", e.message));
+  } catch (dbErr) {
+    console.error("Failed to initialize specific Firestore database, falling back to default:", dbErr);
+    db = getFirestore(adminApp);
+  }
+} catch (err) {
+  console.error("Failed to initialize Firebase Admin on server:", err);
+}
 
 // Helper to send OneSignal notifications via axios
 async function sendOneSignalNotification(notification: any) {
-  const appId = (process.env.ONESIGNAL_APP_ID || '').trim();
-  const restKey = (process.env.ONESIGNAL_REST_API_KEY || '').trim();
+  let appId = (process.env.ONESIGNAL_APP_ID || process.env.VITE_ONESIGNAL_APP_ID || '').trim();
+  let restKey = (process.env.ONESIGNAL_REST_API_KEY || '').trim();
 
-  if (!appId || !restKey || appId === 'dummy-id') {
-    // Try to fetch from Firestore if not in memory
+  const isPlaceholder = (val: string) => !val || val === 'dummy-id' || val === 'YOUR_ONESIGNAL_APP_ID' || val === 'placeholder';
+
+  // If not in env or seems to be a placeholder, try to fetch from Firestore
+  if (isPlaceholder(appId) || isPlaceholder(restKey)) {
     if (db) {
       try {
+        console.log("OneSignal configuration missing in env, attempting to fetch from Firestore 'settings'...");
         const settingsSnap = await db.collection('settings').limit(1).get();
         if (!settingsSnap.empty) {
           const settings = settingsSnap.docs[0].data();
           if (settings.oneSignalAppId && settings.oneSignalRestApiKey) {
-            const id = settings.oneSignalAppId.trim();
-            const key = settings.oneSignalRestApiKey.trim();
-            process.env.ONESIGNAL_APP_ID = id;
-            process.env.ONESIGNAL_REST_API_KEY = key;
-            return await axios.post('https://onesignal.com/api/v1/notifications', 
-              { ...notification, app_id: id },
-              { headers: { 'Authorization': `Basic ${key}`, 'Content-Type': 'application/json' } }
-            );
+            appId = settings.oneSignalAppId.trim();
+            restKey = settings.oneSignalRestApiKey.trim();
+            console.log("OneSignal config successfully loaded from Firestore.");
+          }
+        } else {
+          console.warn("OneSignal config fetch: 'settings' collection found but is empty.");
+        }
+      } catch (e: any) {
+        console.error("Failed to fetch OneSignal settings from DB:", e.message);
+        if (e.message.includes('permission') || e.message.includes('7')) {
+          console.warn("Detected permission issue. This often happens if the project ID in firebase-applet-config.json is stale or if the service account lacks access to the named database.");
+          // Attempt a one-time fallback to default database if we were using a named one
+          try {
+             console.log("Attempting fallback to default Firestore database...");
+             const defaultDb = getFirestore();
+             const fallbackSnap = await defaultDb.collection('settings').limit(1).get();
+             if (!fallbackSnap.empty) {
+                const settings = fallbackSnap.docs[0].data();
+                appId = settings.oneSignalAppId?.trim() || appId;
+                restKey = settings.oneSignalRestApiKey?.trim() || restKey;
+                console.log("OneSignal config loaded from default database fallback.");
+             }
+          } catch (fallbackErr: any) {
+             console.error("Fallback attempt failed:", fallbackErr.message);
           }
         }
-      } catch (e) {
-        console.error("Failed to fetch OneSignal settings from DB:", e);
       }
     }
-    throw new Error("OneSignal is not configured. Please check Admin Settings.");
+  }
+
+  if (isPlaceholder(appId) || isPlaceholder(restKey)) {
+    throw new Error("OneSignal is not configured. Please add ONESIGNAL_APP_ID and ONESIGNAL_REST_API_KEY to 'Secrets' in AI Studio Settings, or configure them in the Admin Panel.");
   }
 
   return await axios.post('https://onesignal.com/api/v1/notifications', 
     { ...notification, app_id: appId },
     { headers: { 'Authorization': `Basic ${restKey}`, 'Content-Type': 'application/json' } }
   );
-}
-
-// Initialize Firebase Admin for server-side operations
-let db: any = null;
-try {
-  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-  if (fs.existsSync(configPath)) {
-    const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    
-    // Initialize Admin SDK
-    const adminApp = !admin.apps.length 
-      ? admin.initializeApp({ 
-          projectId: firebaseConfig.projectId 
-        })
-      : admin.app();
-
-    console.log("Firebase Admin initialized with Project ID:", firebaseConfig.projectId);
-
-    // Use getFirestore from firebase-admin/firestore with the app instance
-    // If named database is provided, use it, otherwise use default
-    if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)') {
-      db = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
-    } else {
-      db = getFirestore(adminApp);
-    }
-  } else {
-    // Fallback for environments without config file
-    if (!admin.apps.length) admin.initializeApp();
-    db = getFirestore();
-  }
-} catch (err) {
-  console.error("Failed to initialize Firebase Admin on server:", err);
 }
 
 // Cache for store settings to avoid frequent Firestore calls

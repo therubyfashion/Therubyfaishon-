@@ -99,7 +99,7 @@ export default function Footer() {
               <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-ruby">Support</h4>
               <ul className="space-y-4">
                 {[
-                  { label: 'Track Order', path: '/my-orders' },
+                  { label: 'Track Order', path: '/track' },
                   { label: 'Returns', path: '/returns' },
                   { label: 'FAQ', path: '/faq' },
                   { label: 'Contact Us', path: '/contact' }

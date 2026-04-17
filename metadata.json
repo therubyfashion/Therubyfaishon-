@@ -1,5 +1,5 @@
 {
   "name": "The Ruby",
-  "description": "A premium e-commerce clothing brand website with a modern, elegant design, integrated admin panel, AI-powered product descriptions, and advanced inventory management (SKU/Barcode).",
+  "description": "Professional order fulfillment dashboard for The Ruby, featuring item tracking, shipment management, and delivery timelines.",
   "requestFramePermissions": []
 }

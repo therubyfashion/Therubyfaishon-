@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy, limit, onSnapshot, serverTimestamp, setDoc, arrayUnion, arrayRemove, runTransaction } from 'firebase/firestore';
 import { db, auth, messaging } from '../firebase';
 import { getToken } from 'firebase/messaging';
@@ -9,9 +9,9 @@ import {
   Ticket, Users, Settings, LogOut, Search, Bell, Menu, X, 
   TrendingUp, ShoppingCart, UserPlus, AlertTriangle, ChevronRight, ChevronLeft,
   MoreVertical, Edit2, Trash2, Plus, Image as ImageIcon, Database, BarChart3,
-  Home, ArrowLeft, Camera, ChevronDown, ChevronUp, Bold, Heading, Globe, Truck,
+  Home, ArrowLeft, Camera, ChevronDown, ChevronUp, Bold, Heading, Globe, Truck, Printer,
   TrendingDown, Shield, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info, MapPin, History,
-  Activity, Send, Rocket, MessageSquare, User
+  Activity, Send, Rocket, MessageSquare, User, CreditCard, Download, Eye, Check, ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -19,7 +19,7 @@ import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell
 } from 'recharts';
 import { useNavigate } from 'react-router-dom';
-import { jsPDF } from 'jspdf';
+import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -28,6 +28,7 @@ import { cn } from '../lib/utils';
 import { generateInvoice } from '../utils/invoiceGenerator';
 import { generateShippingLabel } from '../utils/shippingLabelGenerator';
 import ReactGlobe from 'react-globe.gl';
+import Barcode from 'react-barcode';
 
 enum OperationType {
   CREATE = 'create',
@@ -1273,9 +1274,9 @@ export default function AdminDashboard() {
         if (data.success) {
           setFirebaseStatus('Connected ✅');
         } else {
-          setFirebaseStatus('Error ❌');
+          setFirebaseStatus(`Error: ${data.error} ❌`);
         }
-      } catch (error) {
+      } catch (error: any) {
         setFirebaseStatus('Offline ❌');
       }
     };
@@ -1450,6 +1451,7 @@ export default function AdminDashboard() {
   };
 
   const [orderSearchTerm, setOrderSearchTerm] = useState('');
+  const [orderTab, setOrderTab] = useState('all');
   const [orderStatusFilter, setOrderStatusFilter] = useState('All Status');
   const [orderTypeFilter, setOrderTypeFilter] = useState('All Orders');
   const [orderStartDate, setOrderStartDate] = useState('');
@@ -1460,6 +1462,243 @@ export default function AdminDashboard() {
   const [activeOrderMenu, setActiveOrderMenu] = useState<string | null>(null);
   const [viewingCustomer, setViewingCustomer] = useState<any | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
+  const [trackingNumber, setTrackingNumber] = useState('');
+  const [carrier, setCarrier] = useState('');
+  const [isTrackingEnabled, setIsTrackingEnabled] = useState(false);
+  const [notifyCustomer, setNotifyCustomer] = useState(true);
+  const [isFulfilling, setIsFulfilling] = useState(false);
+  const [fulfillmentItems, setFulfillmentItems] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (viewingCustomer && viewingCustomer.items) {
+      setFulfillmentItems(viewingCustomer.items.map((item: any) => ({ ...item, qtyToFulfill: item.quantity })));
+    }
+  }, [viewingCustomer]);
+
+  const handleUpdateFulfillmentQty = (idx: number, delta: number) => {
+    setFulfillmentItems(prev => prev.map((item, i) => {
+      if (i === idx) {
+        const newQty = Math.max(0, Math.min(item.quantity, item.qtyToFulfill + delta));
+        return { ...item, qtyToFulfill: newQty };
+      }
+      return item;
+    }));
+  };
+  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
+
+  useEffect(() => {
+    if (viewingCustomer) {
+      setTrackingNumber(viewingCustomer.trackingNumber || '');
+      setCarrier(viewingCustomer.carrier || '');
+      setIsTrackingEnabled(!!viewingCustomer.trackingNumber);
+      setShowSuccessOverlay(false);
+    }
+  }, [viewingCustomer]);
+
+  const getTrackingUrl = (carrierName: string, trackingNum: string) => {
+    if (!carrierName || !trackingNum) return '';
+    const c = carrierName.toLowerCase().replace(/\s/g, '');
+    const urls: Record<string, string> = {
+      'bluedart': `https://www.bluedart.com/tracking?trackid=${trackingNum}`,
+      'delhivery': `https://www.delhivery.com/track/package/${trackingNum}`,
+      'dtdc': `https://www.dtdc.in/tracking/tracking_results.asp?SearchType=T&TNo=${trackingNum}`,
+      'ecom': `https://ecomexpress.in/tracking/?tracking_id=${trackingNum}`,
+      'fedex': `https://www.fedex.com/apps/fedextrack/?tracknumbers=${trackingNum}`,
+      'xpressbees': `https://www.xpressbees.com/track?tracking_id=${trackingNum}`,
+      'shadowfax': `https://www.shadowfax.in/track?orderId=${trackingNum}`,
+    };
+    return urls[c] || `https://www.google.com/search?q=${carrierName}+tracking+${trackingNum}`;
+  };
+
+  const formatTimestamp = (ts: any) => {
+    if (!ts) return 'Just now';
+    if (ts.seconds) return new Date(ts.seconds * 1000).toLocaleString();
+    if (ts instanceof Date) return ts.toLocaleString();
+    if (typeof ts === 'number') return new Date(ts).toLocaleString();
+    if (typeof ts === 'string') return new Date(ts).toLocaleString();
+    return 'Just now';
+  };
+
+  const handleMarkAsDelivered = async (order: any) => {
+    if (!order) return;
+    try {
+      const now = new Date();
+      const updateData = {
+        status: 'Delivered',
+        deliveredAt: serverTimestamp(),
+      };
+
+      await updateDoc(doc(db, 'orders', order.id), updateData);
+      
+      // Notify customer
+      try {
+        if (order.userId && order.userId !== 'guest') {
+          fetch('/api/send-user-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: order.userId,
+              title: 'Order Delivered! 🎉',
+              body: `Your order ${order.orderId} has been successfully delivered. Enjoy!`,
+              url: '/my-orders'
+            })
+          });
+        }
+
+        const targetEmail = order.address?.email || order.email;
+        if (targetEmail) {
+          fetch('/api/send-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              to: targetEmail,
+              subject: `Order Delivered: ${order.orderId} ✨`,
+              html: `
+                <div style="font-family: sans-serif; padding: 20px; color: #1A2C54; max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 20px;">
+                  <div style="text-align: center; margin-bottom: 20px;">
+                    <h2 style="color: #e11d48; margin: 0;">THE RUBY</h2>
+                  </div>
+                  <h1 style="color: #008060; text-align: center;">Package Delivered!</h1>
+                  <p>Hi ${order.address?.name || order.customerName || 'Customer'},</p>
+                  <p>We are happy to inform you that your order <strong>${order.orderId}</strong> has been successfully delivered! 🎉</p>
+                  <p>We hope you love your new Ruby pieces. If you need any assistance or have questions, our support team is always here to help.</p>
+                  
+                  <div style="background: #f6f6f7; padding: 20px; border-radius: 12px; margin: 20px 0; border: 1px solid #e1e3e5; text-align: center;">
+                    <p style="margin: 0 0 10px 0; font-size: 14px; font-weight: bold;">How was your experience?</p>
+                    <a href="${window.location.origin}/contact" style="display: inline-block; background: #008060; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">Give Feedback</a>
+                  </div>
+                  <p style="text-align: center; font-size: 13px; margin-top: 20px;">Thanks for shopping with <strong>The Ruby</strong>!</p>
+                </div>
+              `
+            })
+          });
+        }
+      } catch (e) {
+        console.error("Failed to send delivery notifications:", e);
+      }
+
+      toast.success("Order marked as Delivered!");
+      setViewingCustomer({ 
+        ...order, 
+        ...updateData, 
+        deliveredAt: { seconds: Math.floor(now.getTime() / 1000) } 
+      });
+    } catch (error) {
+      console.error("Error marking as delivered:", error);
+      toast.error("Failed to update status");
+    }
+  };
+
+  const handleFulfillOrder = async (order: any) => {
+    if (!order) return;
+    setIsFulfilling(true);
+    try {
+      const now = new Date();
+      const updateData: any = {
+        status: 'Shipped',
+        fulfillmentStatus: 'Fulfilled',
+        fulfilledAt: serverTimestamp(),
+      };
+
+      if (isTrackingEnabled && trackingNumber) {
+        updateData.trackingNumber = trackingNumber;
+        updateData.carrier = carrier;
+        updateData.trackingUrl = getTrackingUrl(carrier, trackingNumber);
+      }
+
+      await updateDoc(doc(db, 'orders', order.id), updateData);
+      
+      // Notify customer if enabled
+      if (notifyCustomer) {
+        try {
+          // Push (only for logged in users)
+          if (order.userId && order.userId !== 'guest') {
+            fetch('/api/send-user-push', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userId: order.userId,
+                title: 'Order Shipped! 📦',
+                body: `Good news! Your order ${order.orderId} has been shipped.`,
+                url: '/my-orders'
+              })
+            });
+          }
+
+          // Email (to anyone who provided an email)
+          const targetEmail = order.address?.email || order.email;
+          if (targetEmail) {
+            const itemsHtml = (order.items || []).map((item: any) => `
+              <div style="display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid #f0f0f0;">
+                <img src="${item.image}" width="50" height="50" style="border-radius: 8px; object-cover: cover;" />
+                <div style="flex: 1;">
+                  <p style="margin: 0; font-size: 14px; font-weight: bold;">${item.name}</p>
+                  <p style="margin: 0; font-size: 12px; color: #666;">Qty: ${item.quantity} · Size: ${item.selectedSize || 'N/A'}</p>
+                </div>
+                <div style="text-align: right;">
+                  <p style="margin: 0; font-size: 14px; font-weight: bold;">₹${item.price.toLocaleString()}</p>
+                </div>
+              </div>
+            `).join('');
+
+            fetch('/api/send-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                to: targetEmail,
+                subject: `Order Shipped: ${order.orderId} is on its way! 📦`,
+                html: `
+                  <div style="font-family: sans-serif; padding: 20px; color: #1A2C54; max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 20px;">
+                    <div style="text-align: center; margin-bottom: 20px;">
+                      <h2 style="color: #e11d48; margin: 0;">THE RUBY</h2>
+                    </div>
+                    <h1 style="color: #008060; text-align: center;">Your Order is Shipped!</h1>
+                    <p>Hi ${order.address?.name || order.customerName || 'Customer'},</p>
+                    <p>Good news! Your order <strong>${order.orderId}</strong> has been shipped and is on its way to you.</p>
+                    
+                    <div style="margin: 20px 0; border-top: 1px solid #eee;">
+                      ${itemsHtml}
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; padding: 10px 0; font-weight: bold;">
+                      <span>Total Amount Paid</span>
+                      <span style="color: #e11d48;">₹${(order.total || 0).toLocaleString()}</span>
+                    </div>
+
+                    <div style="background: #f6f6f7; padding: 20px; border-radius: 12px; margin: 20px 0; border: 1px solid #e1e3e5; text-align: center;">
+                      <p style="margin: 0 0 10px 0; font-size: 12px; color: #6d7175; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">Live Tracking</p>
+                      <p style="margin: 0 0 15px 0; font-size: 14px; color: #1A2C54;">You can track your order status in real-time using the button below:</p>
+                      <a href="${window.location.origin}/track/${order.orderId}" style="display: inline-block; background: #e11d48; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px;">Track My Order</a>
+                    </div>
+                    ${updateData.trackingNumber ? `
+                      <p style="font-size: 13px; color: #6d7175; text-align: center;">Carrier: <strong>${updateData.carrier}</strong> | AWB: <strong>${updateData.trackingNumber}</strong></p>
+                    ` : ''}
+                    <p style="font-size: 13px; margin-top: 20px; text-align: center;">Thank you for shopping with <strong>The Ruby</strong>!</p>
+                  </div>
+                `
+              })
+            });
+          }
+        } catch (e) {
+          console.error("Failed to send shipment notifications:", e);
+        }
+      }
+
+      toast.success("Order fulfilled successfully! 📦");
+      // Update local state with a real timestamp for immediate UI feedback
+      setViewingCustomer({ 
+        ...order, 
+        ...updateData, 
+        fulfilledAt: { seconds: Math.floor(now.getTime() / 1000) } 
+      });
+      setShowSuccessOverlay(true);
+    } catch (error) {
+      console.error("Error fulfilling order:", error);
+      toast.error("Failed to fulfill order");
+    } finally {
+      setIsFulfilling(false);
+    }
+  };
 
   const [formData, setFormData] = useState({
     name: '',
@@ -1778,6 +2017,15 @@ export default function AdminDashboard() {
     const orderId = (order.orderId || order.id || '').toLowerCase();
     const matchesSearch = customerName.includes(orderSearchTerm.toLowerCase()) || 
                          orderId.includes(orderSearchTerm.toLowerCase());
+    
+    let matchesTab = true;
+    if (orderTab === 'unfulfilled') matchesTab = order.fulfillmentStatus !== 'Fulfilled';
+    else if (orderTab === 'paid_unful') matchesTab = (order.status === 'Shipped' || order.status === 'Delivered' || order.status === 'Paid' || order.status === 'Confirmed') && order.fulfillmentStatus !== 'Fulfilled';
+    else if (orderTab === 'open') matchesTab = order.status !== 'Delivered' && order.status !== 'Cancelled';
+    else if (orderTab === 'delivered') matchesTab = order.status === 'Delivered';
+    else if (orderTab === 'onhold') matchesTab = order.fulfillmentStatus === 'On Hold';
+    else if (orderTab === 'closed') matchesTab = order.status === 'Delivered' || order.status === 'Cancelled';
+
     const matchesStatus = orderStatusFilter === 'All Status' || order.status === orderStatusFilter;
     
     let matchesDate = true;
@@ -1795,8 +2043,67 @@ export default function AdminDashboard() {
       }
     }
     
-    return matchesSearch && matchesStatus && matchesDate;
+    return matchesSearch && matchesStatus && matchesDate && matchesTab;
   });
+
+  const paginatedOrders = useMemo(() => {
+    const start = (currentPage - 1) * entriesPerPage;
+    return filteredOrders.slice(start, start + entriesPerPage);
+  }, [filteredOrders, currentPage, entriesPerPage]);
+
+  const orderStats = useMemo(() => {
+    const rev = filteredOrders.reduce((s, o) => s + (o.total || 0), 0);
+    const today = new Date().toDateString();
+    const todayOrders = orders.filter(o => {
+      const d = o.createdAt?.seconds ? new Date(o.createdAt.seconds * 1000) : new Date(o.createdAt || Date.now());
+      return d.toDateString() === today;
+    });
+    const todaySales = todayOrders.reduce((s, o) => s + (o.total || 0), 0);
+    const unful = orders.filter(o => o.fulfillmentStatus !== 'Fulfilled').length;
+    const aov = orders.length > 0 ? Math.round(rev / orders.length) : 0;
+
+    return [
+      { label: 'Total Revenue', value: `₹${rev.toLocaleString('en-IN')}`, change: '↑ 18.4%', up: true },
+      { label: "Today's Sales", value: `₹${todaySales.toLocaleString('en-IN')}`, change: '↑ 12.1%', up: true },
+      { label: 'Orders List', value: filteredOrders.length, change: '+24 this week', up: true },
+      { label: 'Unfulfilled', value: unful, change: unful > 0 ? 'NEEDS ACTION' : 'STABLE', up: unful === 0 },
+      { label: 'Avg. Order', value: `₹${aov.toLocaleString('en-IN')}`, change: '↑ 5.2%', up: true },
+    ];
+  }, [orders, filteredOrders]);
+
+  const ORDER_TABS = [
+    { id: 'all', label: 'All' },
+    { id: 'unfulfilled', label: 'Unfulfilled' },
+    { id: 'paid_unful', label: 'Paid' },
+    { id: 'open', label: 'Open' },
+    { id: 'delivered', label: 'Delivered' },
+    { id: 'onhold', label: 'On hold' },
+    { id: 'closed', label: 'Closed' }
+  ];
+
+  const BADGE_CFG: Record<string, any> = {
+    Paid: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'PAID' },
+    Confirmed: { bg: 'bg-ruby/5', text: 'text-ruby', dot: 'bg-ruby', label: 'CONFIRMED' },
+    Shipped: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500', label: 'SHIPPED' },
+    Delivered: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'DELIVERED' },
+    Fulfilled: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'FULFILLED' },
+    Unfulfilled: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500', label: 'UNFULFILLED' },
+    Pending: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500', label: 'PENDING' },
+    Processing: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500', label: 'PROCESSING' },
+    Cancelled: { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-500', label: 'CANCELLED' },
+    'Refunded': { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-500', label: 'REFUNDED' },
+    'On Hold': { bg: 'bg-gray-100', text: 'text-gray-500', dot: 'bg-gray-400', label: 'ON HOLD' },
+  };
+
+  const StatusBadge = ({ status, label, className }: { status: string, label?: string, className?: string }) => {
+    const c = BADGE_CFG[status] || BADGE_CFG['On Hold'];
+    return (
+      <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-sm ring-1 ring-inset ${c.bg} ${c.text} ${c.bg.replace('bg-', 'ring-').replace('-50', '-200')} ${className || ''}`}>
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 animate-pulse ${c.dot}`} />
+        {label || c.label || status}
+      </span>
+    );
+  };
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -1989,10 +2296,10 @@ export default function AdminDashboard() {
       });
 
       const totalRevenue = orders.reduce((acc, o) => acc + (o.totalAmount || 0), 0);
-      const finalY = (doc as any).lastAutoTable.finalY + 10;
+      const finalY = (doc as any).lastAutoTable?.finalY || 150;
       doc.setFontSize(12);
-      doc.text(`Total Orders: ${orders.length}`, 14, finalY);
-      doc.text(`Total Revenue: Rs. ${totalRevenue.toFixed(2)}`, 14, finalY + 7);
+      doc.text(`Total Orders: ${orders.length}`, 14, finalY + 10);
+      doc.text(`Total Revenue: Rs. ${totalRevenue.toFixed(2)}`, 14, finalY + 17);
 
       doc.save(`Sales_Report_${new Date().toISOString().split('T')[0]}.pdf`);
       toast.success("Report generated!");
@@ -3281,557 +3588,924 @@ export default function AdminDashboard() {
 
           {activeTab === 'orders' && !viewingCustomer && (
             <div className="space-y-6">
-              {/* Orders Stats */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {[
-                  { label: 'Total Orders', value: orders.length.toLocaleString(), trend: '+12% Today', icon: ShoppingBag, color: 'text-ruby', bgColor: 'bg-white' },
-                  { label: 'Pending', value: orders.filter(o => o.status === 'Pending').length, trend: `+${orders.filter(o => o.status === 'Pending').length}`, icon: AlertTriangle, color: 'text-[#FACC15]', bgColor: 'bg-white' },
-                  { label: 'Delivered', value: orders.filter(o => o.status === 'Delivered').length.toLocaleString(), trend: '+20 Today', icon: TrendingUp, color: 'text-[#22C55E]', bgColor: 'bg-white' },
-                  { label: 'Cancelled', value: orders.filter(o => o.status === 'Cancelled').length, trend: "Restock Needed", icon: AlertTriangle, color: 'text-[#EF4444]', bgColor: 'bg-white' },
-                ].map((stat, i) => (
-                  <div key={i} className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 space-y-4">
-                    <div className="flex items-center space-x-4">
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-sm ${stat.label === 'Cancelled' ? 'bg-red-50 text-red-500' : stat.label === 'Pending' ? 'bg-yellow-50 text-yellow-500' : stat.label === 'Total Orders' ? 'bg-ruby/10 text-ruby' : 'bg-green-50 text-green-500'}`}>
-                        <stat.icon size={24} />
+              {/* Header with Title and Buttons */}
+              <div className="flex flex-wrap items-end justify-between gap-3 mb-5 px-1">
+                <div>
+                  <h1 className="text-3xl font-black text-gray-900 tracking-tighter font-syne uppercase">Orders</h1>
+                  <p className="text-[13px] text-gray-400 mt-1 font-medium">
+                    {filteredOrders.length === orders.length ? `Showing all ${orders.length} orders` : `Filtered ${filteredOrders.length} of ${orders.length} orders`}
+                  </p>
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <button 
+                    onClick={() => {
+                      const rows = [['Order', 'Customer', 'Email', 'Date', 'Total', 'Status', 'Fulfillment']];
+                      filteredOrders.forEach(o => rows.push([
+                        o.orderId || o.id, 
+                        o.address?.name || o.customerName || 'N/A', 
+                        o.address?.email || o.email || 'N/A', 
+                        new Date(o.createdAt?.seconds ? o.createdAt.seconds * 1000 : o.createdAt || Date.now()).toLocaleDateString(), 
+                        o.total || 0, 
+                        o.status || 'Pending', 
+                        o.fulfillmentStatus || 'Unfulfilled'
+                      ]));
+                      const a = document.createElement('a');
+                      a.href = URL.createObjectURL(new Blob([rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n')], { type: 'text/csv' }));
+                      a.download = `theruby-orders-${new Date().toISOString().split('T')[0]}.csv`; 
+                      a.click();
+                      toast.success(`Exported ${filteredOrders.length} orders successfully`);
+                    }} 
+                    className="flex items-center gap-2 h-10 px-4 rounded-xl border border-gray-200 bg-white text-[13px] font-bold text-gray-600 shadow-sm hover:bg-gray-50 transition-all active:scale-95"
+                  >
+                    <Download size={14} />
+                    <span>Export CSV</span>
+                  </button>
+                  <button 
+                    onClick={handleAddOrder}
+                    className="flex items-center gap-2 h-10 px-6 rounded-xl bg-ruby text-white text-[13px] font-black uppercase tracking-widest hover:bg-ruby-dark shadow-xl shadow-ruby/20 transition-all active:scale-95"
+                  >
+                    <Plus size={16} />
+                    <span>New Order</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* KPI Strip */}
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 md:gap-4 mb-6">
+                {orderStats.map((k, i) => (
+                  <div key={i} className="bg-white border border-gray-100 rounded-2xl p-4 md:p-5 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer relative overflow-hidden group">
+                    <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-ruby scale-x-0 group-hover:scale-x-100 transition-transform origin-left duration-300" />
+                    <p className="text-[9px] md:text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2">{k.label}</p>
+                    <p className="text-xl md:text-2xl font-black text-gray-900 tracking-tight mb-1">{k.value}</p>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[10px] md:text-[11px] font-black ${k.up ? 'text-green-600' : 'text-red-500'}`}>{k.change}</span>
+                      <div className={`w-3.5 h-3.5 md:w-4 md:h-4 rounded-full flex items-center justify-center ${k.up ? 'bg-green-50' : 'bg-red-50'}`}>
+                         <TrendingUp size={8} className={k.up ? 'text-green-600' : 'text-red-500'} />
                       </div>
-                      <div className="space-y-1">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{stat.label}</p>
-                        <h3 className="text-xl font-black text-[#1A2C54]">{stat.value}</h3>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-1 pt-2 border-t border-gray-50">
-                      {stat.label === 'Cancelled' ? (
-                        <div className="flex items-center space-x-1 px-2 py-0.5 bg-red-50 rounded-md">
-                          <AlertTriangle size={10} className="text-red-500" />
-                          <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Restock Needed</span>
-                        </div>
-                      ) : stat.label === 'Pending' ? (
-                        <div className="flex items-center space-x-1 px-2 py-0.5 bg-yellow-50 rounded-md">
-                          <span className="text-[10px] font-bold text-[#FACC15] uppercase tracking-wider">{stat.trend}</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center space-x-1 px-2 py-0.5 bg-green-50 rounded-md">
-                          <TrendingUp size={10} className="text-[#22C55E]" />
-                          <span className="text-[10px] font-bold text-[#22C55E] uppercase tracking-wider">{stat.trend}</span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 ))}
               </div>
 
-              {/* Filters Bar */}
-              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
-                  <div className="relative w-full">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                    <input 
-                      type="text" 
-                      placeholder="Search customer or ID..." 
-                      value={orderSearchTerm}
-                      onChange={(e) => setOrderSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ruby/20 font-medium"
-                    />
-                  </div>
-                  <select 
-                    value={orderStatusFilter}
-                    onChange={(e) => setOrderStatusFilter(e.target.value)}
-                    className="w-full px-4 py-2 bg-gray-50 border border-gray-100 rounded-lg text-sm font-bold text-gray-600 focus:outline-none"
-                  >
-                    <option>All Status</option>
-                    <option>Pending</option>
-                    <option>Processing</option>
-                    <option>Shipped</option>
-                    <option>Delivered</option>
-                    <option>Cancelled</option>
-                  </select>
-                  <div className="flex flex-col space-y-1">
-                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">From</label>
-                    <input 
-                      type="date" 
-                      value={orderStartDate}
-                      onChange={(e) => setOrderStartDate(e.target.value)}
-                      className="w-full px-4 py-2 bg-gray-50 border border-gray-100 rounded-lg text-sm font-medium text-gray-600 focus:outline-none"
-                    />
-                  </div>
-                  <div className="flex flex-col space-y-1">
-                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">To</label>
-                    <input 
-                      type="date" 
-                      value={orderEndDate}
-                      onChange={(e) => setOrderEndDate(e.target.value)}
-                      className="w-full px-4 py-2 bg-gray-50 border border-gray-100 rounded-lg text-sm font-medium text-gray-600 focus:outline-none"
-                    />
-                  </div>
+              {/* Filters & Tabs Box */}
+              <div className="bg-white border border-gray-100 rounded-[2rem] p-4 shadow-xl shadow-gray-200/50 space-y-4">
+                {/* Tabs */}
+                <div className="flex gap-1 overflow-x-auto scrollbar-none pb-2 border-b border-gray-50">
+                  {ORDER_TABS.map(t => {
+                    const getStatCount = (id: string) => {
+                      if (id === 'all') return orders.length;
+                      if (id === 'unfulfilled') return orders.filter(o => o.fulfillmentStatus !== 'Fulfilled').length;
+                      if (id === 'paid_unful') return orders.filter(o => (o.status === 'Shipped' || o.status === 'Delivered' || o.status === 'Paid') && o.fulfillmentStatus !== 'Fulfilled').length;
+                      if (id === 'open') return orders.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled').length;
+                      if (id === 'delivered') return orders.filter(o => o.status === 'Delivered').length;
+                      if (id === 'onhold') return orders.filter(o => o.fulfillmentStatus === 'On Hold').length;
+                      if (id === 'closed') return orders.filter(o => o.status === 'Delivered' || o.status === 'Cancelled').length;
+                      return 0;
+                    };
+                    const count = getStatCount(t.id);
+                    const isActive = orderTab === t.id;
+                    return (
+                      <button 
+                        key={t.id} 
+                        onClick={() => { setOrderTab(t.id); setCurrentPage(1); }} 
+                        className={`h-10 px-5 rounded-xl text-[11px] font-black uppercase tracking-widest whitespace-nowrap flex items-center gap-3 transition-all ${isActive ? 'bg-gray-900 text-white shadow-lg' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}
+                      >
+                        {t.label}
+                        {count > 0 && (
+                          <span className={`text-[9px] font-black min-w-[20px] h-4 rounded-full px-1.5 flex items-center justify-center ${isActive ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-400'}`}>
+                            {count}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2 border-t border-gray-50">
-                  <div className="flex items-center space-x-2">
+
+                {/* Toolbar */}
+                <div className="flex flex-col lg:flex-row gap-4 items-center">
+                  <div className="flex-1 w-full relative group">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-ruby transition-colors" size={18} />
+                    <input 
+                      className="w-full h-12 bg-gray-50/50 border border-gray-100 rounded-2xl pl-12 pr-4 text-sm text-gray-900 outline-none focus:ring-4 focus:ring-ruby/5 focus:border-ruby/20 focus:bg-white transition-all font-medium" 
+                      placeholder="Search by order ID, customer name, email or tracking..." 
+                      value={orderSearchTerm} 
+                      onChange={e => { setOrderSearchTerm(e.target.value); setCurrentPage(1); }}
+                    />
+                  </div>
+                  <div className="flex gap-2 w-full lg:w-auto">
+                    <div className="relative group">
+                      <input 
+                        type="date" 
+                        value={orderStartDate}
+                        onChange={(e) => setOrderStartDate(e.target.value)}
+                        className="h-12 px-4 bg-gray-50/50 border border-gray-100 rounded-2xl text-[11px] font-black uppercase tracking-widest text-gray-600 focus:outline-none focus:bg-white transition-all"
+                      />
+                    </div>
+                    <div className="relative group">
+                      <input 
+                        type="date" 
+                        value={orderEndDate}
+                        onChange={(e) => setOrderEndDate(e.target.value)}
+                        className="h-12 px-4 bg-gray-50/50 border border-gray-100 rounded-2xl text-[11px] font-black uppercase tracking-widest text-gray-600 focus:outline-none focus:bg-white transition-all"
+                      />
+                    </div>
                     <button 
                       onClick={() => {
                         setOrderSearchTerm('');
                         setOrderStatusFilter('All Status');
                         setOrderStartDate('');
                         setOrderEndDate('');
+                        setOrderTab('all');
                       }}
-                      className="text-xs font-bold text-ruby hover:underline"
+                      className="h-12 px-6 rounded-2xl border border-gray-100 bg-white text-[11px] font-black uppercase tracking-widest text-ruby hover:bg-ruby hover:text-white transition-all active:scale-95 shadow-sm"
                     >
-                      Reset Filters
+                      Clear
                     </button>
                   </div>
-                  <button 
-                    onClick={handleAddOrder}
-                    className="w-full sm:w-auto flex items-center justify-center space-x-2 px-6 py-2.5 bg-ruby text-white rounded-xl text-sm font-bold hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 active:scale-95"
-                  >
-                    <Plus size={18} />
-                    <span>Add Order</span>
-                  </button>
                 </div>
               </div>
 
-              {/* Orders Table/Cards */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                {/* Desktop Table View */}
-                <div className="hidden md:block overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
+              {/* Bulk Selection Message */}
+              <AnimatePresence>
+                {selectedOrders.length > 0 && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="bg-gray-900 text-white rounded-[1.5rem] px-6 h-16 flex items-center justify-between shadow-xl mt-4">
+                      <div className="flex items-center gap-4">
+                        <span className="text-[13px] font-black font-syne uppercase tracking-wider">{selectedOrders.length} ORDERS SELECTED</span>
+                        <div className="w-px h-6 bg-white/20" />
+                        <div className="flex gap-2">
+                          <button onClick={() => toast.success('Bulk action started...')} className="h-9 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest bg-white/10 hover:bg-white/20 transition-all border border-white/10">Bulk Fulfill</button>
+                          <button onClick={() => toast.success('Preparing labels...')} className="h-9 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest bg-white/10 hover:bg-white/20 transition-all border border-white/10">Print All</button>
+                        </div>
+                      </div>
+                      <button onClick={() => setSelectedOrders([])} className="text-[10px] font-black uppercase tracking-widest hover:text-ruby transition-colors px-4 h-9">Deselect All</button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Main List Table */}
+              <div className="bg-white border border-gray-100 rounded-[2rem] shadow-2xl shadow-gray-200/30 overflow-hidden relative min-h-[500px]">
+                {/* Desktop view */}
+                <div className="hidden lg:block overflow-x-auto overflow-y-hidden">
+                  <table className="w-full border-collapse">
                     <thead>
-                      <tr className="bg-gray-50/50 text-[11px] font-bold uppercase tracking-widest text-gray-400 border-b border-gray-100">
-                        <th className="py-4 px-6 w-10">
-                          <input 
-                            type="checkbox" 
-                            className="rounded border-gray-300 text-ruby focus:ring-ruby"
-                            onChange={(e) => {
-                              if (e.target.checked) setSelectedOrders(orders.map(o => o.id));
-                              else setSelectedOrders([]);
-                            }}
-                          />
+                      <tr className="bg-gray-50/80 text-[10px] font-black text-gray-400 uppercase tracking-[0.25em] border-b border-gray-100 h-14">
+                        <th className="px-6 text-center w-12">
+                           <div className="flex justify-center">
+                              <input 
+                                type="checkbox" 
+                                className="w-5 h-5 rounded-md border-gray-300 text-ruby focus:ring-ruby cursor-pointer"
+                                onChange={(e) => {
+                                  if (e.target.checked) setSelectedOrders(filteredOrders.map(o => o.id));
+                                  else setSelectedOrders([]);
+                                }}
+                                checked={selectedOrders.length === filteredOrders.length && filteredOrders.length > 0}
+                              />
+                           </div>
                         </th>
-                        <th className="py-4 px-6">#Order ID</th>
-                        <th className="py-4 px-6">Customer</th>
-                        <th className="py-4 px-6">Status</th>
-                        <th className="py-4 px-6">Shipping</th>
-                        <th className="py-4 px-6">Total</th>
-                        <th className="py-4 px-6">Date</th>
-                        <th className="py-4 px-6 text-right">Actions</th>
+                        <th className="px-6 text-left">Order Information</th>
+                        <th className="px-6 text-left">Customer Details</th>
+                        <th className="px-6 text-center">Items</th>
+                        <th className="px-6 text-right">Revenue</th>
+                        <th className="px-6 text-center">Status</th>
+                        <th className="px-6 text-center">Fulfillment</th>
+                        <th className="px-6 text-right w-24">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="text-sm">
-                      {filteredOrders.map((order, i) => (
-                        <tr key={order.id || i} className="border-b border-gray-50 hover:bg-gray-50/30 transition-colors group">
-                          <td className="py-4 px-6">
-                            <input 
-                              type="checkbox" 
-                              checked={selectedOrders.includes(order.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) setSelectedOrders([...selectedOrders, order.id]);
-                                else setSelectedOrders(selectedOrders.filter(id => id !== order.id));
-                              }}
-                              className="rounded border-gray-300 text-ruby focus:ring-ruby" 
-                            />
-                          </td>
-                          <td className="py-4 px-6 font-bold text-[#1A2C54]">
-                            {order.orderId?.startsWith('#') ? order.orderId : `#${order.orderId || order.id?.slice(-6) || 'N/A'}`}
-                          </td>
-                          <td className="py-4 px-6">
-                            <button 
-                              onClick={() => setViewingCustomer(order)}
-                              className="flex flex-col text-left hover:text-[#3B82F6] transition-colors"
-                            >
-                              <span className="font-bold text-[#1A2C54] group-hover:text-[#3B82F6]">{order.address?.name || order.customerName || order.customer || 'Guest User'}</span>
-                              <div className="flex flex-col">
-                                <span className="text-[10px] text-gray-400 font-medium lowercase">{order.address?.email || order.email || 'No Email'}</span>
-                                <span className="text-[10px] text-ruby font-bold">{order.address?.number || order.address?.phoneNumber || 'No Phone'}</span>
+                    <tbody className="divide-y divide-gray-50 font-sans">
+                      {paginatedOrders.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-40 text-center">
+                            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
+                              <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <ShoppingBag size={40} className="text-gray-200" />
                               </div>
-                            </button>
-                          </td>
-                          <td className="py-4 px-6">
-                            <span className={`px-3 py-1 rounded-md text-[11px] font-bold ${statusColors[order.status || 'Pending']}`}>
-                              {order.status || 'Pending'}
-                            </span>
-                          </td>
-                          <td className="py-4 px-6">
-                            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-                              {order.shippingMethod || 'Standard'}
-                            </span>
-                          </td>
-                          <td className="py-4 px-6 font-black text-[#1A2C54]">
-                            {typeof order.amount === 'string' ? order.amount : `₹${(order.total || 0).toLocaleString()}`}
-                          </td>
-                          <td className="py-4 px-6">
-                            <div className="flex flex-col">
-                              <span className="text-xs font-bold text-[#1A2C54]">{new Date(order.createdAt || Date.now()).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-                              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{new Date(order.createdAt || Date.now()).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
-                            </div>
-                          </td>
-                          <td className="py-4 px-6 text-right relative">
-                            <div className="flex items-center justify-end">
-                              <div className="relative">
-                                <button 
-                                  onClick={() => setActiveOrderMenu(activeOrderMenu === order.id ? null : order.id)}
-                                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-400"
-                                >
-                                  <MoreVertical size={18} />
-                                </button>
-                                <AnimatePresence>
-                                  {activeOrderMenu === order.id && (
-                                    <>
-                                      <div className="fixed inset-0 z-10" onClick={() => setActiveOrderMenu(null)} />
-                                      <motion.div 
-                                        initial={{ opacity: 0, scale: 0.95, y: -10 }}
-                                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                                        exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                                        className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-2xl border border-gray-100 z-20 py-2 overflow-hidden"
-                                      >
-                                        {[
-                                          { label: 'View', icon: Maximize2, onClick: () => setViewingCustomer(order) },
-                                          { label: 'Invoice', icon: ShoppingBag, onClick: () => generateInvoice(order, settings) },
-                                          { 
-                                            label: 'Update Status', 
-                                            icon: Edit2, 
-                                            onClick: () => {
-                                              const nextStatus: Record<string, string> = {
-                                                'Pending': 'Processing',
-                                                'Processing': 'Shipped',
-                                                'Shipped': 'Delivered',
-                                                'Delivered': 'Pending'
-                                              };
-                                              handleUpdateOrderStatus(order.id, nextStatus[order.status || 'Pending'] || 'Pending');
-                                            }
-                                          },
-                                          { label: 'Delete', icon: Trash2, danger: true, onClick: () => handleDeleteOrder(order.id) },
-                                        ].map((action, idx) => (
-                                          <button 
-                                            key={idx}
-                                            onClick={() => {
-                                              if (action.onClick) action.onClick();
-                                              setActiveOrderMenu(null);
-                                            }}
-                                            className={`w-full flex items-center space-x-3 px-4 py-2.5 text-xs font-bold transition-colors ${action.danger ? 'text-red-500 hover:bg-red-50' : 'text-gray-600 hover:bg-gray-50'}`}
-                                          >
-                                            <action.icon size={14} />
-                                            <span>{action.label}</span>
-                                          </button>
-                                        ))}
-                                      </motion.div>
-                                    </>
-                                  )}
-                                </AnimatePresence>
-                              </div>
-                            </div>
+                              <h3 className="text-2xl font-black text-gray-900 font-syne uppercase tracking-tighter">No Orders Found</h3>
+                              <p className="text-sm text-gray-400 mt-2 font-medium max-w-xs mx-auto">We couldn't find any orders matching your criteria. Try adjusting your filters.</p>
+                            </motion.div>
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        paginatedOrders.map((order, i) => {
+                          const isSelected = selectedOrders.includes(order.id);
+                          const customerDoc = customers.find(c => c.uid === order.customerUid || c.email === order.email);
+                          const customerPhoto = customerDoc?.photoURL || customerDoc?.photo;
+                          const customerName = order.address?.name || order.customerName || customerDoc?.displayName || 'Guest User';
+                          const initials = customerName.split(' ').map((n:any) => n[0]).join('').slice(0,2).toUpperCase();
+                          const hue = (order.id.charCodeAt(0) + (order.id.charCodeAt(1) || 0) + (order.id.charCodeAt(2) || 0)) % 360;
+                          const createdAt = order.createdAt?.seconds ? new Date(order.createdAt.seconds * 1000) : new Date(order.createdAt || Date.now());
+                          
+                          return (
+                            <motion.tr 
+                              key={order.id}
+                              initial={{ opacity: 0, y: 15 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: i * 0.02, duration: 0.3 }}
+                              onClick={() => setViewingCustomer(order)}
+                              className={`group cursor-pointer hover:bg-ruby/[0.01] transition-all relative ${isSelected ? 'bg-ruby/[0.03]' : ''}`}
+                            >
+                                <td className="px-6 py-5 text-center" onClick={(e) => e.stopPropagation()}>
+                                  <div className="flex justify-center">
+                                    <input 
+                                      type="checkbox" 
+                                      className="w-5 h-5 rounded-md border-gray-300 text-ruby focus:ring-ruby cursor-pointer transition-transform active:scale-125"
+                                      checked={isSelected}
+                                      onChange={(e) => {
+                                        if (e.target.checked) setSelectedOrders([...selectedOrders, order.id]);
+                                        else setSelectedOrders(selectedOrders.filter(id => id !== order.id));
+                                      }}
+                                    />
+                                  </div>
+                                </td>
+                                <td className="px-6 py-5">
+                                  <div className="flex items-center gap-4">
+                                    {customerPhoto ? (
+                                      <div className="w-12 h-12 rounded-[1rem] overflow-hidden border border-gray-100 shadow-sm flex-shrink-0 group-hover:rotate-6 transition-transform">
+                                        <img src={customerPhoto} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                      </div>
+                                    ) : (
+                                      <div 
+                                        className="w-12 h-12 rounded-[1rem] flex items-center justify-center text-sm font-black font-syne shadow-lg shadow-black/5 flex-shrink-0 group-hover:rotate-6 transition-transform"
+                                        style={{ background: `hsl(${hue}, 75%, 95%)`, color: `hsl(${hue}, 60%, 40%)` }}
+                                      >
+                                        {initials}
+                                      </div>
+                                    )}
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <p className="text-[14px] font-black text-gray-900 tracking-tight">{order.orderId || `#${order.id.slice(-6).toUpperCase()}`}</p>
+                                        <div className="w-1 h-1 rounded-full bg-gray-200" />
+                                        <p className="text-[11px] font-bold text-gray-400">{createdAt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
+                                      </div>
+                                      <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                                         {order.isVIP && <span className="text-[9px] font-black bg-amber-100 text-amber-700 px-2 py-0.5 rounded tracking-widest uppercase shadow-sm shadow-amber-200/50">VIP</span>}
+                                         <span className="text-[9px] font-black bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded tracking-widest uppercase border border-emerald-100/50">{order.shippingMethod || 'Standard'}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-6 py-5">
+                                  <p className="text-[14px] font-black text-gray-800 tracking-tight group-hover:text-ruby transition-colors">{customerName}</p>
+                                  <p className="text-[11px] text-gray-400 font-bold tracking-wide truncate max-w-[180px] lowercase">{order.address?.email || order.email || 'Email missing'}</p>
+                                </td>
+                                <td className="px-6 py-5 text-center">
+                                  <div className="inline-flex flex-col items-center">
+                                    <p className="text-[14px] font-black text-gray-900 group-hover:scale-110 transition-transform">{order.items?.length || 0}</p>
+                                    <div className="flex justify-center -space-x-2.5 mt-2">
+                                      {order.items?.slice(0,3).map((item:any, idx:number)=>(
+                                        <div key={idx} className="w-6 h-6 rounded-full border-2 border-white bg-gray-100 overflow-hidden shadow-md ring-1 ring-gray-100">
+                                          <img src={item.image || item.images?.[0] || 'https://picsum.photos/seed/placeholder/100/100'} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                        </div>
+                                      ))}
+                                      {(order.items?.length || 0) > 3 && (
+                                        <div className="w-6 h-6 rounded-full border-2 border-white bg-ruby text-[9px] font-black text-white flex items-center justify-center shadow-lg">+{(order.items?.length || 0) - 3}</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-6 py-5 text-right">
+                                  <p className="text-[17px] font-black text-gray-900 leading-none mb-1">₹{(order.total || 0).toLocaleString()}</p>
+                                  <p className="text-[10px] font-black text-gray-400 tracking-widest uppercase">Razorpay</p>
+                                </td>
+                                <td className="px-6 py-5 text-center">
+                                   <StatusBadge status={order.status || 'Pending'} />
+                                </td>
+                                <td className="px-6 py-5 text-center">
+                                   <StatusBadge status={order.fulfillmentStatus || 'Unfulfilled'} />
+                                </td>
+                                <td className="px-6 py-5 text-right" onClick={(e) => e.stopPropagation()}>
+                                   <div className="flex items-center justify-end gap-1">
+                                      <button 
+                                        onClick={() => setViewingCustomer(order)}
+                                        className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-ruby transition-all"
+                                        title="View Details"
+                                      >
+                                        <Eye size={16} />
+                                      </button>
+                                      <button 
+                                        onClick={() => {
+                                          if (confirm('Are you sure you want to delete this order?')) {
+                                            deleteDoc(doc(db, 'orders', order.id));
+                                            toast.success('Order deleted');
+                                          }
+                                        }}
+                                        className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-all font-medium"
+                                        title="Delete Order"
+                                      >
+                                        <Trash2 size={16} />
+                                      </button>
+                                   </div>
+                                </td>
+                            </motion.tr>
+                          );
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>
 
-                {/* Mobile Card View */}
-                <div className="md:hidden divide-y divide-gray-100">
-                  {filteredOrders.length === 0 ? (
-                    <div className="p-20 text-center text-gray-400 text-xs font-bold uppercase tracking-widest">
-                      No orders found
-                    </div>
+                {/* Mobile view Cards */}
+                <div className="lg:hidden divide-y divide-gray-50 bg-white">
+                  {paginatedOrders.length === 0 ? (
+                    <div className="py-24 text-center text-gray-400 text-xs font-bold uppercase tracking-widest">No matching orders found</div>
                   ) : (
-                    filteredOrders.map((order, i) => (
-                      <div key={order.id || i} className="p-4 space-y-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-3">
-                            <input 
-                              type="checkbox" 
-                              checked={selectedOrders.includes(order.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) setSelectedOrders([...selectedOrders, order.id]);
-                                else setSelectedOrders(selectedOrders.filter(id => id !== order.id));
-                              }}
-                              className="rounded border-gray-300 text-ruby focus:ring-ruby" 
-                            />
-                            <span className="font-bold text-[#1A2C54]">
-                              {order.orderId || `#${order.id?.slice(-6) || 'N/A'}`}
-                            </span>
+                    paginatedOrders.map((order, i) => {
+                      const customerDoc = customers.find(c => c.uid === order.customerUid || c.email === order.email);
+                      const customerPhoto = customerDoc?.photoURL || customerDoc?.photo;
+                      const customerName = order.address?.name || order.customerName || customerDoc?.displayName || 'Guest User';
+                      const hue = (order.id.charCodeAt(0) + (order.id.charCodeAt(1) || 0)) % 360;
+                      const createdAt = order.createdAt?.seconds ? new Date(order.createdAt.seconds * 1000) : new Date(order.createdAt || Date.now());
+                      
+                      return (
+                        <div 
+                          key={order.id} 
+                          onClick={() => setViewingCustomer(order)}
+                          className="p-5 active:bg-ruby/[0.02] transition-colors border-b border-gray-50 last:border-0"
+                        >
+                          <div className="flex justify-between items-start mb-4">
+                            <div className="flex gap-4">
+                               {customerPhoto ? (
+                                 <div className="w-12 h-12 rounded-[1rem] overflow-hidden border border-gray-100 shadow-sm flex-shrink-0">
+                                   <img src={customerPhoto} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                 </div>
+                               ) : (
+                                 <div 
+                                    className="w-12 h-12 rounded-[1rem] flex-shrink-0 flex items-center justify-center text-sm font-black font-syne shadow-lg shadow-black/5"
+                                    style={{ background: `hsl(${hue}, 75%, 95%)`, color: `hsl(${hue}, 60%, 40%)` }}
+                                  >
+                                    {customerName[0].toUpperCase()}
+                                  </div>
+                               )}
+                                <div>
+                                   <div className="flex items-center gap-2">
+                                      <p className="text-[15px] font-black text-gray-900 tracking-tight">{order.orderId || `#${order.id.slice(-6).toUpperCase()}`}</p>
+                                      <span className="text-[9px] font-black bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full tracking-tighter uppercase whitespace-nowrap">{order.shippingMethod || 'STD'}</span>
+                                   </div>
+                                   <p className="text-[12px] font-black text-gray-800 uppercase tracking-[0.05em] mt-0.5">{customerName}</p>
+                                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1.5">{createdAt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} • {createdAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</p>
+                                </div>
+                            </div>
+                            <div className="text-right">
+                               <p className="text-[18px] font-black text-gray-900 tracking-tight leading-none">₹{(order.total || 0).toLocaleString()}</p>
+                               <span className="text-[9px] font-black text-gray-300 tracking-widest uppercase">Total</span>
+                            </div>
                           </div>
-                          <span className={`px-3 py-1 rounded-md text-[10px] font-bold ${statusColors[order.status || 'Pending']}`}>
-                            {order.status || 'Pending'}
-                          </span>
-                        </div>
-                        
-                        <div className="flex items-center justify-between">
-                          <div className="space-y-1">
-                            <p className="text-sm font-bold text-[#1A2C54]">{order.address?.name || order.customerName || order.customer || 'Guest User'}</p>
-                            <p className="text-[10px] text-gray-400 font-medium">{order.address?.email || order.email || 'No Email'}</p>
-                          </div>
-                          <p className="font-black text-[#1A2C54]">
-                            ₹{(order.total || 0).toLocaleString()}
-                          </p>
-                        </div>
-
-                        <div className="flex items-center justify-between pt-2">
-                          <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
-                            {order.createdAt ? (
-                              <>
-                                {new Date(order.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} • {new Date(order.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-                              </>
-                            ) : 'N/A'}
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <button 
-                              onClick={() => setViewingCustomer(order)}
-                              className="p-2 bg-gray-50 text-gray-600 rounded-lg"
-                            >
-                              <Maximize2 size={16} />
-                            </button>
-                            <button 
-                              onClick={() => {
-                                const nextStatus: Record<string, string> = {
-                                  'Pending': 'Processing',
-                                  'Processing': 'Shipped',
-                                  'Shipped': 'Delivered',
-                                  'Delivered': 'Pending'
-                                };
-                                handleUpdateOrderStatus(order.id, nextStatus[order.status || 'Pending'] || 'Pending');
-                              }}
-                              className="p-2 bg-gray-50 text-ruby rounded-lg"
-                            >
-                              <Edit2 size={16} />
-                            </button>
-                            <button 
-                              onClick={() => handleDeleteOrder(order.id)}
-                              className="p-2 bg-red-50 text-red-500 rounded-lg"
-                            >
-                              <Trash2 size={16} />
-                            </button>
+                          <div className="flex items-center gap-2 flex-wrap">
+                             <StatusBadge status={order.status || 'Pending'} className="scale-90 origin-left" />
+                             <StatusBadge status={order.fulfillmentStatus || 'Unfulfilled'} className="scale-90 origin-left" />
+                             <div className="ml-auto flex items-center gap-2">
+                                <div className="flex -space-x-2">
+                                    {(order.items || []).slice(0, 3).map((it:any, idx:number)=>(
+                                       <div key={idx} className="w-6 h-6 rounded-full border-2 border-white bg-gray-100 overflow-hidden shadow-sm">
+                                          <img src={it.image || it.images?.[0] || 'https://picsum.photos/seed/p/50/50'} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                       </div>
+                                    ))}
+                                </div>
+                                <span className="text-[10px] font-black text-gray-400">{(order.items || []).length} ITEMS</span>
+                             </div>
                           </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
-              </div>
 
-                {/* Pagination */}
-                <div className="p-6 border-t border-gray-50 flex flex-col md:flex-row items-center justify-end gap-4 bg-gray-50/30">
-                  <div className="flex items-center space-x-4">
-                    <div className="flex items-center bg-white border border-gray-100 rounded-lg overflow-hidden shadow-sm">
-                      <button className="px-4 py-2 hover:bg-gray-50 text-gray-600 border-r border-gray-100 transition-colors flex items-center space-x-2 text-xs font-bold">
-                        <ChevronRight size={16} className="rotate-180" />
-                        <span>Previous</span>
-                      </button>
-                      <button className="px-4 py-2 hover:bg-gray-50 text-gray-600 transition-colors flex items-center space-x-2 text-xs font-bold">
-                        <span>Next</span>
-                        <ChevronRight size={16} />
-                      </button>
-                    </div>
-                  </div>
+                {/* Footer with Pagination style */}
+                <div className="px-8 py-6 border-t border-gray-50 bg-gray-50/50 flex flex-col sm:flex-row items-center justify-between gap-4">
+                   <p className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em]">
+                     Viewing {paginatedOrders.length} of {filteredOrders.length} records
+                   </p>
+                   {filteredOrders.length > entriesPerPage && (
+                      <div className="flex items-center gap-2.5 bg-white p-1 rounded-2xl shadow-sm border border-gray-100">
+                        <button 
+                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                          disabled={currentPage === 1}
+                          className="w-10 h-10 rounded-xl bg-gray-50 text-gray-400 flex items-center justify-center hover:bg-ruby hover:text-white transition-all disabled:opacity-20 cursor-pointer"
+                        >
+                          <ChevronRight className="rotate-180" size={18} />
+                        </button>
+                        <div className="flex items-center gap-1.5 px-2">
+                           <span className="w-8 h-8 rounded-lg bg-gray-900 text-white flex items-center justify-center text-xs font-black shadow-lg">{currentPage}</span>
+                           <span className="text-[10px] font-black text-gray-300 uppercase px-2 font-syne">of {Math.ceil(filteredOrders.length / entriesPerPage)}</span>
+                        </div>
+                        <button 
+                          onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredOrders.length / entriesPerPage), p + 1))}
+                          disabled={currentPage >= Math.ceil(filteredOrders.length / entriesPerPage)}
+                          className="w-10 h-10 rounded-xl bg-gray-50 text-gray-400 flex items-center justify-center hover:bg-ruby hover:text-white transition-all disabled:opacity-20 cursor-pointer"
+                        >
+                          <ChevronRight size={18} />
+                        </button>
+                      </div>
+                   )}
                 </div>
               </div>
-            )}
+            </div>
+          )}
 
-          {/* Customer Detail View */}
+          {/* Order Detail View (Exact Match UI) */}
           {viewingCustomer && (
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-8"
-            >
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <button 
-                  onClick={() => setViewingCustomer(null)}
-                  className="flex items-center space-x-2 text-gray-400 hover:text-[#1A2C54] transition-colors"
-                >
-                  <ChevronRight size={20} className="rotate-180" />
-                  <span className="text-sm font-bold uppercase tracking-widest">Back to Orders</span>
-                </button>
-                <div className="flex space-x-2 w-full sm:w-auto">
-                  <button 
-                    onClick={() => generateInvoice(viewingCustomer, settings)}
-                    className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-gray-100 text-gray-600 rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-widest hover:bg-gray-200 transition-all flex items-center justify-center gap-2"
-                  >
-                    <ShoppingBag size={14} />
-                    Invoice
-                  </button>
-                  <button 
-                    onClick={() => generateShippingLabel(viewingCustomer, settings)}
-                    className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-[#1A2C54] text-white rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-widest hover:bg-[#0A1A34] transition-all shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2"
-                  >
-                    <Truck size={14} />
-                    Shipping Label
-                  </button>
-                  <button 
-                    onClick={() => {
-                      const customerId = viewingCustomer.userId || viewingCustomer.customerEmail || viewingCustomer.email;
-                      const existingChat = chats.find(c => c.id === customerId || c.userId === customerId);
-                      if (existingChat) {
-                        setSelectedChat(existingChat);
-                        setActiveTab('chats');
-                      } else {
-                        toast.error("No active chat found for this customer.");
-                      }
-                    }}
-                    className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 bg-[#3B82F6] text-white rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg shadow-blue-200 flex items-center justify-center gap-2"
-                  >
-                    <MessageCircle size={14} />
-                    Message
-                  </button>
+            <div className="fixed inset-0 bg-shop-bg z-[1000] overflow-y-auto font-sans antialiased text-shop-text">
+              
+              <div className="max-w-[960px] mx-auto p-4 sm:p-5 pb-16">
+                
+                {/* BREADCRUMB */}
+                <div className="flex items-center gap-1.5 mb-4 overflow-x-auto whitespace-nowrap scrollbar-hide">
+                  <button onClick={() => setViewingCustomer(null)} className="text-[13px] text-blue-600 hover:underline">Orders</button>
+                  <span className="text-gray-400 text-[13px]">›</span>
+                  <span className="text-[13px] text-blue-600 cursor-pointer hover:underline">{viewingCustomer.orderId || `#${viewingCustomer.id.slice(-6).toUpperCase()}`}</span>
+                  <span className="text-gray-400 text-[13px]">›</span>
+                  <span className="text-[13px] text-gray-500">Fulfill items</span>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Profile Card */}
-                <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6">
-                  <div className="flex flex-col items-center text-center space-y-4">
-                    <div className="relative">
-                      <div className="w-24 h-24 rounded-3xl bg-gray-50 border-4 border-white shadow-xl overflow-hidden">
-                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${viewingCustomer.address?.name || viewingCustomer.customerName || viewingCustomer.customer}`} alt="Avatar" />
-                      </div>
-                      <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-green-500 border-4 border-white rounded-full shadow-lg flex items-center justify-center">
-                        <CheckCheck size={12} className="text-white" />
-                      </div>
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-black text-[#1A2C54]">{viewingCustomer.address?.name || viewingCustomer.customerName || viewingCustomer.customer}</h3>
-                      <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Verified Customer</p>
-                    </div>
+                {/* PAGE HEADER */}
+                <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => setViewingCustomer(null)} className="w-[34px] h-[34px] bg-white border border-shop-border rounded-lg flex items-center justify-center shadow-sm hover:bg-gray-50 transition-colors">
+                      <ChevronLeft size={16} className="text-shop-text" />
+                    </button>
+                    <h2 className="text-[20px] font-[700] text-shop-text uppercase tracking-tight">Fulfill items</h2>
+                    <span className={cn(
+                      "px-2.5 py-1 rounded-full text-[12px] font-[600]",
+                      viewingCustomer.fulfillmentStatus === 'Fulfilled' ? "bg-shop-green-light text-shop-green" : "bg-[#fff7e0] text-[#b98900]"
+                    )}>
+                      {viewingCustomer.fulfillmentStatus || 'Unfulfilled'}
+                    </span>
                   </div>
                   
-                  <div className="p-4 bg-ruby/5 rounded-2xl border border-ruby/10 space-y-3">
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-lg bg-ruby/10 flex items-center justify-center">
-                          <Database size={12} className="text-ruby" />
-                        </div>
-                        <span className="text-[10px] font-bold text-ruby uppercase tracking-widest">Order ID</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => generateInvoice(viewingCustomer, settings)} className="px-4 h-9 rounded-lg border border-shop-border bg-white text-[13px] font-[600] text-shop-text hover:bg-gray-50 flex items-center gap-2 shadow-sm transition-all active:scale-95">
+                      <Download size={14} />
+                      <span>Invoice</span>
+                    </button>
+                    
+                    <div className="relative group/status">
+                      <button className="px-4 h-9 rounded-lg border border-shop-border bg-white text-[13px] font-[600] text-shop-text hover:bg-gray-50 flex items-center gap-2 shadow-sm transition-all active:scale-95">
+                        <Edit2 size={14} />
+                        <span className="capitalize">{viewingCustomer.status || 'Status'}</span>
+                      </button>
+                      <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-shop-border rounded-xl shadow-2xl opacity-0 invisible group-hover/status:opacity-100 group-hover/status:visible transition-all z-[300] p-1.5 space-y-0.5">
+                        {['Pending', 'Paid', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Refunded'].map(s => (
+                          <button 
+                            key={s}
+                            onClick={() => {
+                              updateDoc(doc(db, 'orders', viewingCustomer.id), { status: s });
+                              setViewingCustomer({ ...viewingCustomer, status: s });
+                              toast.success(`Order status: ${s}`);
+                            }}
+                            className="w-full text-left px-3.5 py-2 rounded-lg text-[13px] font-[500] hover:bg-gray-50 flex items-center justify-between"
+                          >
+                            <span>{s}</span>
+                            {viewingCustomer.status === s && <Check size={14} className="text-shop-green" />}
+                          </button>
+                        ))}
                       </div>
-                      <span className="text-xs font-black text-ruby">{viewingCustomer.orderId?.startsWith('#') ? viewingCustomer.orderId : `#${viewingCustomer.orderId || viewingCustomer.id.substring(0, 8)}`}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-lg bg-ruby/10 flex items-center justify-center">
-                          <Calendar size={12} className="text-ruby" />
-                        </div>
-                        <span className="text-[10px] font-bold text-ruby uppercase tracking-widest">Date</span>
-                      </div>
-                      <span className="text-xs font-black text-ruby">{new Date(viewingCustomer.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4 pt-6 border-t border-gray-50">
-                    <div className="flex items-center justify-between group cursor-pointer">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
-                          <Mail size={14} />
-                        </div>
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Email</span>
-                      </div>
-                      <span className="text-sm font-bold text-[#1A2C54]">{viewingCustomer.address?.email || viewingCustomer.email || 'N/A'}</span>
-                    </div>
-                    <div className="flex items-center justify-between group cursor-pointer">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-green-50 group-hover:text-green-500 transition-colors">
-                          <Phone size={14} />
-                        </div>
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Phone</span>
-                      </div>
-                      <span className="text-sm font-bold text-[#1A2C54]">{viewingCustomer.address?.number || viewingCustomer.shippingAddress?.phone || 'N/A'}</span>
-                    </div>
-                    <div className="flex items-center justify-between group cursor-pointer">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-purple-50 group-hover:text-purple-500 transition-colors">
-                          <Shield size={14} />
-                        </div>
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Payment</span>
-                      </div>
-                      <span className="text-sm font-bold text-[#1A2C54]">{viewingCustomer.paymentMethod}</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Address & Order Details */}
-                <div className="lg:col-span-2 space-y-8">
-                  <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6">
-                    <h4 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Shipping Address</h4>
-                    <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100 relative overflow-hidden group">
-                      <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                        <Truck size={48} className="text-[#1A2C54]" />
+                {/* GRID */}
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_320px] gap-4 items-start">
+                  
+                  {/* LEFT COLUMN */}
+                  <div className="space-y-4">
+                    
+                    {/* FULFILL FROM */}
+                    <div className="bg-white border border-shop-border rounded-xl shadow-sm overflow-hidden">
+                      <div className="px-4 py-[14px] border-b border-shop-border">
+                        <h3 className="text-[14px] font-[700] text-shop-text">Fulfill from</h3>
                       </div>
-                      <p className="text-sm font-bold text-[#1A2C54] leading-relaxed relative z-10">
-                        {viewingCustomer.address ? (
-                          <>
-                            <span className="text-ruby text-[10px] font-black uppercase tracking-widest block mb-1">Recipient Name</span>
-                            <span className="text-lg">{viewingCustomer.address.name}</span><br />
-                            <span className="text-ruby text-[10px] font-black uppercase tracking-widest block mt-3 mb-1">Full Address</span>
-                            {viewingCustomer.address.address},<br />
-                            {viewingCustomer.address.city}, {viewingCustomer.address.state} - {viewingCustomer.address.pincode}<br />
-                            India
-                          </>
-                        ) : viewingCustomer.shippingAddress ? (
-                          <>
-                            <span className="text-ruby text-[10px] font-black uppercase tracking-widest block mb-1">Recipient Name</span>
-                            <span className="text-lg">{viewingCustomer.shippingAddress.fullName}</span><br />
-                            <span className="text-ruby text-[10px] font-black uppercase tracking-widest block mt-3 mb-1">Full Address</span>
-                            {viewingCustomer.shippingAddress.address},<br />
-                            {viewingCustomer.shippingAddress.city}, {viewingCustomer.shippingAddress.zipCode}<br />
-                            {viewingCustomer.shippingAddress.country}
-                          </>
-                        ) : (
-                          'No address provided'
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                      <h4 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Order Items</h4>
-                      <div className="relative w-full sm:w-48">
-                        <select
-                          value={viewingCustomer.status}
-                          onChange={(e) => handleUpdateOrderStatus(viewingCustomer.id, e.target.value)}
-                          className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-widest text-[#1A2C54] focus:ring-2 focus:ring-ruby/20 transition-all appearance-none cursor-pointer"
-                        >
-                          {['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'].map(status => (
-                            <option key={status} value={status}>{status}</option>
-                          ))}
-                        </select>
-                        <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
-                          <ChevronDown size={14} />
+                      <div className="p-4">
+                        <div className="flex items-center gap-2.5 bg-[#f6f6f7] border border-shop-border rounded-lg p-3 sm:p-3.5">
+                          <div className="w-9 h-9 bg-shop-green-light rounded-lg flex items-center justify-center shrink-0">
+                            <Home size={18} className="text-shop-green" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="text-[14px] font-[700] text-shop-text">The Ruby, Mumbai</div>
+                            <div className="text-[12px] text-shop-text-muted mt-0.5">📦 142 items in stock · Primary location</div>
+                          </div>
+                          <div className="text-[12px] text-blue-600 cursor-pointer font-[500] hover:underline">Change</div>
                         </div>
                       </div>
                     </div>
-                    <div className="space-y-4">
-                      {(viewingCustomer.items || []).map((item: any, idx: number) => (
-                        <div key={idx} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 sm:p-6 bg-gray-50 rounded-2xl border border-gray-100 gap-4 hover:border-ruby/20 transition-all group">
-                          <div className="flex items-center space-x-4">
-                            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-white rounded-2xl flex items-center justify-center shadow-sm overflow-hidden border border-gray-100 group-hover:scale-105 transition-transform">
-                              {item.image ? (
-                                <img src={item.image} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                              ) : (
-                                <ShoppingBag size={24} className="text-[#3B82F6]" />
-                              )}
-                            </div>
-                            <div>
-                              <p className="text-base font-black text-[#1A2C54]">{item.name}</p>
-                              <div className="flex flex-wrap gap-2 mt-1">
-                                <span className="px-2 py-0.5 bg-white border border-gray-100 rounded-md text-[9px] font-bold text-gray-500 uppercase tracking-widest">Qty: {item.quantity}</span>
-                                <span className="px-2 py-0.5 bg-white border border-gray-100 rounded-md text-[9px] font-bold text-gray-500 uppercase tracking-widest">Size: {item.selectedSize || 'N/A'}</span>
-                                <span className="px-2 py-0.5 bg-white border border-gray-100 rounded-md text-[9px] font-bold text-gray-500 uppercase tracking-widest">₹{item.price.toLocaleString()}</span>
+
+                    {/* ITEMS TO FULFILL */}
+                    <div className="bg-white border border-shop-border rounded-xl shadow-sm overflow-hidden">
+                      <div className="px-4 py-[14px] border-b border-shop-border flex items-center justify-between">
+                        <h3 className="text-[14px] font-[700] text-shop-text">Items to fulfill</h3>
+                        <div className="flex items-center gap-2">
+                          <div className="text-[12px] text-shop-text-muted">{(viewingCustomer.items || []).length} items</div>
+                          <div className="text-[12px] text-blue-600 cursor-pointer font-[500] hover:underline" onClick={() => {
+                            setFulfillmentItems(fulfillmentItems.map((item: any) => ({ ...item, qtyToFulfill: item.quantity })));
+                          }}>Select all</div>
+                        </div>
+                      </div>
+                      <div className="px-4">
+                        <div className="overflow-x-auto">
+                          <table className="w-full border-collapse">
+                            <thead>
+                              <tr>
+                                <th className="w-[48px] py-[10px]"></th>
+                                <th className="text-[12px] font-[600] text-shop-text-muted uppercase tracking-[0.4px] py-[10px] text-left">Product</th>
+                                <th className="w-[120px] text-center text-[12px] font-[600] text-shop-text-muted uppercase tracking-[0.4px] py-[10px]">Qty to fulfill</th>
+                                <th className="w-[100px] text-right text-[12px] font-[600] text-shop-text-muted uppercase tracking-[0.4px] py-[10px]">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {fulfillmentItems.map((item: any, idx: number) => (
+                                <tr key={idx} className="border-t border-[#f0f0f0]">
+                                  <td className="py-3">
+                                    <div className="w-12 h-12 rounded-lg border border-shop-border overflow-hidden bg-gray-50">
+                                      <img src={item.image} alt="" className="w-full h-full object-cover" />
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-3">
+                                    <div className="text-[14px] font-[600] text-shop-text">{item.name}</div>
+                                    <div className="text-[12px] text-shop-text-muted">
+                                      {item.selectedSize && `Size: ${item.selectedSize}`}
+                                      {item.selectedSize && item.selectedColor && ' / '}
+                                      {item.selectedColor && `Color: ${item.selectedColor}`}
+                                    </div>
+                                  </td>
+                                  <td className="py-3">
+                                    <div className="flex items-center justify-center gap-2">
+                                      <input 
+                                        type="number" 
+                                        min="0"
+                                        max={item.quantity}
+                                        value={item.qtyToFulfill}
+                                        onChange={(e) => {
+                                          const val = Math.min(item.quantity, Math.max(0, parseInt(e.target.value) || 0));
+                                          const newItems = [...fulfillmentItems];
+                                          newItems[idx].qtyToFulfill = val;
+                                          setFulfillmentItems(newItems);
+                                        }}
+                                        className="w-16 h-[34px] border border-shop-border rounded-lg text-center text-[14px] font-[600] text-shop-text focus:border-shop-green focus:ring-2 focus:ring-shop-green/10 outline-none transition-all"
+                                      />
+                                      <span className="text-[13px] text-shop-text-muted">of {item.quantity}</span>
+                                    </div>
+                                  </td>
+                                  <td className="py-3 text-right">
+                                    <div className="text-[14px] font-[600] text-shop-text">₹{(item.price * item.qtyToFulfill).toLocaleString()}</div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                      <div className="px-4 py-3 bg-[#fafafa] border-t border-shop-border flex justify-between items-center text-[13px]">
+                        <span className="text-shop-text-muted ">Total to fulfill: <strong className="text-shop-text">{fulfillmentItems.reduce((acc: number, curr: any) => acc + curr.qtyToFulfill, 0)} items</strong></span>
+                        <span className="text-[14px] font-[700] text-shop-text">₹{fulfillmentItems.reduce((acc: number, curr: any) => acc + (curr.price * curr.qtyToFulfill), 0).toLocaleString()}</span>
+                      </div>
+                    </div>
+
+                      {/* TRACKING */}
+                    <div className="bg-white border border-shop-border rounded-xl shadow-sm overflow-hidden">
+                      <div className="px-4 py-[14px] border-b border-shop-border flex items-center justify-between">
+                        <h3 className="text-[14px] font-[700] text-shop-text">Tracking information</h3>
+                        <span className="text-[12px] text-shop-text-muted">Optional</span>
+                      </div>
+                      <div className="p-4">
+                        <div 
+                          className="flex items-center gap-2.5 mb-5 cursor-pointer select-none"
+                          onClick={() => setIsTrackingEnabled(!isTrackingEnabled)}
+                        >
+                          <div className={cn(
+                            "w-10 h-[22px] rounded-full relative transition-all duration-200 shrink-0",
+                            isTrackingEnabled ? "bg-shop-green" : "bg-gray-200"
+                          )}>
+                            <div className={cn(
+                              "w-[16px] h-[16px] bg-white rounded-full absolute top-[3px] transition-all duration-200 shadow-sm",
+                              isTrackingEnabled ? "left-[21px]" : "left-[3px]"
+                            )} />
+                          </div>
+                          <span className="text-[14px] font-[500] text-shop-text">Add tracking number</span>
+                        </div>
+
+                        <AnimatePresence>
+                          {isTrackingEnabled && (
+                            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-4 overflow-hidden mb-2">
+                              <div>
+                                <label className="block text-[12px] font-[600] text-shop-text-muted mb-1.5 uppercase tracking-wider">Carrier</label>
+                                <div className="relative">
+                                  <select 
+                                    value={carrier}
+                                    onChange={(e) => setCarrier(e.target.value)}
+                                    className="w-full h-10 border border-shop-border rounded-lg px-3 text-[14px] text-shop-text bg-white outline-none focus:border-shop-green transition-colors cursor-pointer appearance-none pr-10 shadow-sm"
+                                  >
+                                    <option value="">Select carrier</option>
+                                    {['Blue Dart', 'Delhivery', 'DTDC', 'Ecom Express', 'FedEx', 'Xpressbees', 'Shadowfax'].map(c => <option key={c} value={c}>{c}</option>)}
+                                  </select>
+                                  <ChevronDown size={16} className="absolute right-3 top-3 text-gray-400 pointer-events-none" />
+                                </div>
+                              </div>
+                              <div>
+                                <label className="block text-[12px] font-[600] text-shop-text-muted mb-1.5 uppercase tracking-wider">Tracking number</label>
+                                <input 
+                                  type="text"
+                                  value={trackingNumber}
+                                  onChange={(e) => setTrackingNumber(e.target.value)}
+                                  placeholder="e.g. BD12345678IN"
+                                  className="w-full h-10 border border-shop-border rounded-lg px-3 text-[14px] text-shop-text focus:border-shop-green outline-none transition-colors shadow-sm"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[12px] font-[600] text-shop-text-muted mb-1.5 flex items-center gap-1.5 uppercase tracking-wider">
+                                  Tracking URL <span className="text-[10px] text-gray-400 font-normal lowercase">(auto-filled)</span>
+                                </label>
+                                <input 
+                                  readOnly
+                                  type="text"
+                                  value={getTrackingUrl(carrier, trackingNumber)}
+                                  className="w-full h-10 border border-shop-border rounded-lg px-3 text-[13px] text-shop-text-muted bg-[#f9f9f9] outline-none"
+                                />
+                                <p className="text-[12px] text-gray-400 mt-2 font-[500]">Customer will receive this link to track their order</p>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+
+                      {/* NOTIFY */}
+                      <div className="px-4 py-[14px] border-t border-shop-border flex items-center gap-3">
+                        <div 
+                          className={cn(
+                            "w-[20px] h-[20px] rounded-[5px] border-1.5 flex items-center justify-center cursor-pointer transition-all shadow-sm",
+                            notifyCustomer ? "bg-shop-green border-shop-green" : "bg-white border-shop-border"
+                          )}
+                          onClick={() => setNotifyCustomer(!notifyCustomer)}
+                        >
+                          {notifyCustomer && <Check size={12} className="text-white stroke-[3px]" />}
+                        </div>
+                        <div className="text-[13px] text-shop-text leading-tight">
+                          Send shipment details to <strong className="font-[600] text-blue-600">{viewingCustomer.email || 'customer'}</strong>
+                        </div>
+                      </div>
+
+                      {/* FULFILL / DELIVER BTN */}
+                      <div className="p-4 pt-1 space-y-2">
+                        {viewingCustomer.fulfillmentStatus === 'Fulfilled' && viewingCustomer.status === 'Shipped' ? (
+                          <button 
+                            onClick={() => handleMarkAsDelivered(viewingCustomer)}
+                            className="w-full h-11 bg-shop-text hover:bg-black text-white rounded-lg text-[15px] font-[600] flex items-center justify-center gap-2.5 transition-all active:scale-[0.98] shadow-md"
+                          >
+                            <CheckCheck size={18} className="text-white" />
+                            <span>Mark as Delivered</span>
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={() => handleFulfillOrder(viewingCustomer)}
+                            disabled={isFulfilling || viewingCustomer.fulfillmentStatus === 'Fulfilled'}
+                            className="w-full h-11 bg-shop-green hover:bg-shop-green-dark text-white rounded-lg text-[15px] font-[600] flex items-center justify-center gap-2.5 transition-all active:scale-[0.98] disabled:bg-gray-300 disabled:cursor-not-allowed shadow-md shadow-shop-green/20"
+                          >
+                            {isFulfilling ? (
+                              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            ) : (
+                              <>
+                                <div className="w-6 h-6 bg-white/20 rounded-full flex items-center justify-center">
+                                  <Check size={14} className="text-white stroke-[3px]" />
+                                </div>
+                                <span>{viewingCustomer.fulfillmentStatus === 'Fulfilled' ? 'Order Fulfilled' : 'Fulfill items'}</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* RIGHT COLUMN */}
+                  <div className="space-y-4">
+                    
+                    {/* ORDER SUMMARY */}
+                    <div className="bg-white border border-shop-border rounded-xl shadow-sm overflow-hidden">
+                      <div className="px-4 py-[14px] border-b border-shop-border flex items-center justify-between">
+                        <h3 className="text-[14px] font-[700] text-shop-text">Order {viewingCustomer.orderId || `#${viewingCustomer.id.slice(-4).toUpperCase()}`}</h3>
+                        <span className="bg-shop-green-light text-shop-green px-2.5 py-1 rounded-full text-[12px] font-[600]">Paid</span>
+                      </div>
+                      <div className="p-4 space-y-3.5">
+                        <div className="flex justify-between items-start">
+                          <span className="text-[13px] text-shop-text-muted font-[500]">Date</span>
+                          <span className="text-[13px] text-shop-text font-[600] text-right">
+                            {new Date(viewingCustomer.createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })} · {new Date(viewingCustomer.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-[13px] text-shop-text-muted font-[500]">Customer</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[13px] text-blue-600 font-[700] hover:underline cursor-pointer">{viewingCustomer.address?.name || viewingCustomer.customerName || viewingCustomer.customer || 'Customer'}</span>
+                          </div>
+                        </div>
+                        <div className="flex justify-between items-start">
+                          <span className="text-[13px] text-shop-text-muted font-[500]">Email</span>
+                          <span className="text-[13px] text-blue-600 font-[600] hover:underline cursor-pointer break-all text-right ml-4">{viewingCustomer.address?.email || viewingCustomer.email || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between items-start">
+                          <span className="text-[13px] text-shop-text-muted font-[500]">Phone</span>
+                          <span className="text-[13px] text-shop-text font-[600] font-mono">{viewingCustomer.address?.phone || viewingCustomer.address?.number || '+91 98765 43210'}</span>
+                        </div>
+                        <div className="flex justify-between items-start">
+                          <span className="text-[13px] text-shop-text-muted font-[500]">Payment</span>
+                          <span className="text-[13px] text-shop-text font-[600]">{viewingCustomer.paymentMethod || 'Razorpay · ****4242'}</span>
+                        </div>
+                        <div className="pt-2 border-t border-gray-100 flex justify-between items-start">
+                          <span className="text-[13px] text-shop-text-muted font-[500]">Subtotal</span>
+                          <span className="text-[13px] font-[600] text-shop-text">₹{(viewingCustomer.total - (viewingCustomer.tax || 0)).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between items-start">
+                          <span className="text-[13px] text-shop-text-muted font-[500]">Shipping</span>
+                          <div className="text-right">
+                            <span className="text-[13px] font-[600] text-shop-text">₹0.00</span>
+                            <span className="text-[11px] text-gray-400 ml-1">(Free)</span>
+                          </div>
+                        </div>
+                        <div className="flex justify-between items-start">
+                          <span className="text-[13px] text-shop-text-muted font-[500]">Tax (18% GST)</span>
+                          <span className="text-[13px] font-[600] text-shop-text">₹{(viewingCustomer.tax || 0).toLocaleString()}</span>
+                        </div>
+                        <div className="pt-2 border-t border-gray-200 flex justify-between items-start">
+                          <span className="text-[14px] text-shop-text font-[800]">Total</span>
+                          <span className="text-[15px] font-[800] text-shop-text">₹{(viewingCustomer.total || 0).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* SHIP TO */}
+                    <div className="bg-white border border-shop-border rounded-xl shadow-sm overflow-hidden">
+                      <div className="px-4 py-[14px] border-b border-shop-border flex items-center justify-between">
+                        <h3 className="text-[14px] font-[700] text-shop-text">Ship to</h3>
+                        <button className="text-[12px] text-blue-600 font-[500] hover:underline">Edit</button>
+                      </div>
+                      <div className="p-4 space-y-4">
+                        <div className="space-y-0.5">
+                           <p className="text-[14px] font-[700] text-shop-text">{viewingCustomer.address?.name || viewingCustomer.customerName || viewingCustomer.customer}</p>
+                           <p className="text-[13px] text-shop-text-muted leading-relaxed">
+                             {viewingCustomer.address?.address || viewingCustomer.shippingAddress?.line1}
+                           </p>
+                           <p className="text-[13px] text-shop-text-muted">
+                             {viewingCustomer.address?.city || viewingCustomer.shippingAddress?.city}, {viewingCustomer.address?.state || viewingCustomer.shippingAddress?.state} – {viewingCustomer.address?.pincode || viewingCustomer.shippingAddress?.postal_code || '400 058'}
+                           </p>
+                           <p className="text-[13px] text-shop-text-muted">India</p>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[13px] text-red-600 font-[600] cursor-pointer hover:underline">
+                           <MapPin size={14} className="text-red-600" />
+                           <span>View on map</span>
+                        </div>
+                        <div className="bg-[#f6f6f7] rounded-lg p-3.5 border border-shop-border">
+                           <p className="text-[10px] text-shop-text-muted font-[700] uppercase tracking-wider mb-1">Shipping Method</p>
+                           <p className="text-[13px] font-[700] text-shop-text">{viewingCustomer.shippingMethod || 'Standard Delivery (3–5 days)'}</p>
+                           <p className="text-[12px] text-shop-text-muted mt-0.5">Expected by {new Date(new Date(viewingCustomer.createdAt).getTime() + (5 * 24 * 60 * 60 * 1000)).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}–{new Date(new Date(viewingCustomer.createdAt).getTime() + (7 * 24 * 60 * 60 * 1000)).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* TIMELINE */}
+                    <div className="bg-white border border-shop-border rounded-xl shadow-sm overflow-hidden">
+                      <div className="px-4 py-[14px] border-b border-shop-border flex items-center justify-between">
+                        <h3 className="text-[14px] font-[700] text-shop-text">Timeline</h3>
+                      </div>
+                      <div className="p-4 pt-5 pb-2">
+                        <div className="space-y-6 relative">
+                          <div className="absolute left-[11px] top-4 bottom-4 w-px bg-gray-100" />
+                          
+                          {[
+                            { title: 'Order Fulfilled', status: viewingCustomer.fulfillmentStatus === 'Fulfilled', date: viewingCustomer.fulfilledAt || null, icon: CheckCheck },
+                            { title: `Payment received via ${viewingCustomer.paymentMethod || 'Razorpay'}`, status: true, date: viewingCustomer.createdAt, icon: CreditCard, subtitle: `(₹${(viewingCustomer.total || 0).toLocaleString()})` },
+                            { title: `Order placed by ${viewingCustomer.address?.name || viewingCustomer.customerName || viewingCustomer.customer || 'Customer'}`, status: true, date: viewingCustomer.createdAt, icon: ShoppingBag },
+                          ].map((evt, i) => (
+                            <div key={i} className={cn("flex gap-3.5 items-start relative z-10", !evt.status && "opacity-40 grayscale")}>
+                              <div className={cn(
+                                "w-6 h-6 rounded-full flex items-center justify-center shrink-0 shadow-sm transition-all",
+                                evt.status ? "bg-shop-green text-white" : "bg-white border border-gray-200 text-gray-300",
+                                i === 1 && "bg-yellow-100 text-yellow-600",
+                                i === 2 && "bg-blue-100 text-blue-600"
+                              )}>
+                                {i === 1 ? <CreditCard size={12} /> : (i === 2 ? <ShoppingBag size={12} /> : <evt.icon size={12} />)}
+                              </div>
+                              <div>
+                                <div className={cn("text-[13px] font-[600] text-shop-text leading-tight mt-0.5", i === 0 && "mt-1")}>{evt.title}</div>
+                                {evt.subtitle && <p className="text-[12px] text-shop-text-muted mt-0.5">{evt.subtitle}</p>}
+                                <p className="text-[11px] text-gray-400 mt-1">
+                                  {evt.status ? (i === 0 ? new Date(evt.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ' · ' + new Date(evt.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'Today at ' + new Date(evt.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })) : 'Pending'}
+                                </p>
                               </div>
                             </div>
-                          </div>
-                          <div className="text-left sm:text-right w-full sm:w-auto pt-4 sm:pt-0 border-t sm:border-t-0 border-gray-100">
-                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Subtotal</p>
-                            <p className="text-xl font-black text-[#1A2C54]">
-                              ₹{(item.price * item.quantity).toLocaleString()}
-                            </p>
-                          </div>
+                          ))}
                         </div>
-                      ))}
+                      </div>
                     </div>
-                    <div className="pt-6 border-t border-gray-50 flex justify-between items-center">
-                      <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">Order Total</p>
-                      <p className="text-2xl font-black text-ruby">₹{(viewingCustomer.total || 0).toLocaleString()}</p>
+
+                    {/* SHIPPING LABEL */}
+                    <div className="bg-white border border-shop-border rounded-xl shadow-sm overflow-hidden">
+                       <div className="px-4 py-[14px] border-b border-shop-border flex justify-between items-center">
+                         <h3 className="text-[14px] font-[700] text-shop-text">Shipping label</h3>
+                         <button className="text-[12px] text-blue-600 font-[700] flex items-center gap-1.5 hover:underline" onClick={() => generateShippingLabel(viewingCustomer)}>
+                            <Printer size={13} />
+                            <span>Print</span>
+                         </button>
+                       </div>
+                       <div className="p-4">
+                          <div className="bg-white rounded-lg p-5 border border-shop-border shadow-inner relative">
+                             <div className="flex justify-between items-start mb-6">
+                                <div className="space-y-0.5">
+                                   <p className="text-[9px] text-shop-text-muted font-[700] uppercase tracking-widest">FROM</p>
+                                   <p className="text-[13px] font-[800] text-shop-text">THE RUBY</p>
+                                   <p className="text-[11px] text-shop-text-muted">Mumbai, MH 400001</p>
+                                </div>
+                                <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center opacity-80">
+                                   <Package size={20} className="text-orange-600" />
+                                </div>
+                             </div>
+
+                             <div className="border-t border-dashed border-gray-300 my-4" />
+
+                             <div className="space-y-4">
+                                <div className="space-y-0.5">
+                                   <p className="text-[9px] text-shop-text-muted font-[700] uppercase tracking-widest">TO</p>
+                                   <p className="text-[14px] font-[800] text-shop-text uppercase">{viewingCustomer.address?.name || viewingCustomer.customerName || viewingCustomer.customer || 'CUSTOMER'}</p>
+                                   <p className="text-[11px] text-shop-text-muted leading-relaxed font-[500] max-w-[200px]">
+                                      {viewingCustomer.address?.address || viewingCustomer.shippingAddress?.line1}, {viewingCustomer.address?.city || viewingCustomer.shippingAddress?.city}
+                                   </p>
+                                   <p className="text-[11px] text-shop-text-muted font-[500]">{viewingCustomer.address?.state || viewingCustomer.shippingAddress?.state} – {viewingCustomer.address?.pincode || viewingCustomer.shippingAddress?.postal_code || '400058'}</p>
+                                   <p className="text-[11px] text-shop-text-muted font-[600]">{viewingCustomer.address?.phone || viewingCustomer.address?.number || '+91 98765 43210'}</p>
+                                </div>
+
+                                {trackingNumber && isTrackingEnabled ? (
+                                   <div className="flex flex-col items-center pt-2">
+                                      <Barcode 
+                                        value={trackingNumber} 
+                                        width={1.6} 
+                                        height={65} 
+                                        displayValue={false}
+                                        margin={0}
+                                        background="transparent"
+                                      />
+                                      <p className="text-[11px] font-mono text-gray-500 mt-2.5 uppercase tracking-[4px]">{trackingNumber}</p>
+                                   </div>
+                                ) : (
+                                   <div className="py-8 text-center text-[12px] text-shop-text-muted bg-gray-50 rounded-lg border border-dashed border-gray-200">
+                                      Fill tracking details to generate barcode
+                                   </div>
+                                )}
+                             </div>
+
+                             <div className="mt-8 flex justify-between items-center text-[10px] text-shop-text-muted font-[600]">
+                                <p>Wt: 0.8 kg</p>
+                                <p>Order: {viewingCustomer.orderId || `#${viewingCustomer.id.slice(-4).toUpperCase()}`}</p>
+                             </div>
+                             
+                             {/* Faded Background Element */}
+                             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[40px] font-black text-gray-100/40 select-none -rotate-12 pointer-events-none">
+                                THE RUBY
+                             </div>
+                          </div>
+                       </div>
                     </div>
+
                   </div>
+
                 </div>
+
               </div>
-            </motion.div>
+
+              {/* SUCCESS OVERLAY (Exact Match style) */}
+              <AnimatePresence>
+                {showSuccessOverlay && (
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-[2000] flex items-center justify-center p-4">
+                    <motion.div initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-2xl p-8 max-w-[400px] w-full text-center shadow-2xl relative overflow-hidden">
+                      <div className="w-[64px] h-[64px] bg-shop-green-light rounded-full flex items-center justify-center mx-auto mb-4">
+                        <CheckCheck size={32} className="text-shop-green stroke-[2.5px]" />
+                      </div>
+                      <h3 className="text-[20px] font-[800] text-shop-text mb-1.5">Fulfillment successful</h3>
+                      <p className="text-shop-text-muted text-[14px] leading-relaxed mb-6">The shipment details have been logged and the customer notify queue has been updated.</p>
+                      
+                      {trackingNumber && (
+                        <div className="bg-[#f6f6f7] rounded-lg p-3.5 mb-5 text-left border border-shop-border">
+                          <p className="text-[11px] font-[600] text-shop-text-muted uppercase tracking-[0.4px] mb-1">Tracking ID</p>
+                          <p className="text-[14px] font-[700] text-shop-text tracking-wider">{trackingNumber}</p>
+                        </div>
+                      )}
+
+                      <div className="flex gap-2.5">
+                        <button onClick={() => setShowSuccessOverlay(false)} className="flex-1 h-[38px] bg-white border border-shop-border rounded-lg text-[13px] font-[600] text-shop-text hover:bg-gray-50 transition-colors">Dismiss</button>
+                        <button onClick={() => { 
+                          setShowSuccessOverlay(false);
+                          setViewingCustomer(null);
+                        }} className="flex-1 h-[38px] bg-shop-green text-white rounded-lg text-[13px] font-[600] hover:bg-shop-green-dark transition-colors">Return to orders</button>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+            </div>
           )}
 
           {activeTab === 'live' && (
@@ -4176,95 +4850,68 @@ export default function AdminDashboard() {
                 <motion.div 
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="space-y-8"
+                  className="space-y-6 max-w-[1000px] mx-auto pb-20"
                 >
-                  <button 
-                    onClick={() => setSelectedCustomer(null)}
-                    className="flex items-center space-x-2 text-gray-400 hover:text-ruby transition-colors group"
-                  >
-                    <div className="p-2 bg-gray-50 rounded-lg group-hover:bg-ruby/10 transition-all">
-                      <ChevronRight size={18} className="rotate-180" />
-                    </div>
-                    <span className="text-xs font-bold uppercase tracking-widest">Back to List</span>
-                  </button>
+                  {/* BREADCRUMB */}
+                  <div className="flex items-center gap-2 text-xs">
+                    <button onClick={() => setSelectedCustomer(null)} className="text-blue-600 hover:underline">Customers</button>
+                    <span className="text-gray-400">›</span>
+                    <span className="text-gray-500">{selectedCustomer.displayName || 'Anonymous'}</span>
+                  </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* Profile Summary */}
-                    <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 space-y-8">
-                      <div className="flex flex-col items-center text-center space-y-4">
-                        <div className="relative">
-                          <div className="w-32 h-32 rounded-[2rem] bg-gray-50 border-4 border-white shadow-2xl overflow-hidden">
-                            <img 
-                              src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedCustomer.displayName || selectedCustomer.email}`} 
-                              alt="Avatar" 
-                              className="w-full h-full object-cover"
-                            />
-                          </div>
-                          <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-green-500 border-4 border-white rounded-2xl shadow-lg flex items-center justify-center">
-                            <CheckCheck size={16} className="text-white" />
-                          </div>
-                        </div>
-                        <div>
-                          <h3 className="text-2xl font-black text-[#1A2C54]">{selectedCustomer.displayName || 'Anonymous'}</h3>
-                          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">{selectedCustomer.role || 'User'}</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <div className="p-5 bg-gray-50 rounded-3xl border border-gray-100 space-y-1">
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Email Address</p>
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-bold text-[#1A2C54]">{selectedCustomer.email}</p>
-                            {selectedCustomer.isVerified ? (
-                              <CheckCheck size={14} className="text-green-500" />
-                            ) : (
-                              <AlertTriangle size={14} className="text-yellow-500" />
-                            )}
-                          </div>
-                        </div>
-                        <div className="p-5 bg-gray-50 rounded-3xl border border-gray-100 space-y-1">
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Phone Number</p>
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-bold text-[#1A2C54]">{selectedCustomer.phoneNumber || 'Not provided'}</p>
-                            {selectedCustomer.phoneVerified && <CheckCheck size={14} className="text-green-500" />}
-                          </div>
-                        </div>
-                        <div className="p-5 bg-gray-50 rounded-3xl border border-gray-100 space-y-1">
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Member Since</p>
-                          <p className="text-sm font-bold text-[#1A2C54]">{new Date(selectedCustomer.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <button 
-                          onClick={() => handleUpdateUserRole(selectedCustomer.id, selectedCustomer.role || 'user')}
-                          className="w-full py-4 bg-[#1A2C54] text-white rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-blue-900/20"
-                        >
-                          Change Role
-                        </button>
-                        <div className="flex gap-3">
-                          <button 
-                            onClick={() => updateLoyaltyPoints(selectedCustomer.id, 100)}
-                            className="flex-1 py-4 bg-ruby/10 text-ruby rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-ruby hover:text-white transition-all"
-                          >
-                            Gift Points
-                          </button>
-                          <button 
-                            onClick={() => {
-                              setCustomerToDelete(selectedCustomer);
-                              setIsCustomerDeleteModalOpen(true);
-                            }}
-                            className="flex-1 py-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all"
-                          >
-                            Delete User
-                          </button>
+                  {/* PAGE HEADER */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <button 
+                        onClick={() => setSelectedCustomer(null)}
+                        className="w-9 h-9 bg-white border border-gray-200 rounded-lg flex items-center justify-center shadow-sm hover:border-gray-400 transition-all"
+                      >
+                        <ArrowLeft size={16} className="text-gray-700" />
+                      </button>
+                      <div>
+                        <h2 className="text-2xl font-black text-gray-900 font-syne tracking-tight">{selectedCustomer.displayName || 'Anonymous'}</h2>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-[10px] font-bold uppercase tracking-wider">
+                            {selectedCustomer.role || 'Customer'}
+                          </span>
+                          <span className="text-[10px] text-gray-400 font-medium">• Customer since {new Date(selectedCustomer.createdAt).getFullYear()}</span>
                         </div>
                       </div>
                     </div>
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <button 
+                        onClick={() => {
+                          const customerId = selectedCustomer.id || selectedCustomer.email;
+                          const existingChat = chats.find(c => c.id === customerId || c.userId === customerId);
+                          if (existingChat) {
+                            setSelectedChat(existingChat);
+                            setActiveTab('chats');
+                          } else {
+                            toast.error("No active chat found for this customer.");
+                          }
+                        }}
+                        className="flex-1 sm:flex-none px-4 py-2 bg-white border border-gray-200 rounded-lg text-xs font-bold text-gray-700 hover:bg-gray-50 transition-all shadow-sm flex items-center justify-center gap-2"
+                      >
+                        <MessageSquare size={14} />
+                        Message
+                      </button>
+                      <button 
+                        onClick={() => handleUpdateUserRole(selectedCustomer.id, selectedCustomer.role || 'user')}
+                        className="flex-1 sm:flex-none px-4 py-2 bg-gray-900 text-white rounded-lg text-xs font-bold hover:bg-black transition-all shadow-sm"
+                      >
+                        Edit Role
+                      </button>
+                    </div>
+                  </div>
 
-                    {/* Advanced Analytics */}
-                    <div className="lg:col-span-2 space-y-8">
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  {/* GRID */}
+                  <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 items-start">
+                    
+                    {/* LEFT COLUMN */}
+                    <div className="space-y-4">
+                      
+                      {/* STATS GRID */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                         {[
                           { 
                             label: 'Total Orders', 
@@ -4281,96 +4928,204 @@ export default function AdminDashboard() {
                             bgColor: 'bg-green-50' 
                           },
                           { 
-                            label: 'Most Ordered', 
-                            value: getMostOrderedProduct(selectedCustomer.id, selectedCustomer.email)?.name || 'None', 
-                            icon: Package, 
-                            color: 'text-purple-600', 
-                            bgColor: 'bg-purple-50' 
-                          },
-                          { 
                             label: 'Loyalty Points', 
                             value: selectedCustomer.loyaltyPoints || 0, 
                             icon: Star, 
                             color: 'text-yellow-600', 
                             bgColor: 'bg-yellow-50' 
                           },
+                          { 
+                            label: 'Avg. Order', 
+                            value: `₹${Math.round(orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).reduce((sum, o) => sum + (o.total || 0), 0) / (orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).length || 1)).toLocaleString()}`, 
+                            icon: Activity, 
+                            color: 'text-purple-600', 
+                            bgColor: 'bg-purple-50' 
+                          },
                         ].map((stat, i) => (
-                          <div key={i} className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm space-y-3">
-                            <div className={`w-10 h-10 rounded-2xl ${stat.bgColor} ${stat.color} flex items-center justify-center`}>
+                          <div key={i} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-4 group hover:border-gray-400 transition-all">
+                            <div className={`w-10 h-10 rounded-xl ${stat.bgColor} ${stat.color} flex items-center justify-center shadow-sm`}>
                               <stat.icon size={20} />
                             </div>
                             <div>
-                              <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{stat.label}</p>
-                              <p className="text-xs font-black text-[#1A2C54] truncate">{stat.value}</p>
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{stat.label}</p>
+                              <p className="text-lg font-black text-gray-900 truncate font-syne">{stat.value}</p>
                             </div>
                           </div>
                         ))}
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        {/* Saved Addresses */}
-                        <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm">
-                          <h4 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest mb-6 flex items-center gap-2">
-                            <MapPin size={18} className="text-ruby" />
-                            Saved Addresses
-                          </h4>
-                          <div className="space-y-4">
-                            {selectedCustomer.addresses && selectedCustomer.addresses.length > 0 ? (
-                              selectedCustomer.addresses.map((addr: any, i: number) => (
-                                <div key={i} className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-1">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-[10px] font-bold text-ruby uppercase tracking-widest">{addr.type || 'Address'}</span>
-                                    {addr.isDefault && <CheckCheck size={12} className="text-green-500" />}
-                                  </div>
-                                  <p className="text-xs font-bold text-[#1A2C54]">{addr.fullName}</p>
-                                  <p className="text-[10px] text-gray-400 leading-relaxed">
-                                    {addr.addressLine1}, {addr.city}, {addr.state} - {addr.pincode}
-                                  </p>
-                                </div>
-                              ))
-                            ) : (
-                              <div className="py-8 text-center space-y-2">
-                                <MapPin size={24} className="text-gray-200 mx-auto" />
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">No addresses saved</p>
-                              </div>
-                            )}
-                          </div>
+                      {/* ORDER HISTORY */}
+                      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                          <h3 className="text-sm font-bold text-gray-900">Recent Orders</h3>
+                          <span className="text-xs text-gray-500">{orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).length} orders total</span>
                         </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left border-collapse min-w-[600px]">
+                            <thead>
+                              <tr className="text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-50">
+                                <th className="py-3 px-4">Order</th>
+                                <th className="py-3 px-4">Date</th>
+                                <th className="py-3 px-4">Status</th>
+                                <th className="py-3 px-4 text-right">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).length > 0 ? (
+                                orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).map((order, i) => (
+                                  <tr 
+                                    key={i} 
+                                    className="group hover:bg-gray-50/50 transition-colors cursor-pointer"
+                                    onClick={() => {
+                                      setSelectedCustomer(null);
+                                      setViewingCustomer(order);
+                                      setActiveTab('orders');
+                                    }}
+                                  >
+                                    <td className="py-3 px-4">
+                                      <span className="text-sm font-bold text-blue-600 hover:underline">#{order.orderId || order.id.slice(-6)}</span>
+                                    </td>
+                                    <td className="py-3 px-4 text-xs text-gray-500">
+                                      {new Date(order.createdAt).toLocaleDateString()}
+                                    </td>
+                                    <td className="py-3 px-4">
+                                      <span className={cn(
+                                        "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                                        order.status === 'Delivered' ? "bg-green-50 text-green-700" : 
+                                        order.status === 'Cancelled' ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"
+                                      )}>
+                                        {order.status || 'Pending'}
+                                      </span>
+                                    </td>
+                                    <td className="py-3 px-4 text-right font-bold text-sm text-gray-900">
+                                      ₹{order.total?.toLocaleString()}
+                                    </td>
+                                  </tr>
+                                ))
+                              ) : (
+                                <tr>
+                                  <td colSpan={4} className="py-12 text-center">
+                                    <ShoppingBag size={32} className="text-gray-200 mx-auto mb-2" />
+                                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">No orders found</p>
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
 
-                        {/* Order History */}
-                        <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm">
-                          <h4 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest mb-6 flex items-center gap-2">
-                            <History size={18} className="text-ruby" />
-                            Order History
-                          </h4>
-                          <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                            {orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).length > 0 ? (
-                              orders.filter(o => o.userId === selectedCustomer.id || o.email === selectedCustomer.email).map((order, i) => (
-                                <div key={i} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100 group hover:border-ruby/20 transition-all">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-xl bg-white border border-gray-100 flex items-center justify-center text-ruby font-black text-[10px]">
-                                      #{order.orderId?.slice(-4) || 'ORD'}
-                                    </div>
-                                    <div>
-                                      <p className="text-xs font-bold text-[#1A2C54]">₹{order.total?.toLocaleString()}</p>
-                                      <p className="text-[9px] font-medium text-gray-400">{new Date(order.createdAt).toLocaleDateString()}</p>
-                                    </div>
-                                  </div>
-                                  <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${statusColors[order.status || 'Pending']}`}>
-                                    {order.status || 'Pending'}
-                                  </span>
+                      {/* SAVED ADDRESSES */}
+                      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                        <div className="px-4 py-3 border-b border-gray-100">
+                          <h3 className="text-sm font-bold text-gray-900">Saved Addresses</h3>
+                        </div>
+                        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {selectedCustomer.addresses && selectedCustomer.addresses.length > 0 ? (
+                            selectedCustomer.addresses.map((addr: any, i: number) => (
+                              <div key={i} className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2 relative group">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-0.5 rounded">{addr.type || 'Address'}</span>
+                                  {addr.isDefault && <CheckCheck size={14} className="text-green-600" />}
                                 </div>
-                              ))
-                            ) : (
-                              <div className="py-8 text-center space-y-2">
-                                <ShoppingBag size={24} className="text-gray-200 mx-auto" />
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">No orders found</p>
+                                <p className="text-sm font-bold text-gray-900">{addr.fullName}</p>
+                                <p className="text-xs text-gray-500 leading-relaxed">
+                                  {addr.addressLine1}, {addr.city}, {addr.state} - {addr.pincode}
+                                </p>
+                                <button className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-red-500">
+                                  <Trash2 size={14} />
+                                </button>
                               </div>
-                            )}
+                            ))
+                          ) : (
+                            <div className="col-span-2 py-8 text-center bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                              <MapPin size={24} className="text-gray-300 mx-auto mb-2" />
+                              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">No addresses saved</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* RIGHT COLUMN */}
+                    <div className="space-y-4">
+                      
+                      {/* CUSTOMER OVERVIEW */}
+                      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                        <div className="p-6 text-center border-b border-gray-100">
+                          <div className="relative inline-block mb-4">
+                            <div className="w-20 h-20 rounded-2xl bg-gray-50 border border-gray-200 overflow-hidden mx-auto">
+                              <img 
+                                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedCustomer.displayName || selectedCustomer.email}`} 
+                                alt="Avatar" 
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                            <div className="absolute -bottom-2 -right-2 w-7 h-7 bg-green-500 border-2 border-white rounded-lg flex items-center justify-center shadow-sm">
+                              <CheckCheck size={14} className="text-white" />
+                            </div>
+                          </div>
+                          <h3 className="text-lg font-bold text-gray-900">{selectedCustomer.displayName || 'Anonymous'}</h3>
+                          <p className="text-xs text-gray-500 mt-1">Customer since {new Date(selectedCustomer.createdAt).getFullYear()}</p>
+                        </div>
+                        <div className="p-4 space-y-4">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Email</label>
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-bold text-gray-900 truncate flex-1 mr-2">{selectedCustomer.email}</p>
+                              <button className="text-blue-600"><Mail size={14} /></button>
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Phone</label>
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-bold text-gray-900">{selectedCustomer.phoneNumber || 'Not provided'}</p>
+                              <button className="text-green-600"><Phone size={14} /></button>
+                            </div>
+                          </div>
+                          <div className="pt-2 border-t border-gray-100 space-y-2">
+                            <button 
+                              onClick={() => updateLoyaltyPoints(selectedCustomer.id, 100)}
+                              className="w-full py-2 bg-yellow-50 text-yellow-700 rounded-lg text-[10px] font-bold uppercase tracking-widest hover:bg-yellow-100 transition-all flex items-center justify-center gap-2"
+                            >
+                              <Star size={12} />
+                              Gift 100 Points
+                            </button>
+                            <button 
+                              onClick={() => {
+                                setCustomerToDelete(selectedCustomer);
+                                setIsCustomerDeleteModalOpen(true);
+                              }}
+                              className="w-full py-2 bg-red-50 text-red-600 rounded-lg text-[10px] font-bold uppercase tracking-widest hover:bg-red-100 transition-all flex items-center justify-center gap-2"
+                            >
+                              <Trash2 size={12} />
+                              Delete Customer
+                            </button>
                           </div>
                         </div>
                       </div>
+
+                      {/* TAGS / NOTES */}
+                      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                          <h3 className="text-sm font-bold text-gray-900">Tags</h3>
+                          <button className="text-xs font-bold text-blue-600 hover:underline">Edit</button>
+                        </div>
+                        <div className="p-4 flex flex-wrap gap-2">
+                          {['VIP', 'Frequent Buyer', 'Mumbai'].map(tag => (
+                            <span key={tag} className="px-2 py-1 bg-gray-100 text-gray-600 rounded-md text-[10px] font-bold uppercase tracking-wider">
+                              {tag}
+                            </span>
+                          ))}
+                          <button className="w-6 h-6 border border-dashed border-gray-300 rounded-md flex items-center justify-center text-gray-400 hover:border-blue-500 hover:text-blue-500 transition-all">
+                            <Plus size={12} />
+                          </button>
+                        </div>
+                      </div>
+
                     </div>
+
                   </div>
                 </motion.div>
               ) : (
@@ -5636,6 +6391,11 @@ export default function AdminDashboard() {
                                     {firebaseStatus}
                                   </span>
                                 </div>
+                                {firebaseStatus.includes('Error') && (
+                                  <p className="text-[8px] text-red-500 mt-1 italic">
+                                    Check server logs or re-run Firebase setup.
+                                  </p>
+                                )}
                               </div>
                             </div>
                           </div>

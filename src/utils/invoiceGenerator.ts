@@ -1,5 +1,5 @@
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 
 export const generateInvoice = (order: any, settings?: any) => {
   const doc = new jsPDF();
@@ -85,7 +85,7 @@ export const generateInvoice = (order: any, settings?: any) => {
     `Rs. ${(item.price * item.quantity).toLocaleString()}`
   ]);
 
-  (doc as any).autoTable({
+  autoTable(doc, {
     startY: startY + 35,
     head: [['ITEM', 'SKU', 'BARCODE', 'PRICE', 'QTY', 'TOTAL']],
     body: tableData,
@@ -108,7 +108,7 @@ export const generateInvoice = (order: any, settings?: any) => {
     theme: 'striped'
   });
 
-  const finalY = (doc as any).lastAutoTable.finalY + 15;
+  const finalY = ((doc as any).lastAutoTable?.finalY || (startY + 100)) + 15;
 
   // Totals Section
   const totalX = pageWidth - 20;

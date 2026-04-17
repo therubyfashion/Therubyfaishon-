@@ -270,32 +270,31 @@ export default function Home() {
             <Link to="/shop" className="text-[13px] font-medium text-gray-600">See all</Link>
           </div>
           <div className="flex space-x-5 overflow-x-auto pb-2 scrollbar-hide">
-            {categories.length > 0 ? categories.map((cat) => {
-              const Icon = categoryIcons[cat.name] || Package;
-              return (
-                <Link 
-                  key={cat.id} 
-                  to={`/shop?category=${cat.name}`}
-                  className="flex flex-col items-center space-y-2 flex-shrink-0 group"
-                >
-                  <div className="w-[60px] h-[60px] rounded-full bg-[#f0f0f0] flex items-center justify-center group-hover:bg-ruby/10 transition-colors">
-                    <Icon size={26} className="text-[#222] group-hover:text-ruby transition-colors" />
-                  </div>
-                  <span className="text-[12px] font-medium text-[#333]">{cat.name}</span>
-                </Link>
-              );
-            }) : (
-              ['Clothes', 'Shoes', 'Bags', 'Electronics', 'Watch', 'Jewelry', 'Kitchen', 'Toys'].map((name) => {
-                const Icon = categoryIcons[name] || Package;
+            {loading ? (
+              [1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="flex flex-col items-center space-y-2 flex-shrink-0 animate-pulse">
+                  <div className="w-[60px] h-[60px] rounded-full bg-gray-200" />
+                  <div className="h-3 w-12 bg-gray-200 rounded" />
+                </div>
+              ))
+            ) : categories.length > 0 ? (
+              categories.map((cat) => {
+                const Icon = categoryIcons[cat.name] || Package;
                 return (
-                  <div key={name} className="flex flex-col items-center space-y-2 flex-shrink-0">
-                    <div className="w-[60px] h-[60px] rounded-full bg-[#f0f0f0] flex items-center justify-center">
-                      <Icon size={26} className="text-[#222]" />
+                  <Link 
+                    key={cat.id} 
+                    to={`/shop?category=${cat.name}`}
+                    className="flex flex-col items-center space-y-2 flex-shrink-0 group"
+                  >
+                    <div className="w-[60px] h-[60px] rounded-full bg-[#f0f0f0] flex items-center justify-center group-hover:bg-ruby/10 transition-colors">
+                      <Icon size={26} className="text-[#222] group-hover:text-ruby transition-colors" />
                     </div>
-                    <span className="text-[12px] font-medium text-[#333]">{name}</span>
-                  </div>
+                    <span className="text-[12px] font-medium text-[#333]">{cat.name}</span>
+                  </Link>
                 );
               })
+            ) : (
+              <p className="text-xs text-gray-400 italic">No categories available.</p>
             )}
           </div>
         </div>

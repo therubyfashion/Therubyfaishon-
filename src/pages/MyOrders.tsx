@@ -170,10 +170,19 @@ export default function MyOrders() {
                       <Package size={16} />
                       <span className="text-xs font-bold uppercase tracking-widest">Standard Shipping</span>
                     </div>
-                    <button className="w-full sm:w-auto px-8 py-3 bg-gray-50 text-[#1A2C54] rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-ruby hover:text-white transition-all flex items-center justify-center space-x-2 group">
-                      <span>View Details</span>
-                      <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
-                    </button>
+                    <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+                      <button 
+                        onClick={() => window.location.href = `/track/${order.orderId || order.id}`}
+                        className="w-full sm:w-auto px-8 py-3 bg-ruby/[0.05] text-ruby rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-ruby hover:text-white transition-all flex items-center justify-center space-x-2 border border-ruby/10"
+                      >
+                        <TrendingUp size={14} />
+                        <span>Track Order</span>
+                      </button>
+                      <button className="w-full sm:w-auto px-8 py-3 bg-gray-50 text-[#1A2C54] rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-100 transition-all flex items-center justify-center space-x-2 group">
+                        <span>View Details</span>
+                        <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </motion.div>

@@ -43,6 +43,7 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
     { name: 'Home', path: '/' },
     { name: 'Shop', path: '/shop' },
     { name: 'About', path: '/about' },
+    { name: 'Track Order', path: '/track' },
     { name: 'FAQ', path: '/faq' },
   ];
 
