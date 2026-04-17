@@ -441,7 +441,8 @@ export default function Checkout() {
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     to: finalOrderData.address.email,
-                    from: settingsData.fromEmail || 'The Ruby <onboarding@resend.dev>',
+                    from: settingsData.fromEmail || undefined,
+                    replyTo: settingsData.supportEmail || undefined,
                     subject: `Order Confirmed! ${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`} ✨`,
                     html: emailHtml
                   })

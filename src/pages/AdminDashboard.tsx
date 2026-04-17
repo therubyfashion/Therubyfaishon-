@@ -1015,7 +1015,7 @@ export default function AdminDashboard() {
     siteTitle: 'The Ruby | Premium Clothing',
     metaDescription: 'Discover the latest trends in fashion at The Ruby.',
     resendApiKey: '',
-    fromEmail: 'The Ruby <onboarding@resend.dev>',
+    fromEmail: '',
     fast2smsApiKey: '',
     fast2smsTestPhone: '',
     oneSignalAppId: '',
@@ -1399,7 +1399,7 @@ export default function AdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: settings.supportEmail,
-          from: settings.fromEmail || 'The Ruby <onboarding@resend.dev>',
+          from: settings.fromEmail || undefined,
           subject: 'Test Email from The Ruby ✨',
           html: `
             <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #FAFAFA; padding: 40px 20px; color: #1A2C54;">
@@ -1552,6 +1552,8 @@ export default function AdminDashboard() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               to: targetEmail,
+              from: settings.fromEmail || undefined,
+              replyTo: settings.supportEmail || undefined,
               subject: `Order Delivered: ${order.orderId} ✨`,
               html: `
                 <div style="font-family: sans-serif; padding: 20px; color: #1A2C54; max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 20px;">
@@ -1649,7 +1651,8 @@ export default function AdminDashboard() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 to: targetEmail,
-                from: settings.fromEmail || 'The Ruby <onboarding@resend.dev>',
+                from: settings.fromEmail || undefined,
+                replyTo: settings.supportEmail || undefined,
                 subject: `Order Shipped: ${order.orderId} is on its way! 📦`,
                 html: `
                   <div style="font-family: sans-serif; padding: 20px; color: #1A2C54; max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 20px;">
@@ -6587,7 +6590,7 @@ export default function AdminDashboard() {
                               <Info size={14} className="mr-2" /> Important Instructions
                             </h4>
                             <ul className="text-[10px] text-blue-600 space-y-1 font-medium leading-relaxed">
-                              <li>• By default, emails are sent using <b>onboarding@resend.dev</b>.</li>
+                              <li>• By default, emails are sent using <b>your verified domain</b> (if configured) or the system default.</li>
                               <li>• <b>Note:</b> Resend only allows sending to your own account email when using the default sender.</li>
                               <li>• To send emails to customers, you <b>must</b> verify your domain on <a href="https://resend.com/domains" target="_blank" className="underline font-bold">Resend.com</a>.</li>
                               <li>• <a href="https://resend.com/docs/dashboard/domains/introduction" target="_blank" className="text-blue-800 underline font-bold">Click here for Step-by-Step Domain Setup Guide</a></li>
@@ -6610,7 +6613,7 @@ export default function AdminDashboard() {
                               <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">From Email (Verified Domain)</label>
                               <input 
                                 type="text" 
-                                placeholder="The Ruby <onboarding@resend.dev>"
+                                placeholder="The Ruby <hello@yourdomain.com>"
                                 value={settings.fromEmail || ''}
                                 onChange={(e) => setSettings({...settings, fromEmail: e.target.value})}
                                 className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 

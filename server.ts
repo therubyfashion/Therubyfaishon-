@@ -281,7 +281,7 @@ async function startServer() {
   });
 
   app.post("/api/send-email", async (req, res) => {
-    const { to, subject, html, from, fromName: providedFromName } = req.body;
+    const { to, subject, html, from, fromName: providedFromName, replyTo } = req.body;
     const apiKey = process.env.RESEND_API_KEY || currentResendApiKey;
     
     if (!to || !subject || !html) {
@@ -316,12 +316,16 @@ async function startServer() {
         }
       }
 
-      const emailPayload = {
+      const emailPayload: any = {
         from: from || process.env.RESEND_FROM_EMAIL || `"${fromName}" <onboarding@resend.dev>`,
         to: Array.isArray(to) ? to : [to],
         subject: subject,
         html: html,
       };
+
+      if (replyTo) {
+        emailPayload.reply_to = replyTo;
+      }
 
       console.log("--- Email Sending Attempt ---");
       console.log("To:", JSON.stringify(to));
@@ -347,7 +351,9 @@ async function startServer() {
         
         if (errorMessage.includes("domain is not verified") || errorMessage.includes("onboarding") || errorMessage.includes("Sender not authorized")) {
           errorMessage = `Bhai, Resend error: "${errorMessage}".
-          Note: Agar aap test kar rahe hain toh "onboarding@resend.dev" hi use karein. Apne domain se send karne ke liye Resend mein domain verify karna padta hai.`;
+          \nSamadhan:
+          1. Agar aapne domain verify kiya hai, toh Admin Settings mein "From Email" ko apne domain wala email (e.g. hello@yourdomain.com) set karein.
+          2. Agar domain verify nahi hai, toh Resend sirf aapke signup email par hi mail bhejega. "onboarding@resend.dev" ka use tabhi karein jab domain setup na ho.`;
         }
 
         return res.status(400).json({ 
