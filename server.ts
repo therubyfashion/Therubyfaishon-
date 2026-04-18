@@ -394,7 +394,7 @@ async function startServer() {
       
       // 3. Resolve From name and email
       let fromName = providedFromName || cachedSettings?.storeName || 'The Ruby';
-      const fromEmail = from || cachedSettings?.fromEmail || process.env.RESEND_FROM_EMAIL || `onboarding@resend.dev`;
+      const fromEmail = from || cachedSettings?.fromEmail || process.env.RESEND_FROM_EMAIL || `support@therubyfashion.shop`;
       
       // Format correctly: "Name" <email@domain.com>
       const formattedFrom = fromEmail.includes('<') ? fromEmail : `"${fromName}" <${fromEmail}>`;
@@ -424,11 +424,13 @@ async function startServer() {
         console.error("Resend API Error:", JSON.stringify(error, null, 2));
         let errorMessage = (error as any).message || "Resend failed to send email";
         
-        if (errorMessage.toLowerCase().includes("not verified") || errorMessage.toLowerCase().includes("onboarding") || errorMessage.toLowerCase().includes("authorized")) {
-          errorMessage = `Bhai, Resend Domain Error: "${errorMessage}".
+        if (errorMessage.toLowerCase().includes("not verified") || errorMessage.toLowerCase().includes("onboarding") || errorMessage.toLowerCase().includes("authorized") || errorMessage.toLowerCase().includes("only send testing emails")) {
+          errorMessage = `Bhai, Resend Domain Verification Error!
           \nSamadhan:
-          1. Agar domain verify kiya hai, toh Admin Settings mein "From Email" ko apna verified email daliye.
-          2. Agar domain verify NAHI hai, toh aap sirf apne signup email par hi test kar sakte hain. Customer ko email nahi jayega jab tak domain verify na ho.`;
+          1. Aapne apna domain 'therubyfashion.shop' Resend.com par verify nahi kiya hai.
+          2. Resend.com -> Domains mein jayein, 'therubyfashion.shop' add karein aur wahan diye gaye 3 DNS record apne Domain Provider (GoDaddy/Hostinger) mein add karein.
+          3. Jab tak domain verify nahi hoga, aap kisi aur ko email nahi bhej sakte.
+          4. Domain verify hone ke baad settings mein 'From Email' ko 'support@therubyfashion.shop' hi rehne dein.`;
         }
 
         return res.status(400).json({ 
