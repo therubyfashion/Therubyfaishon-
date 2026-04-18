@@ -81,7 +81,8 @@ function AppContent() {
     if (authLoading) return;
     
     const publicPaths = ['/login', '/signup', '/verify-prompt', '/verify-email', '/about', '/contact', '/faq'];
-    const isPublicPath = publicPaths.includes(location.pathname) || location.pathname.startsWith('/product/') || location.pathname === '/';
+    // Home ('/') is NOT public for logged-in but unverified users
+    const isPublicPath = publicPaths.includes(location.pathname) || location.pathname.startsWith('/product/');
     
     if (user && profile && !profile.isVerified && !isPublicPath) {
       navigate(`/verify-prompt?email=${encodeURIComponent(user.email || '')}&uid=${user.uid}`);
@@ -127,13 +128,14 @@ function AppContent() {
           console.log("OneSignal initialized successfully");
 
           // modern login for targeted notifications (much more reliable)
-          if (user) {
+          // Only identify if verified
+          if (user && profile?.isVerified) {
             await OneSignal.login(user.uid);
             await OneSignal.User.addTag("role", isAdmin ? 'admin' : 'customer');
             await OneSignal.User.addTag("email", user.email);
             console.log("OneSignal user identified:", user.uid);
           } else {
-            // Logout when no user to prevent cross-account notifications
+            // Logout when no user or unverified to prevent early notifications
             await OneSignal.logout();
           }
         });
