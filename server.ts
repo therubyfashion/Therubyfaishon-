@@ -394,11 +394,18 @@ async function startServer() {
       res.json({ success: true, id: response.data.id });
     } catch (error: any) {
       const errorData = error.response?.data;
+      const errorMsg = errorData?.errors ? (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : JSON.stringify(errorData.errors)) : error.message;
+
+      // Don't treat "not subscribed" as a hard crash
+      if (errorMsg.includes("not subscribed")) {
+        console.warn("OneSignal Broadcast Warning:", errorMsg);
+        return res.json({ success: true, warning: errorMsg, id: null });
+      }
+
       console.error("OneSignal Broadcast Error Detail:", JSON.stringify(errorData || error.message, null, 2));
-      
       let userFriendlyError = "Broadcast notification fail ho gaya.";
       if (errorData?.errors) {
-        userFriendlyError = `OneSignal Error: ${errorData.errors.join(', ')}`;
+        userFriendlyError = `OneSignal Error: ${errorMsg}`;
       }
 
       res.status(500).json({ 
@@ -434,11 +441,18 @@ async function startServer() {
       res.json({ success: true, id: response.data.id });
     } catch (error: any) {
       const errorData = error.response?.data;
+      const errorMsg = errorData?.errors ? (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : JSON.stringify(errorData.errors)) : error.message;
+
+      // Specific user error: usually means user hasn't accepted push permissions yet or synced yet
+      if (errorMsg.includes("not subscribed") || errorMsg.includes("not found")) {
+        console.warn(`OneSignal Targeted Push Warning for ${userId}:`, errorMsg);
+        return res.json({ success: true, warning: "User not yet subscribed to push notifications.", id: null });
+      }
+
       console.error("OneSignal User Push Error Detail:", JSON.stringify(errorData || error.message, null, 2));
-      
       let userFriendlyError = "Push notification fail ho gaya.";
       if (errorData?.errors) {
-        userFriendlyError = `OneSignal Error: ${errorData.errors.join(', ')}`;
+        userFriendlyError = `OneSignal Error: ${errorMsg}`;
       }
 
       res.status(500).json({ 
