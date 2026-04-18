@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { collection, getDocs, query, limit } from 'firebase/firestore';
 import { db } from './firebase';
@@ -67,13 +67,26 @@ import { useVisitorTracking } from './hooks/useVisitorTracking';
 
 function AppContent() {
   const location = useLocation();
+  const navigate = useNavigate();
   const isAdminPath = location.pathname.startsWith('/admin');
   const [showSplash, setShowSplash] = React.useState(true);
   
   // Track live visitors
   useVisitorTracking();
 
-  const { user, isAdmin } = useAuth();
+  const { user, profile, isAdmin, loading: authLoading } = useAuth();
+
+  // Handle unverified email redirect
+  React.useEffect(() => {
+    if (authLoading) return;
+    
+    const publicPaths = ['/login', '/signup', '/verify-prompt', '/verify-email', '/about', '/contact', '/faq'];
+    const isPublicPath = publicPaths.includes(location.pathname) || location.pathname.startsWith('/product/') || location.pathname === '/';
+    
+    if (user && profile && !profile.isVerified && !isPublicPath) {
+      navigate(`/verify-prompt?email=${encodeURIComponent(user.email || '')}&uid=${user.uid}`);
+    }
+  }, [user, profile, location.pathname, authLoading, navigate]);
 
   // Initialize OneSignal
   React.useEffect(() => {

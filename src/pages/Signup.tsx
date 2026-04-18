@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, updateProfile, signOut } from 'firebase/auth';
 import { auth, db } from '../firebase';
-import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import { Mail, Lock, User, ArrowRight, Phone, CheckCircle2 } from 'lucide-react';
@@ -38,7 +38,21 @@ export default function Signup() {
     setLoading(true);
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      const { user } = await signInWithPopup(auth, provider);
+      
+      // Ensure profile exists
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      if (!userDoc.exists()) {
+        await setDoc(doc(db, 'users', user.uid), {
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName,
+          role: 'user',
+          isVerified: true, // Google accounts are pre-verified
+          createdAt: new Date().toISOString()
+        });
+      }
+      
       toast.success("Welcome to The Ruby!");
       navigate('/');
     } catch (error: any) {
@@ -169,10 +183,8 @@ export default function Signup() {
 
       const emailData = await emailResponse.json();
       if (!emailResponse.ok) {
-        // If email fails, we still created the user in Auth and Firestore
-        // We should let them know but maybe not throw a hard error that blocks everything
         console.error("Email send failed:", emailData.error);
-        toast.error(`Account created but email failed: ${emailData.error}`);
+        toast.error("Account created, but verification email failed to send. You can resend it from the next screen.");
       } else {
         toast.success("Verification code sent to your email!");
       }

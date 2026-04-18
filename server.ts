@@ -21,20 +21,22 @@ let db: any = null;
 try {
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
   let firestoreDatabaseId = '(default)';
+  let firebaseProjectId = undefined;
 
   if (fs.existsSync(configPath)) {
     try {
       const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || firestoreDatabaseId;
+      firebaseProjectId = firebaseConfig.projectId;
     } catch (e) {
       console.warn("Could not parse firebase-applet-config.json:", e);
     }
   }
     
   // Initialize Admin SDK
-  // In AI Studio/Cloud Run, calling initializeApp() without arguments is the most reliable way 
-  // to use the environment's default service account and project ID.
-  const adminApp = !admin.apps.length ? admin.initializeApp() : admin.app();
+  const adminApp = !admin.apps.length 
+    ? admin.initializeApp({ projectId: firebaseProjectId }) 
+    : admin.app();
   const actualProjectId = adminApp.options.projectId || process.env.PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
 
   console.log("Firebase Admin initialized. Project:", actualProjectId, "DB ID:", firestoreDatabaseId);
