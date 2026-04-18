@@ -1272,9 +1272,10 @@ export default function AdminDashboard() {
         const response = await fetch('/api/firebase-status');
         const data = await response.json();
         if (data.success) {
-          setFirebaseStatus('Connected ✅');
+          setFirebaseStatus(`Connected ✅ (${data.info.databaseId})`);
         } else {
           setFirebaseStatus(`Error: ${data.error} ❌`);
+          console.log("Firebase Diag:", data.diagnostics);
         }
       } catch (error: any) {
         setFirebaseStatus('Offline ❌');
@@ -6400,15 +6401,23 @@ export default function AdminDashboard() {
                                   </span>
                                 </div>
                                 <div className="flex items-center justify-between text-[10px] pt-1 border-t border-blue-100 mt-1">
-                                  <span className="text-blue-600">Firebase Server Connection:</span>
+                                  <span className="text-blue-600">Firebase Server:</span>
                                   <span className={firebaseStatus.includes('Connected') ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
                                     {firebaseStatus}
                                   </span>
                                 </div>
                                 {firebaseStatus.includes('Error') && (
-                                  <p className="text-[8px] text-red-500 mt-1 italic">
-                                    Check server logs or re-run Firebase setup.
-                                  </p>
+                                  <div className="mt-1 space-y-1">
+                                    <p className="text-[8px] text-red-500 italic">
+                                      {firebaseStatus.includes('PERMISSION_DENIED') ? "Bhai, settings mein 'Set up Firebase' button dubara click karein permissions fix karne ke liye." : "Check server logs or re-run Firebase setup."}
+                                    </p>
+                                    <button 
+                                      onClick={() => window.location.reload()}
+                                      className="text-[8px] bg-red-100 text-red-600 px-2 py-0.5 rounded uppercase font-bold"
+                                    >
+                                      Retry Check
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             </div>

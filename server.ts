@@ -18,47 +18,90 @@ let oneSignalClient: any = null;
 
 // Initialize Firebase Admin for server-side operations
 let db: any = null;
-try {
-  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-  let firestoreDatabaseId = '(default)';
-  let firebaseProjectId = undefined;
+let adminApp: admin.app.App | null = null;
 
-  if (fs.existsSync(configPath)) {
-    try {
-      const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || firestoreDatabaseId;
-      firebaseProjectId = firebaseConfig.projectId;
-    } catch (e) {
-      console.warn("Could not parse firebase-applet-config.json:", e);
-    }
-  }
-    
-  // Initialize Admin SDK
-  const adminApp = !admin.apps.length 
-    ? admin.initializeApp({ projectId: firebaseProjectId }) 
-    : admin.app();
-  const actualProjectId = adminApp.options.projectId || process.env.PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-
-  console.log("Firebase Admin initialized. Project:", actualProjectId, "DB ID:", firestoreDatabaseId);
-
-  // Use getFirestore from firebase-admin/firestore with the app instance
+const initializeFirebase = async () => {
   try {
-    if (firestoreDatabaseId && firestoreDatabaseId !== '(default)') {
-      db = getFirestore(adminApp, firestoreDatabaseId);
-    } else {
-      db = getFirestore(adminApp);
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    let firestoreDatabaseId = '(default)';
+    let firebaseProjectId = undefined;
+
+    if (fs.existsSync(configPath)) {
+      try {
+        const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || firestoreDatabaseId;
+        firebaseProjectId = firebaseConfig.projectId;
+      } catch (e) {
+        console.warn("Could not parse firebase-applet-config.json:", e);
+      }
     }
-    // Verify connection immediately
-    db.collection('settings').limit(1).get()
-      .then(() => console.log("Successfully connected to Firestore collection 'settings'"))
-      .catch((e: any) => console.warn("Initial Firestore test failed (this is normal if collection is empty or if still provisioning):", e.message));
-  } catch (dbErr) {
-    console.error("Failed to initialize specific Firestore database, falling back to default:", dbErr);
-    db = getFirestore(adminApp);
+      
+    // 1. Initialize Admin App
+    try {
+      if (admin.apps.length > 0) {
+        adminApp = admin.app();
+      } else {
+        // CRITICAL: We MUST use the projectId from firebase-applet-config.json
+        // because the environment project (ais-...) usually doesn't have Firestore enabled.
+        const targetProjectId = firebaseProjectId || process.env.PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
+        
+        console.log(`Initializing Firebase Admin for Project: ${targetProjectId}`);
+        
+        adminApp = admin.initializeApp({
+          credential: admin.credential.applicationDefault(),
+          projectId: targetProjectId
+        });
+      }
+    } catch (initErr: any) {
+      console.warn("Project-specific init failed, trying basic ADC:", initErr.message);
+      adminApp = admin.initializeApp({ 
+        credential: admin.credential.applicationDefault()
+      });
+    }
+
+    if (!adminApp) throw new Error("Failed to initialize adminApp");
+    
+    // 2. Resolve Firestore (Brute Force Strategy)
+    const tryConnect = async (dbId: string): Promise<any> => {
+      console.log(`Testing Firestore Database: [${dbId}]`);
+      const testDb = dbId === '(default)' ? getFirestore(adminApp!) : getFirestore(adminApp!, dbId);
+      // Wait for a small health check
+      await testDb.listCollections();
+      return testDb;
+    };
+
+    // Primary Attempt: Try config database
+    try {
+      if (firestoreDatabaseId && firestoreDatabaseId !== '(default)') {
+        db = await tryConnect(firestoreDatabaseId);
+        console.log(`✅ Connected to config database: ${firestoreDatabaseId}`);
+      } else {
+        throw new Error("No specific database in config");
+      }
+    } catch (primaryErr: any) {
+      console.warn(`❌ Specific database [${firestoreDatabaseId}] failed: ${primaryErr.message}`);
+      
+      // Secondary Attempt: Try (default)
+      try {
+        console.log("🔄 Fallback: Trying '(default)' database...");
+        db = await tryConnect('(default)');
+        console.log("✅ Connected to '(default)' database.");
+      } catch (fallback1Err: any) {
+        console.error(`❌ Fallback '(default)' failed: ${fallback1Err.message}`);
+
+        // Tertiary Attempt: If nothing works, just assign default and let it fail on query 
+        // with more descriptive errors later
+        db = getFirestore(adminApp!);
+        console.log("⚠️ Using default Firestore instance without verification.");
+      }
+    }
+  } catch (err) {
+    console.error("FATAL: Firebase bootstrap failed:", err);
   }
-} catch (err) {
-  console.error("Failed to initialize Firebase Admin on server:", err);
-}
+};
+
+// Start initialization immediately
+initializeFirebase();
 
 // Helper to send OneSignal notifications via axios
 async function sendOneSignalNotification(notification: any) {
@@ -129,11 +172,52 @@ async function startServer() {
   // API routes
   app.get("/api/firebase-status", async (req, res) => {
     try {
-      if (!db) throw new Error("Firebase Admin not initialized");
-      await db.collection('settings').limit(1).get();
-      res.json({ success: true, status: "Connected" });
+      if (!db) {
+        console.log("Database object is null, attempting late initialization...");
+        await initializeFirebase();
+      }
+
+      if (!db) throw new Error("Firebase Admin not initialized on server (db is null)");
+      
+      // Try a simple operation to check permissions
+      let collections;
+      try {
+        collections = await db.listCollections();
+      } catch (e: any) {
+        console.warn(`API Check Failed: ${e.message}`);
+        // If not found, it might be because the global DB object is stale or wrong DB ID
+        if (e.message.includes("NOT_FOUND") || e.message.includes("5")) {
+          console.log("Stale DB or NOT_FOUND detected in API. Re-triggering bootstrap...");
+          await initializeFirebase();
+          collections = await db.listCollections();
+        } else {
+          throw e;
+        }
+      }
+      
+      res.json({ 
+        success: true, 
+        status: "Connected ✅",
+        collectionsFound: collections.length,
+        info: {
+          databaseId: db._databaseId || db.databaseId || 'default',
+          projectId: adminApp?.options.projectId || 'unknown',
+          envProjectId: process.env.PROJECT_ID || 'missing'
+        }
+      });
     } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
+      console.error("Firebase Status Check Failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message,
+        code: error.code,
+        diagnostics: {
+          projectId: adminApp?.options.projectId,
+          envProjectId: process.env.PROJECT_ID,
+          hasDbObject: !!db
+        },
+        details: "Bhai, ye 'NOT_FOUND' error ka matlab hai ki database exist nahi karta. Maine 3 alag-alag tarike se connect karne ki koshish ki hai. Agar ab bhi nahi ho raha, toh please ek baar settings mein 'Set up Firebase' button click karein, aur region 'asia-southeast1' choose karein."
+      });
     }
   });
 
@@ -284,42 +368,39 @@ async function startServer() {
 
   app.post("/api/send-email", async (req, res) => {
     const { to, subject, html, from, fromName: providedFromName, replyTo } = req.body;
-    const apiKey = process.env.RESEND_API_KEY || currentResendApiKey;
     
-    if (!to || !subject || !html) {
-      return res.status(400).json({ error: "Missing required fields: to, subject, or html" });
-    }
-
-    if (!apiKey) {
-      return res.status(400).json({ error: "Email service not configured." });
-    }
-
     try {
-      const dynamicResend = new Resend(apiKey);
-      
-      // Use provided fromName or fallback to cached/default
-      let fromName = providedFromName || 'The Ruby';
-      
-      if (!providedFromName) {
-        try {
-          const now = Date.now();
-          if (!cachedSettings || (now - lastSettingsFetch > SETTINGS_CACHE_TTL)) {
-            if (db) {
-              const settingsSnap = await db.collection('settings').limit(1).get();
-              if (!settingsSnap.empty) {
-                cachedSettings = settingsSnap.docs[0].data();
-                lastSettingsFetch = now;
-              }
-            }
+      // 1. Fetch Latest Settings (Caching handles performance)
+      const now = Date.now();
+      if (!cachedSettings || (now - lastSettingsFetch > SETTINGS_CACHE_TTL)) {
+        if (db) {
+          const settingsSnap = await db.collection('settings').limit(1).get();
+          if (!settingsSnap.empty) {
+            cachedSettings = settingsSnap.docs[0].data();
+            lastSettingsFetch = now;
           }
-          if (cachedSettings?.storeName) fromName = cachedSettings.storeName;
-        } catch (e) {
-          console.error("Silent error fetching settings:", e);
         }
       }
 
+      // 2. Resolve API Key
+      const apiKey = process.env.RESEND_API_KEY || currentResendApiKey || cachedSettings?.resendApiKey;
+      
+      if (!apiKey) {
+        console.error("Email API Key not found in Environment or Database.");
+        return res.status(400).json({ error: "Bhai, Admin Panel mein 'Resend API Key' set karein." });
+      }
+
+      const dynamicResend = new Resend(apiKey);
+      
+      // 3. Resolve From name and email
+      let fromName = providedFromName || cachedSettings?.storeName || 'The Ruby';
+      const fromEmail = from || cachedSettings?.fromEmail || process.env.RESEND_FROM_EMAIL || `onboarding@resend.dev`;
+      
+      // Format correctly: "Name" <email@domain.com>
+      const formattedFrom = fromEmail.includes('<') ? fromEmail : `"${fromName}" <${fromEmail}>`;
+
       const emailPayload: any = {
-        from: from || process.env.RESEND_FROM_EMAIL || `"${fromName}" <onboarding@resend.dev>`,
+        from: formattedFrom,
         to: Array.isArray(to) ? to : [to],
         subject: subject,
         html: html,
@@ -331,31 +412,23 @@ async function startServer() {
 
       console.log("--- Email Sending Attempt ---");
       console.log("To:", JSON.stringify(to));
-      console.log("From:", emailPayload.from);
+      console.log("From:", formattedFrom);
       
-      if (!apiKey || apiKey.trim() === '') {
-        console.error("RESEND_API_KEY is empty or missing in environment/settings.");
-        return res.status(400).json({ 
-          error: "Bhai, settings mein 'Resend API Key' save nahi hai ya galat hai. Pehle settings check karein." 
-        });
-      }
-
       if (!to || (Array.isArray(to) && to.length === 0) || to === '') {
-        console.error("Recipient email is missing.");
-        return res.status(400).json({ error: "Customer ka email missing hai order mein." });
+        return res.status(400).json({ error: "Recipient email is missing." });
       }
 
       const { data, error } = await dynamicResend.emails.send(emailPayload);
       
       if (error) {
         console.error("Resend API Error:", JSON.stringify(error, null, 2));
-        let errorMessage = error.message || "Resend failed to send email";
+        let errorMessage = (error as any).message || "Resend failed to send email";
         
-        if (errorMessage.includes("domain is not verified") || errorMessage.includes("onboarding") || errorMessage.includes("Sender not authorized")) {
-          errorMessage = `Bhai, Resend error: "${errorMessage}".
+        if (errorMessage.toLowerCase().includes("not verified") || errorMessage.toLowerCase().includes("onboarding") || errorMessage.toLowerCase().includes("authorized")) {
+          errorMessage = `Bhai, Resend Domain Error: "${errorMessage}".
           \nSamadhan:
-          1. Agar aapne domain verify kiya hai, toh Admin Settings mein "From Email" ko apne domain wala email (e.g. hello@yourdomain.com) set karein.
-          2. Agar domain verify nahi hai, toh Resend sirf aapke signup email par hi mail bhejega. "onboarding@resend.dev" ka use tabhi karein jab domain setup na ho.`;
+          1. Agar domain verify kiya hai, toh Admin Settings mein "From Email" ko apna verified email daliye.
+          2. Agar domain verify NAHI hai, toh aap sirf apne signup email par hi test kar sakte hain. Customer ko email nahi jayega jab tak domain verify na ho.`;
         }
 
         return res.status(400).json({ 

@@ -184,7 +184,11 @@ export default function Signup() {
       const emailData = await emailResponse.json();
       if (!emailResponse.ok) {
         console.error("Email send failed:", emailData.error);
-        toast.error("Account created, but verification email failed to send. You can resend it from the next screen.");
+        if (emailData.error?.includes("Bhai")) {
+          toast.error(emailData.error, { duration: 6000 });
+        } else {
+          toast.error("Account created, but verification email failed to send. Resend it from the next screen.");
+        }
       } else {
         toast.success("Verification code sent to your email!");
       }

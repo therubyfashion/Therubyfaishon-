@@ -303,6 +303,9 @@ export default function VerifyPrompt() {
 
       const emailData = await emailResponse.json();
       if (!emailResponse.ok) {
+        if (emailData.error?.includes("Bhai")) {
+          throw new Error(emailData.error);
+        }
         throw new Error(emailData.error || "Failed to resend code");
       }
 
