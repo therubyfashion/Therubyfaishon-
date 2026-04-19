@@ -1,27 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Instagram, Facebook, Twitter, Mail, MapPin, Phone, Youtube, MessageCircle, Sparkles, ArrowUpRight } from 'lucide-react';
-import { collection, getDocs, query, limit } from 'firebase/firestore';
-import { db } from '../firebase';
-import { motion } from 'motion/react';
+import { useSettings } from '../contexts/SettingsContext';
 
 export default function Footer() {
-  const [settings, setSettings] = useState<any>(null);
-
-  useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const q = query(collection(db, 'settings'), limit(1));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-          setSettings(querySnapshot.docs[0].data());
-        }
-      } catch (error) {
-        console.error("Error fetching footer settings:", error);
-      }
-    };
-    fetchSettings();
-  }, []);
+  const { settings } = useSettings();
 
   const socialLinks = [
     { id: 'instagram', icon: Instagram, url: settings?.footerSocials?.instagram, color: 'hover:text-pink-500 hover:bg-pink-500/10' },

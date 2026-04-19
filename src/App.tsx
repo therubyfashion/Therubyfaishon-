@@ -4,6 +4,7 @@ import { Toaster } from 'sonner';
 import { collection, getDocs, query, limit } from 'firebase/firestore';
 import { db } from './firebase';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { SettingsProvider, useSettings } from './contexts/SettingsContext';
 import { CartProvider } from './contexts/CartContext';
 import { WishlistProvider } from './contexts/WishlistContext';
 import Footer from './components/Footer';
@@ -51,15 +52,17 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <CartProvider>
-        <WishlistProvider>
-          <Router>
-            <AppContent />
-          </Router>
-        </WishlistProvider>
-      </CartProvider>
-    </AuthProvider>
+    <SettingsProvider>
+      <AuthProvider>
+        <CartProvider>
+          <WishlistProvider>
+            <Router>
+              <AppContent />
+            </Router>
+          </WishlistProvider>
+        </CartProvider>
+      </AuthProvider>
+    </SettingsProvider>
   );
 }
 
@@ -75,6 +78,7 @@ function AppContent() {
   useVisitorTracking();
 
   const { user, profile, isAdmin, loading: authLoading } = useAuth();
+  const { settings, loading: settingsLoading } = useSettings();
 
   // Handle unverified email redirect
   React.useEffect(() => {
@@ -91,27 +95,17 @@ function AppContent() {
 
   // Initialize OneSignal
   React.useEffect(() => {
+    if (settingsLoading) return;
+    
     const initOneSignal = async () => {
       try {
         // @ts-ignore
-        let appId = import.meta.env.VITE_ONESIGNAL_APP_ID;
+        let appId = import.meta.env.VITE_ONESIGNAL_APP_ID || settings?.oneSignalAppId;
         
-        // If not in env, try to fetch from Firestore
-        if (!appId) {
-          console.log("OneSignal App ID not found in env, fetching from Firestore...");
-          const settingsSnap = await getDocs(query(collection(db, 'settings'), limit(1)));
-          if (!settingsSnap.empty) {
-            const settingsData = settingsSnap.docs[0].data();
-            appId = settingsData.oneSignalAppId;
-          }
-        }
-
         if (!appId) {
           console.warn("OneSignal App ID is missing. Push notifications will not work.");
           return;
         }
-
-        console.log("Initializing OneSignal with App ID:", appId);
 
         // @ts-ignore
         window.OneSignalDeferred = window.OneSignalDeferred || [];
@@ -125,17 +119,11 @@ function AppContent() {
             serviceWorkerPath: 'OneSignalSDKWorker.js',
           });
 
-          console.log("OneSignal initialized successfully");
-
-          // modern login for targeted notifications (much more reliable)
-          // Only identify if verified
           if (user && profile?.isVerified) {
             await OneSignal.login(user.uid);
             await OneSignal.User.addTag("role", isAdmin ? 'admin' : 'customer');
             await OneSignal.User.addTag("email", user.email);
-            console.log("OneSignal user identified:", user.uid);
           } else {
-            // Logout when no user or unverified to prevent early notifications
             await OneSignal.logout();
           }
         });
@@ -145,58 +133,44 @@ function AppContent() {
     };
 
     initOneSignal();
-  }, [user, isAdmin]);
-
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowSplash(false);
-    }, 2500);
-    return () => clearTimeout(timer);
-  }, []);
+  }, [user, isAdmin, settings, settingsLoading]);
 
   // Apply SEO settings globally
   React.useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const settingsSnap = await getDocs(query(collection(db, 'settings'), limit(1)));
-        if (!settingsSnap.empty) {
-          const settings = settingsSnap.docs[0].data();
-          
-          // Apply Title
-          if (settings.siteTitle) {
-            document.title = settings.siteTitle;
-          }
-          
-          // Apply Meta Description
-          if (settings.metaDescription) {
-            let metaDesc = document.querySelector('meta[name="description"]');
-            if (!metaDesc) {
-              metaDesc = document.createElement('meta');
-              metaDesc.setAttribute('name', 'description');
-              document.head.appendChild(metaDesc);
-            }
-            metaDesc.setAttribute('content', settings.metaDescription);
-          }
-          
-          // Apply Favicon
-          if (settings.favicon) {
-            const links = document.querySelectorAll("link[rel*='icon']");
-            links.forEach(link => link.parentNode?.removeChild(link));
-            
-            const link = document.createElement('link');
-            link.type = 'image/x-icon';
-            link.rel = 'shortcut icon';
-            link.href = settings.favicon;
-            document.getElementsByTagName('head')[0].appendChild(link);
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching SEO settings:', error);
-      }
-    };
+    if (settingsLoading || !settings) return;
     
-    fetchSettings();
-  }, []);
+    try {
+      // Apply Title
+      if (settings.siteTitle) {
+        document.title = settings.siteTitle;
+      }
+      
+      // Apply Meta Description
+      if (settings.metaDescription) {
+        let metaDesc = document.querySelector('meta[name="description"]');
+        if (!metaDesc) {
+          metaDesc = document.createElement('meta');
+          metaDesc.setAttribute('name', 'description');
+          document.head.appendChild(metaDesc);
+        }
+        metaDesc.setAttribute('content', settings.metaDescription);
+      }
+      
+      // Apply Favicon
+      if (settings.favicon) {
+        const links = document.querySelectorAll("link[rel*='icon']");
+        links.forEach(link => link.parentNode?.removeChild(link));
+        
+        const link = document.createElement('link');
+        link.type = 'image/x-icon';
+        link.rel = 'shortcut icon';
+        link.href = settings.favicon;
+        document.getElementsByTagName('head')[0].appendChild(link);
+      }
+    } catch (error) {
+      console.error('Error applying SEO settings:', error);
+    }
+  }, [settings, settingsLoading]);
   
   return (
     <div className="min-h-screen flex flex-col">

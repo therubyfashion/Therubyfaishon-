@@ -1042,46 +1042,29 @@ export default function AdminDashboard() {
     // Initialize audio
     audioRef.current = new Audio(settings.notificationSound);
     
-    // Real-time orders listener for notifications
-    const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(10));
-    let isInitialLoad = true;
+    const fetchAllData = async () => {
+      try {
+        const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(50));
+        const ordersSnap = await getDocs(q);
+        setOrders(ordersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
 
-    const unsubscribeOrders = onSnapshot(q, (snapshot) => {
-      // ... existing orders logic ...
-      setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'orders');
-    });
+        const chatsQuery = query(collection(db, 'chats'), orderBy('lastMessageAt', 'desc'));
+        const chatsSnap = await getDocs(chatsQuery);
+        setChats(chatsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
 
-    // Real-time chats listener
-    const chatsQuery = query(collection(db, 'chats'), orderBy('lastMessageAt', 'desc'));
-    const unsubscribeChats = onSnapshot(chatsQuery, (snapshot) => {
-      setChats(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'chats');
-    });
+        const sessionsSnap = await getDocs(collection(db, 'active_sessions'));
+        setLiveSessions(sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
 
-    // Real-time active sessions listener
-    const unsubscribeSessions = onSnapshot(collection(db, 'active_sessions'), (snapshot) => {
-      setLiveSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'active_sessions');
-    });
-
-    // Real-time notifications listener
-    const notificationsQuery = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(50));
-    const unsubscribeNotifications = onSnapshot(notificationsQuery, (snapshot) => {
-      setNotifications(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'notifications');
-    });
-
-    return () => {
-      unsubscribeOrders();
-      unsubscribeChats();
-      unsubscribeSessions();
-      unsubscribeNotifications();
+        const notificationsQuery = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(50));
+        const noticesSnap = await getDocs(notificationsQuery);
+        setNotifications(noticesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } catch (error) {
+        console.error("Dashboard Quota Protect:", error);
+      }
     };
+    
+    fetchAllData();
+    // No return since we don't have listeners now
   }, [settings.notificationSound]);
 
   useEffect(() => {

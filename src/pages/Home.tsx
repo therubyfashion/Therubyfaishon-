@@ -93,8 +93,12 @@ export default function Home() {
         // Fetch Banners
         const bannersSnap = await getDocs(query(collection(db, 'banners'), where('active', '==', true)));
         setBanners(bannersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } catch (error) {
-        console.error("Error fetching home data:", error);
+      } catch (error: any) {
+        if (error.code === 'resource-exhausted') {
+          console.warn("Home Data: Firestore Quota reached. Content will load after reset.");
+        } else {
+          console.error("Error fetching home data:", error);
+        }
       } finally {
         setLoading(false);
       }
