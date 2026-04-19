@@ -55,38 +55,19 @@ export default function TrackOrder() {
     setLoading(true);
     setError(null);
     try {
-      // Find order by orderId (custom format like TRB-123456) or document ID
-      let orderData: any = null;
-      
-      // 1. Try finding by document ID first if it looks like one
-      if (oid.length > 15) {
-        const docRef = doc(db, 'orders', oid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          orderData = { id: docSnap.id, ...docSnap.data() };
-        }
+      const response = await fetch('/api/track-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: oid, email })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Order not found or access denied.");
       }
 
-      // 2. Try finding by custom orderId
-      if (!orderData) {
-        const q = query(collection(db, 'orders'), where('orderId', '==', oid.toUpperCase()));
-        const querySnap = await getDocs(q);
-        if (!querySnap.empty) {
-          orderData = { id: querySnap.docs[0].id, ...querySnap.docs[0].data() };
-        }
-      }
-
-      if (!orderData) {
-        throw new Error("Order not found. Please check your Order ID.");
-      }
-
-      // Verify email
-      const customerEmail = orderData.email || orderData.address?.email;
-      if (customerEmail?.toLowerCase() !== email.toLowerCase()) {
-        throw new Error("Email address doesn't match this Order ID.");
-      }
-
-      setOrder(orderData);
+      setOrder(data);
       window.history.pushState({}, '', `/track/${oid.toUpperCase()}`);
     } catch (err: any) {
       setError(err.message);
