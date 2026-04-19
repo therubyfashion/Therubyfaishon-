@@ -29,17 +29,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
-        // Use onSnapshot for real-time profile updates
-        unsubscribeProfile = onSnapshot(doc(db, 'users', firebaseUser.uid), async (userDoc) => {
-          const userData = userDoc.data() as UserProfile | undefined;
-          if (userDoc.exists()) {
-            setProfile(userData);
-          } else {
-            // If user exists in Auth but not in Firestore (should not happen with our flow)
-            setProfile(null);
+        const fetchProfile = async () => {
+          try {
+            const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+            const userData = userDoc.data() as UserProfile | undefined;
+            if (userDoc.exists()) {
+              setProfile(userData);
+            } else {
+              setProfile(null);
+            }
+          } catch (error) {
+            console.error("Error fetching profile:", error);
+          } finally {
+            setLoading(false);
           }
-          setLoading(false);
-        });
+        };
+        fetchProfile();
       } else {
         setUser(null);
         setProfile(null);

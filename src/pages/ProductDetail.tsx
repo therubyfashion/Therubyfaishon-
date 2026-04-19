@@ -241,22 +241,25 @@ export default function ProductDetail() {
         setLoading(false);
       }
     };
-    fetchProduct();
-
-    // Fetch Reviews
-    if (id) {
-      const q = query(
-        collection(db, 'reviews'),
-        where('productId', '==', id)
-      );
-      const unsubscribe = onSnapshot(q, (snapshot) => {
+    const fetchReviews = async () => {
+      if (!id) return;
+      try {
+        const q = query(
+          collection(db, 'reviews'),
+          where('productId', '==', id)
+        );
+        const snapshot = await getDocs(q);
         const fetchedReviews = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Review));
         // Sort client-side to avoid needing a composite index
         fetchedReviews.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setReviews(fetchedReviews);
-      });
-      return () => unsubscribe();
-    }
+      } catch (error) {
+        console.error("Error fetching reviews:", error);
+      }
+    };
+
+    fetchProduct();
+    fetchReviews();
   }, [id, navigate]);
 
   if (loading) return <ProductDetailSkeleton />;

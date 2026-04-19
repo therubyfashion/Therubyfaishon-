@@ -93,47 +93,53 @@ const initializeFirebase = async (force = false) => {
 
     if (!adminApp) throw new Error("Failed to initialize adminApp");
     
+    console.log(`Searching for Database: [${firestoreDatabaseId}] in Project: [${adminApp.options.projectId}]`);
+    
     // 2. Resolve Firestore (Brute Force Strategy)
     const tryConnect = async (dbId: string): Promise<any> => {
-      console.log(`Testing Firestore Database Connection: [${dbId}]`);
+      console.log(`Testing Firestore Database Connection: [${dbId}] in Project: [${adminApp?.options.projectId}]`);
       const testDb = dbId === '(default)' ? getFirestore(adminApp!) : getFirestore(adminApp!, dbId);
       
-      // Wait for a small health check
       try {
         // Use a simple listCollections check - it's a good test for Admin permissions
-        await testDb.listCollections();
+        // We set a timeout because gRPC NOT_FOUND can sometimes hang or take time
+        const collections = await Promise.race([
+          testDb.listCollections(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore connection timeout")), 5000))
+        ]) as any;
+        
+        console.log(`✅ Success: Found ${collections.length} collections in [${dbId}]`);
         return testDb;
       } catch (e: any) {
-        console.warn(`Connection test failed for [${dbId}]: ${e.message}`);
+        console.warn(`❌ Connection failed for [${dbId}]: ${e.message} (Code: ${e.code})`);
         throw e;
       }
     };
 
-    // Primary Attempt: Try config database
-    try {
-      if (firestoreDatabaseId && firestoreDatabaseId !== '(default)') {
-        db = await tryConnect(firestoreDatabaseId);
-        console.log(`✅ Connected to config database: ${firestoreDatabaseId}`);
-      } else {
-        throw new Error("No specific database in config");
-      }
-    } catch (primaryErr: any) {
-      console.warn(`❌ Specific database [${firestoreDatabaseId}] connection failed. Trying fallback...`);
-      
-      // Secondary Attempt: Try (default)
-      try {
-        console.log("🔄 Fallback: Trying '(default)' database...");
-        db = await tryConnect('(default)');
-        currentFirestoreDatabaseId = '(default)';
-        console.log("✅ Connected to '(default)' database.");
-      } catch (fallback1Err: any) {
-        console.error(`❌ Fallback '(default)' failed: ${fallback1Err.message}`);
+    // Try multiple possible database IDs
+    const databaseIdsToTry = [
+      firestoreDatabaseId,
+      '(default)',
+      'ai-studio-7e49bc2d-5269-463a-a740-bbf9c06449c0' // Hardcoded based on user screenshot just in case
+    ].filter((id, index, self) => id && self.indexOf(id) === index); // Unique and non-empty
 
-        // Tertiary Attempt: If nothing works, just assign default handle and hope for the best 
-        // (Maybe permissions take time to propagate)
-        db = getFirestore(adminApp!);
-        console.log("⚠️ Using default Firestore instance without verification.");
+    let connected = false;
+    for (const id of databaseIdsToTry) {
+      try {
+        db = await tryConnect(id);
+        currentFirestoreDatabaseId = id;
+        connected = true;
+        console.log(`🎉 Firebase Admin fully synced with database: ${id}`);
+        break;
+      } catch (e) {
+        continue;
       }
+    }
+
+    if (!connected) {
+      console.error("🚨 All Firestore connection attempts failed. Using default handle as last resort.");
+      db = getFirestore(adminApp!);
+      currentFirestoreDatabaseId = firestoreDatabaseId || '(default)';
     }
   } catch (err) {
     console.error("FATAL: Firebase bootstrap failed:", err);
@@ -326,11 +332,15 @@ async function startServer() {
       res.json({ 
         success: true, 
         status: "Connected ✅",
-        collectionsFound: collections.length,
+        collectionsFound: Array.isArray(collections) ? collections.length : 0,
         info: {
           databaseId: currentFirestoreDatabaseId,
           projectId: adminApp?.options.projectId || currentFirebaseProjectId || 'unknown',
-          envProjectId: process.env.PROJECT_ID || 'missing'
+          authAppCount: admin.apps.length,
+          env: {
+            projectId: process.env.PROJECT_ID || 'missing',
+            gcpProject: process.env.GOOGLE_CLOUD_PROJECT || 'missing'
+          }
         }
       });
     } catch (error: any) {
@@ -341,10 +351,11 @@ async function startServer() {
         code: error.code,
         diagnostics: {
           projectId: adminApp?.options.projectId,
-          envProjectId: process.env.PROJECT_ID,
-          hasDbObject: !!db
+          databaseId: currentFirestoreDatabaseId,
+          authApps: admin.apps.length,
+          rawError: JSON.parse(JSON.stringify(error)) // Attempt to capture more gRPC details
         },
-        details: "Bhai, ye 'NOT_FOUND' error ka matlab hai ki database exist nahi karta. Maine 3 alag-alag tarike se connect karne ki koshish ki hai. Agar ab bhi nahi ho raha, toh please ek baar settings mein 'Set up Firebase' button click karein, aur region 'asia-southeast1' choose karein."
+        suggestion: "Bhai, ye 'NOT_FOUND' error ka matlab hai ki database exist nahi karta ya ID galat hai. Screenshot ke mutabik ID sahi lag rahi hai, magar shayad permissions sync nahi hui hain. Ek baar dashboard se 'Set up Firebase' dobara karein."
       });
     }
   });
