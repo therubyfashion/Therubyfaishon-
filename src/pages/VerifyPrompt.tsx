@@ -318,6 +318,15 @@ export default function VerifyPrompt() {
     }
   };
 
+  const handleSignOut = async () => {
+    try {
+      await auth.signOut();
+      navigate('/login');
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4 bg-[#FAFAFA] py-12 relative overflow-hidden">
       {/* Decorative Elements */}
@@ -331,6 +340,15 @@ export default function VerifyPrompt() {
         animate={{ opacity: 1, y: 0 }}
         className="max-w-md w-full bg-white p-8 md:p-12 rounded-[2.5rem] shadow-[0_20px_50px_-20px_rgba(0,0,0,0.08)] border border-gray-50 relative z-10 text-center"
       >
+        {/* Back Button */}
+        <button 
+          onClick={handleSignOut}
+          className="absolute top-6 left-6 p-2 rounded-xl bg-gray-50 text-gray-400 hover:text-ruby hover:bg-ruby/5 transition-all group lg:top-8 lg:left-8"
+          title="Back to Login"
+        >
+          <LogOut size={18} className="rotate-180 group-hover:-translate-x-1 transition-transform" />
+        </button>
+
         <div className="mb-8">
           <div className="w-20 h-20 bg-ruby/10 text-ruby rounded-3xl flex items-center justify-center mx-auto">
             <Mail size={40} />
