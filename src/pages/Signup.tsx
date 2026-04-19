@@ -195,7 +195,8 @@ export default function Signup() {
 
       localStorage.removeItem('phone_user');
       // Keep user signed in so they have permissions to update their profile during verification
-      navigate(`/verify-prompt?email=${encodeURIComponent(formData.email)}&uid=${user.uid}`);
+      const errorParam = !emailResponse.ok ? `&message=${encodeURIComponent("Account created, but verification email failed to send. You can resend it from the next screen.")}` : '';
+      navigate(`/verify-prompt?email=${encodeURIComponent(formData.email)}&uid=${user.uid}${errorParam}`);
     } catch (error: any) {
       console.error("Signup error:", error);
       if (error.code === 'auth/email-already-in-use') {

@@ -4,7 +4,7 @@ import { auth, db } from '../firebase';
 import { doc, getDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
-import { Mail, ArrowRight, RefreshCw, LogOut, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Mail, ArrowRight, RefreshCw, LogOut, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export default function VerifyPrompt() {
   const navigate = useNavigate();
@@ -15,14 +15,17 @@ export default function VerifyPrompt() {
   const [email, setEmail] = useState('');
   const [uid, setUid] = useState('');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [urlMessage, setUrlMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const emailParam = params.get('email');
     const uidParam = params.get('uid');
+    const msgParam = params.get('message');
     
     if (emailParam) setEmail(emailParam);
     if (uidParam) setUid(uidParam);
+    if (msgParam) setUrlMessage(msgParam);
 
     const fetchSettings = async () => {
       try {
@@ -329,6 +332,16 @@ export default function VerifyPrompt() {
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 bg-[#FAFAFA] py-12 relative overflow-hidden">
+      {/* Back Button - Fixed to screen for maximum reliability */}
+      <button 
+        onClick={handleSignOut}
+        className="fixed top-6 left-6 px-4 py-2 flex items-center gap-2 rounded-xl bg-white shadow-lg text-[#1A2C54] hover:text-ruby transition-all group z-[100] border border-gray-100"
+        title="Back to Login"
+      >
+        <LogOut size={16} className="rotate-180 group-hover:-translate-x-1 transition-transform" />
+        <span className="text-[10px] font-bold uppercase tracking-widest">Back</span>
+      </button>
+
       {/* Decorative Elements */}
       <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-ruby/5 rounded-full blur-[120px]" />
@@ -338,16 +351,21 @@ export default function VerifyPrompt() {
       <motion.div 
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-md w-full bg-white p-8 md:p-12 rounded-[2.5rem] shadow-[0_20px_50px_-20px_rgba(0,0,0,0.08)] border border-gray-50 relative z-10 text-center"
+        className="max-w-md w-full bg-white p-8 md:p-12 rounded-[2.5rem] shadow-[0_20px_50px_-20px_rgba(0,0,0,0.08)] border border-gray-50 relative z-10 text-center flex flex-col items-center"
       >
-        {/* Back Button */}
-        <button 
-          onClick={handleSignOut}
-          className="absolute top-6 left-6 p-2 rounded-xl bg-gray-50 text-gray-400 hover:text-ruby hover:bg-ruby/5 transition-all group lg:top-8 lg:left-8"
-          title="Back to Login"
-        >
-          <LogOut size={18} className="rotate-180 group-hover:-translate-x-1 transition-transform" />
-        </button>
+        {urlMessage && (
+          <div className="w-full mb-8 p-4 bg-red-50 border border-red-100 rounded-2xl flex flex-col items-start gap-2 text-left">
+            <div className="flex items-center gap-2 text-red-600">
+              <AlertCircle size={18} />
+              <span className="text-xs font-black uppercase tracking-wider">Configuration Required</span>
+            </div>
+            <p className="text-[11px] font-bold text-red-500 leading-relaxed">
+              {urlMessage} 
+              <br />
+              <span className="text-[#1A2C54] mt-1 block opacity-80">Check Admin Panel -> Settings -> Resend API Key.</span>
+            </p>
+          </div>
+        )}
 
         <div className="mb-8">
           <div className="w-20 h-20 bg-ruby/10 text-ruby rounded-3xl flex items-center justify-center mx-auto">
