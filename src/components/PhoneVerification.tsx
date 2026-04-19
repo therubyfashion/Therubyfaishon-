@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Phone, ShieldCheck, X, ArrowRight, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Phone, ShieldCheck, X, ArrowRight, RefreshCw, CheckCircle2, ArrowLeft } from 'lucide-react';
 import { doc, updateDoc, setDoc, getDoc } from 'firebase/firestore';
 import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult, linkWithPhoneNumber } from 'firebase/auth';
 import { auth, db } from '../firebase';
@@ -231,8 +231,19 @@ export default function PhoneVerification({ onSuccess, onClose, prefillPhone }: 
       >
         {/* Header */}
         <div className="p-8 pb-4 flex justify-between items-start">
-          <div className="w-12 h-12 bg-ruby/10 rounded-2xl flex items-center justify-center text-ruby">
-            {step === 'input' ? <Phone size={24} /> : <ShieldCheck size={24} />}
+          <div className="flex gap-4">
+            {step === 'otp' && (
+              <button 
+                onClick={() => setStep('input')}
+                className="p-2 hover:bg-gray-100 rounded-xl text-gray-400 transition-colors"
+                title="Back to phone number"
+              >
+                <ArrowLeft size={20} />
+              </button>
+            )}
+            <div className="w-12 h-12 bg-ruby/10 rounded-2xl flex items-center justify-center text-ruby">
+              {step === 'input' ? <Phone size={24} /> : <ShieldCheck size={24} />}
+            </div>
           </div>
           <button 
             onClick={onClose}
