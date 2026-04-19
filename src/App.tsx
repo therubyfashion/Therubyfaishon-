@@ -135,6 +135,13 @@ function AppContent() {
     initOneSignal();
   }, [user, isAdmin, settings, settingsLoading]);
 
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Apply SEO settings globally
   React.useEffect(() => {
     if (settingsLoading || !settings) return;
