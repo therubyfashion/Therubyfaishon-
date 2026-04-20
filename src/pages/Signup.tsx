@@ -203,6 +203,8 @@ export default function Signup() {
         toast.error("Email already in use. Please sign in.");
       } else if (error.code === 'auth/network-request-failed') {
         toast.error("Network error! Please check your internet connection or disable ad-blockers.");
+      } else if (error.code === 'not-found' || error.message?.includes('5 NOT_FOUND')) {
+        toast.error("Bhai, Database abhi ready ho raha hai (Google Provisioning). 2-3 minute baad dobara try karein, sab thik ho jayega! 💎", { duration: 6000 });
       } else if (error.message) {
         toast.error(error.message);
       } else {

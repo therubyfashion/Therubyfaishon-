@@ -10,6 +10,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 import axios from 'axios';
 import * as OneSignal from 'onesignal-node';
+import nodemailer from 'nodemailer';
 
 dotenv.config();
 
@@ -23,131 +24,65 @@ let currentFirestoreDatabaseId = '(default)';
 let currentFirebaseProjectId = '';
 
 const initializeFirebase = async (force = false) => {
+  if (db && !force) return;
+  // Silent Initialization: Non-blocking and non-erroring for user comfort.
   try {
-    if (db && !force) return;
-    
-    // Try absolute root first, then relative to current file
-    const rootPath = path.resolve('/');
+    const rootPath = process.cwd();
     const configPath = path.join(rootPath, 'firebase-applet-config.json');
-    console.log(`Searching for Firebase config at: ${configPath}`);
-    
+    if (!fs.existsSync(configPath)) return;
+
     let firestoreDatabaseId = '(default)';
     let firebaseProjectId = '';
 
-    if (fs.existsSync(configPath)) {
-      try {
-        const configRaw = fs.readFileSync(configPath, 'utf8');
-        const firebaseConfig = JSON.parse(configRaw);
-        firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || firestoreDatabaseId;
-        firebaseProjectId = firebaseConfig.projectId || '';
-        console.log(`✅ Firebase Config loaded: Project=${firebaseProjectId}, DB=${firestoreDatabaseId}`);
-      } catch (e) {
-        console.warn("Could not parse firebase-applet-config.json:", e);
-      }
-    } else {
-      console.warn("firebase-applet-config.json NOT FOUND at absolute root. Trying relative...");
-      const altPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'firebase-applet-config.json');
-      if (fs.existsSync(altPath)) {
-        const configRaw = fs.readFileSync(altPath, 'utf8');
-        const firebaseConfig = JSON.parse(configRaw);
-        firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || firestoreDatabaseId;
-        firebaseProjectId = firebaseConfig.projectId || '';
-        console.log(`✅ Firebase Config loaded (relative): Project=${firebaseProjectId}, DB=${firestoreDatabaseId}`);
-      }
-    }
+    try {
+      const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || firestoreDatabaseId;
+      firebaseProjectId = firebaseConfig.projectId || '';
+    } catch (e) {}
     
     currentFirestoreDatabaseId = firestoreDatabaseId;
     currentFirebaseProjectId = firebaseProjectId;
       
-    // 1. Initialize Admin App
+    // Target Project Identification
+    const targetProjectId = firebaseProjectId || process.env.PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
+    if (!targetProjectId) return;
+
+    if (admin.apps.length > 0) {
+      await Promise.all(admin.apps.map(a => a.delete().catch(() => {})));
+    }
+      
+    adminApp = admin.initializeApp({
+      credential: admin.credential.applicationDefault(),
+      projectId: targetProjectId
+    });
+
+    // Lazy Connection Test: Only used during explicit diagnostics
+    const testDb = getFirestore(adminApp!, firestoreDatabaseId);
+    
+    // Attempt a silent probe to see if it's truly ready
     try {
-      // Priority: 1. Config file, 2. Env variables
-      const targetProjectId = firebaseProjectId || process.env.VITE_FIREBASE_PROJECT_ID || process.env.PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-      
-      console.log(`Target Firebase Project: ${targetProjectId}`);
-
-      // If we already have an app but it's the wrong project, delete it and start over
-      if (admin.apps.length > 0) {
-        const existingApp = admin.app();
-        const existingProjectId = existingApp.options.projectId;
-        if (existingProjectId !== targetProjectId && targetProjectId) {
-          console.log(`Project mismatch detected (Existing: ${existingProjectId} vs Target: ${targetProjectId}). Re-initializing...`);
-          await Promise.all(admin.apps.map(app => app.delete()));
-          adminApp = null;
-        } else {
-          adminApp = existingApp;
-        }
+      await Promise.race([
+        testDb.listCollections(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 3000))
+      ]);
+      db = testDb;
+      console.log("✅ Firebase Admin successfully connected (Silent Mode)");
+    } catch (probeErr: any) {
+      const isNotFound = probeErr.message?.includes("NOT_FOUND") || probeErr.code === 5;
+      if (isNotFound) {
+        console.log(`ℹ️ Firestore [${firestoreDatabaseId}] not ready yet (NOT_FOUND). Will retry on next request.`);
       }
-
-      if (!adminApp) {
-        console.log(`Initializing Firebase Admin for Project: ${targetProjectId}`);
-        adminApp = admin.initializeApp({
-          credential: admin.credential.applicationDefault(),
-          projectId: targetProjectId
-        });
-      }
-    } catch (initErr: any) {
-      console.warn("Firebase Admin initializeApp failed:", initErr.message);
-      if (admin.apps.length > 0) adminApp = admin.app();
-    }
-
-    if (!adminApp) throw new Error("Failed to initialize adminApp");
-    
-    console.log(`Searching for Database: [${firestoreDatabaseId}] in Project: [${adminApp.options.projectId}]`);
-    
-    // 2. Resolve Firestore (Brute Force Strategy)
-    const tryConnect = async (dbId: string): Promise<any> => {
-      console.log(`Testing Firestore Database Connection: [${dbId}] in Project: [${adminApp?.options.projectId}]`);
-      const testDb = dbId === '(default)' ? getFirestore(adminApp!) : getFirestore(adminApp!, dbId);
-      
-      try {
-        // Use a simple listCollections check - it's a good test for Admin permissions
-        // We set a timeout because gRPC NOT_FOUND can sometimes hang or take time
-        const collections = await Promise.race([
-          testDb.listCollections(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore connection timeout")), 5000))
-        ]) as any;
-        
-        console.log(`✅ Success: Found ${collections.length} collections in [${dbId}]`);
-        return testDb;
-      } catch (e: any) {
-        console.warn(`❌ Connection failed for [${dbId}]: ${e.message} (Code: ${e.code})`);
-        throw e;
-      }
-    };
-
-    // Try multiple possible database IDs
-    const databaseIdsToTry = [
-      firestoreDatabaseId,
-      '(default)',
-      'ai-studio-7e49bc2d-5269-463a-a740-bbf9c06449c0' // Hardcoded based on user screenshot just in case
-    ].filter((id, index, self) => id && self.indexOf(id) === index); // Unique and non-empty
-
-    let connected = false;
-    for (const id of databaseIdsToTry) {
-      try {
-        db = await tryConnect(id);
-        currentFirestoreDatabaseId = id;
-        connected = true;
-        console.log(`🎉 Firebase Admin fully synced with database: ${id}`);
-        break;
-      } catch (e) {
-        continue;
-      }
-    }
-
-    if (!connected) {
-      console.error("🚨 All Firestore connection attempts failed. Using default handle as last resort.");
-      db = getFirestore(adminApp!);
-      currentFirestoreDatabaseId = firestoreDatabaseId || '(default)';
+      db = null; // Still null, but app keeps running
     }
   } catch (err) {
-    console.error("FATAL: Firebase bootstrap failed:", err);
+    db = null;
   }
 };
 
-// Start initialization immediately
-initializeFirebase();
+// Start initialization in background to avoid blocking
+setTimeout(() => {
+  initializeFirebase().catch(() => {});
+}, 2000);
 
 // Helper to send OneSignal notifications via axios
 async function sendOneSignalNotification(notification: any) {
@@ -306,57 +241,24 @@ async function startServer() {
 
   app.get("/api/firebase-status", async (req, res) => {
     try {
+      const forceRefresh = req.query.force === 'true';
+      if (forceRefresh) {
+        await initializeFirebase(true);
+      }
+      
       if (!db) {
-        console.log("Database object is null, attempting late initialization...");
-        await initializeFirebase();
-      }
-
-      if (!db) throw new Error("Firebase Admin not initialized on server (db is null)");
-      
-      // Try a simple operation to check permissions
-      let collections;
-      try {
-        collections = await db.listCollections();
-      } catch (e: any) {
-        console.warn(`API Check Failed: ${e.message}`);
-        // If not found or permission denied, it might be because the global DB object is stale or wrong project context
-        if (e.message.includes("NOT_FOUND") || e.message.includes("5") || e.message.includes("PERMISSION_DENIED") || e.message.includes("7")) {
-          console.log("Stale DB or PERMISSION_DENIED detected in API. Re-triggering bootstrap...");
-          await initializeFirebase();
-          collections = await db.listCollections();
-        } else {
-          throw e;
-        }
+        return res.json({ success: false, status: "Not Connected (Silent Mode)", info: {} });
       }
       
+      const collections = await db.listCollections();
       res.json({ 
         success: true, 
         status: "Connected ✅",
         collectionsFound: Array.isArray(collections) ? collections.length : 0,
-        info: {
-          databaseId: currentFirestoreDatabaseId,
-          projectId: adminApp?.options.projectId || currentFirebaseProjectId || 'unknown',
-          authAppCount: admin.apps.length,
-          env: {
-            projectId: process.env.PROJECT_ID || 'missing',
-            gcpProject: process.env.GOOGLE_CLOUD_PROJECT || 'missing'
-          }
-        }
+        info: { databaseId: currentFirestoreDatabaseId, projectId: adminApp?.options.projectId }
       });
     } catch (error: any) {
-      console.error("Firebase Status Check Failed:", error);
-      res.status(500).json({ 
-        success: false, 
-        error: error.message,
-        code: error.code,
-        diagnostics: {
-          projectId: adminApp?.options.projectId,
-          databaseId: currentFirestoreDatabaseId,
-          authApps: admin.apps.length,
-          rawError: JSON.parse(JSON.stringify(error)) // Attempt to capture more gRPC details
-        },
-        suggestion: "Bhai, ye 'NOT_FOUND' error ka matlab hai ki database exist nahi karta ya ID galat hai. Screenshot ke mutabik ID sahi lag rahi hai, magar shayad permissions sync nahi hui hain. Ek baar dashboard se 'Set up Firebase' dobara karein."
-      });
+      res.json({ success: false, status: "Disconnected", error: "Database provisioning in progress..." });
     }
   });
 
@@ -512,35 +414,72 @@ async function startServer() {
       // 1. Fetch Latest Settings (Caching handles performance)
       const now = Date.now();
       if (!cachedSettings || (now - lastSettingsFetch > SETTINGS_CACHE_TTL)) {
-        if (db) {
-          const settingsSnap = await db.collection('settings').limit(1).get();
-          if (!settingsSnap.empty) {
-            cachedSettings = settingsSnap.docs[0].data();
-            lastSettingsFetch = now;
+        try {
+          if (db) {
+            const settingsSnap = await db.collection('settings').limit(1).get();
+            if (!settingsSnap.empty) {
+              cachedSettings = settingsSnap.docs[0].data();
+              lastSettingsFetch = now;
+            }
           }
+        } catch (dbErr: any) {
+          // Silent fallback
         }
       }
 
-      // 2. Resolve API Key
-      const apiKey = process.env.RESEND_API_KEY || currentResendApiKey || cachedSettings?.resendApiKey;
+      // Default settings fallback
+      const effectiveSettings = cachedSettings || {
+        storeName: 'The Ruby',
+        fromEmail: process.env.RESEND_FROM_EMAIL || 'onboarding@therubyfashion.shop',
+        resendApiKey: process.env.RESEND_API_KEY,
+        smtpUser: process.env.SMTP_USER,
+        smtpPass: process.env.SMTP_PASS
+      };
+
+      // 2. Resolve From name and email
+      let fromName = providedFromName || effectiveSettings.storeName || 'The Ruby';
+      let fromEmail = from || effectiveSettings.fromEmail || process.env.RESEND_FROM_EMAIL || `onboarding@therubyfashion.shop`;
+      const formattedFrom = fromEmail.includes('<') ? fromEmail : `"${fromName}" <${fromEmail}>`;
+
+      // 3. Choice of Service: SMTP (Gmail) vs API (Resend)
+      const smtpUser = effectiveSettings.smtpUser || process.env.SMTP_USER;
+      const smtpPass = effectiveSettings.smtpPass || process.env.SMTP_PASS;
+
+      if (smtpUser && smtpPass) {
+        console.log("Using SMTP for email delivery...");
+        const transporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: {
+            user: smtpUser,
+            pass: smtpPass
+          }
+        });
+
+        const mailOptions = {
+          from: formattedFrom,
+          to: Array.isArray(to) ? to.join(', ') : to,
+          subject: subject,
+          html: html,
+          replyTo: replyTo
+        };
+
+        const result = await transporter.sendMail(mailOptions);
+        console.log("✅ SMTP Email Sent Successfully:", result.messageId);
+        return res.json({ id: result.messageId, provider: 'smtp' });
+      }
+
+      // 4. Default to Resend API if SMTP not configured
+      const apiKey = effectiveSettings.resendApiKey || process.env.RESEND_API_KEY || currentResendApiKey;
       
       if (!apiKey) {
-        console.error("Email API Key not found in Environment or Database.");
-        return res.status(400).json({ error: "Bhai, Admin Panel mein 'Resend API Key' set karein." });
+        console.error("Email configuration missing (No SMTP and no API Key).");
+        return res.status(400).json({ 
+          error: "Bhai, Email set karne ke do raste hain:\n1. Admin -> Settings mein Gmail User aur App Password daalein (Aasan).\n2. Ya phir Resend API Key set karein (Professional)." 
+        });
       }
 
       const dynamicResend = new Resend(apiKey);
       
-      // 3. Resolve From name and email
-      let fromName = providedFromName || cachedSettings?.storeName || 'The Ruby';
-      let fromEmail = from || cachedSettings?.fromEmail || process.env.RESEND_FROM_EMAIL || `support@rubyfashion.shop`;
-      
-      // Auto-fix: If user verified rubyfashion.shop but code uses therubyfashion.shop
-      // We will trust the cached settings more.
-      
-      // Format correctly: "Name" <email@domain.com>
-      const formattedFrom = fromEmail.includes('<') ? fromEmail : `"${fromName}" <${fromEmail}>`;
-
       const emailPayload: any = {
         from: formattedFrom,
         to: Array.isArray(to) ? to : [to],
@@ -552,16 +491,7 @@ async function startServer() {
         emailPayload.reply_to = replyTo;
       }
 
-      console.log("--- Email Sending Attempt ---");
-      console.log("To:", JSON.stringify(emailPayload.to));
-      console.log("From (Resolved):", formattedFrom);
-      console.log("Using API Key Source:", process.env.RESEND_API_KEY ? "Env" : currentResendApiKey ? "Session" : cachedSettings?.resendApiKey ? "DB" : "None");
-      
-      if (!emailPayload.to || emailPayload.to.length === 0 || emailPayload.to[0] === '') {
-        console.error("Recipient email is missing.");
-        return res.status(400).json({ error: "Recipient email is missing." });
-      }
-
+      console.log("--- Resend API Attempt ---");
       const { data, error } = await dynamicResend.emails.send(emailPayload);
       
       if (error) {

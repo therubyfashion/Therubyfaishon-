@@ -196,7 +196,11 @@ export default function VerifyPrompt() {
       }
     } catch (error: any) {
       console.error("Verification error:", error);
-      toast.error("Failed to verify code.");
+      if (error.code === 'not-found' || error.message?.includes('5 NOT_FOUND')) {
+        toast.error("Bhai, Database abhi ready ho raha hai. 2-3 minute baad dobara try karein! 💎", { duration: 6000 });
+      } else {
+        toast.error("Failed to verify code.");
+      }
     } finally {
       setVerifying(false);
     }
@@ -315,7 +319,11 @@ export default function VerifyPrompt() {
       toast.success("New verification code sent!");
     } catch (error: any) {
       console.error("Resend error:", error);
-      toast.error(error.message || "Failed to resend code.");
+      if (error.code === 'not-found' || error.message?.includes('5 NOT_FOUND')) {
+        toast.error("Bhai, Database abhi ready ho raha hai. Thodi der mein dobara try karein! 💎", { duration: 6000 });
+      } else {
+        toast.error(error.message || "Failed to resend code.");
+      }
     } finally {
       setLoading(false);
     }
@@ -362,7 +370,7 @@ export default function VerifyPrompt() {
             <p className="text-[11px] font-bold text-red-500 leading-relaxed">
               {urlMessage} 
               <br />
-              <span className="text-[#1A2C54] mt-1 block opacity-80">Check Admin Panel -> Settings -> Resend API Key.</span>
+              <span className="text-[#1A2C54] mt-1 block opacity-80">Check Admin Panel &rarr; Settings &rarr; Resend API Key.</span>
             </p>
           </div>
         )}

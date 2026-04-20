@@ -11,7 +11,8 @@ import {
   MoreVertical, Edit2, Trash2, Plus, Image as ImageIcon, Database, BarChart3,
   Home, ArrowLeft, Camera, ChevronDown, ChevronUp, Bold, Heading, Globe, Truck, Printer,
   TrendingDown, Shield, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info, MapPin, History,
-  Activity, Send, Rocket, MessageSquare, User, CreditCard, Download, Eye, Check, ArrowRight
+  Activity, Send, Rocket, MessageSquare, User, CreditCard, Download, Eye, Check, ArrowRight,
+  Cloud, RefreshCw, CheckCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -1016,6 +1017,8 @@ export default function AdminDashboard() {
     metaDescription: 'Discover the latest trends in fashion at The Ruby.',
     resendApiKey: '',
     fromEmail: '',
+    smtpUser: '',
+    smtpPass: '',
     fast2smsApiKey: '',
     fast2smsTestPhone: '',
     oneSignalAppId: '',
@@ -1103,6 +1106,34 @@ export default function AdminDashboard() {
   }, [sidebarOpen]);
 
   const [activeSettingsTab, setActiveSettingsTab] = useState('store');
+  const [firebaseDiagnostics, setFirebaseDiagnostics] = useState<any>(null);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(false);
+  const [firebaseStatus, setFirebaseStatus] = useState<string>('Checking...');
+
+  const checkFirebaseStatus = async (force = false) => {
+    setIsLoadingStatus(true);
+    try {
+      const res = await fetch(`/api/firebase-status${force ? '?force=true' : ''}`);
+      const data = await res.json();
+      if (data.success) {
+        setFirebaseStatus(data.status);
+        setFirebaseDiagnostics(data.info);
+      } else {
+        setFirebaseStatus(`Error: ${data.error}`);
+        setFirebaseDiagnostics(data.diagnostics);
+      }
+    } catch (err: any) {
+      setFirebaseStatus(`Error: ${err.message}`);
+    } finally {
+      setIsLoadingStatus(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'settings' && activeSettingsTab === 'firebase') {
+      checkFirebaseStatus();
+    }
+  }, [activeTab, activeSettingsTab]);
 
   const handleSendNotification = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1246,26 +1277,6 @@ export default function AdminDashboard() {
 
   const [isTestingOneSignal, setIsTestingOneSignal] = useState(false);
   const [isSendingTestPush, setIsSendingTestPush] = useState(false);
-
-  const [firebaseStatus, setFirebaseStatus] = useState<string>('Checking...');
-
-  useEffect(() => {
-    const checkFirebaseStatus = async () => {
-      try {
-        const response = await fetch('/api/firebase-status');
-        const data = await response.json();
-        if (data.success) {
-          setFirebaseStatus(`Connected ✅ (${data.info.databaseId})`);
-        } else {
-          setFirebaseStatus(`Error: ${data.error} ❌`);
-          console.log("Firebase Diag:", data.diagnostics);
-        }
-      } catch (error: any) {
-        setFirebaseStatus('Offline ❌');
-      }
-    };
-    checkFirebaseStatus();
-  }, []);
 
   const handleTestOneSignal = async () => {
     setIsTestingOneSignal(true);
@@ -2784,6 +2795,7 @@ export default function AdminDashboard() {
                         >
                           {[
                             { id: 'store', label: 'Store Setting', icon: Settings },
+                            { id: 'firebase', label: 'Firebase Status', icon: Cloud },
                             { id: 'sheets', label: 'Google Sheet URL', icon: Database },
                             { id: 'email', label: 'Email Settings', icon: Mail },
                             { id: 'sound', label: 'Notification Sound', icon: Volume2 },
@@ -6523,6 +6535,99 @@ export default function AdminDashboard() {
                       </motion.div>
                     )}
 
+                    {activeSettingsTab === 'firebase' && (
+                      <motion.div 
+                        key="firebase"
+                        initial={{ opacity: 0, x: 10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -10 }}
+                        className="space-y-6"
+                      >
+                        <h3 className="text-lg font-bold text-[#1A2C54] flex items-center">
+                          <Cloud size={20} className="mr-2 text-ruby" /> Firebase Database Status
+                        </h3>
+                        
+                        <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
+                          <div className="flex items-center justify-between mb-6">
+                            <div className="flex items-center space-x-4">
+                              <div className={`p-3 rounded-xl ${firebaseStatus === 'Connected ✅' ? 'bg-green-100 text-green-600' : (firebaseStatus.includes('Error') ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-400')}`}>
+                                <Database size={24} />
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Connection Status</p>
+                                <h4 className={`text-xl font-black ${firebaseStatus === 'Connected ✅' ? 'text-green-600' : (firebaseStatus.includes('Error') ? 'text-red-500' : 'text-[#1A2C54]')}`}>
+                                  {firebaseStatus || 'Checking...'}
+                                </h4>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => checkFirebaseStatus(true)}
+                              disabled={isLoadingStatus}
+                              className={`flex items-center space-x-2 px-4 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold text-[#1A2C54] hover:bg-gray-50 transition-all ${isLoadingStatus ? 'opacity-50' : ''}`}
+                            >
+                              <RefreshCw size={14} className={isLoadingStatus ? 'animate-spin' : ''} />
+                              <span>Force Re-sync</span>
+                            </button>
+                          </div>
+
+                          {firebaseDiagnostics && (
+                            <div className="space-y-4">
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="p-4 bg-white rounded-xl border border-gray-100">
+                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Project ID</p>
+                                  <p className="text-sm font-bold text-[#1A2C54] truncate">{firebaseDiagnostics.projectId || 'Unknown'}</p>
+                                </div>
+                                <div className="p-4 bg-white rounded-xl border border-gray-100">
+                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Database ID</p>
+                                  <p className="text-sm font-bold text-[#1A2C54] truncate">{firebaseDiagnostics.databaseId || '(default)'}</p>
+                                </div>
+                              </div>
+
+                              {firebaseDiagnostics.error && (
+                                <div className="p-4 bg-red-50 border border-red-100 rounded-xl">
+                                  <p className="text-xs font-bold text-red-600 mb-1">Recent Error Message:</p>
+                                  <code className="text-[10px] text-red-500 block bg-white/50 p-2 rounded border border-red-100 overflow-x-auto whitespace-pre-wrap">
+                                    {firebaseDiagnostics.error}
+                                  </code>
+                                  
+                                  <div className="mt-4 p-3 bg-white/50 rounded-lg border border-red-100">
+                                    <p className="text-[11px] font-bold text-red-600 flex items-center uppercase tracking-wider">
+                                      <Info size={12} className="mr-1.5" /> Kyun ho raha hai ye?
+                                    </p>
+                                    <p className="text-xs text-[#1A2C54] mt-2 leading-relaxed opacity-80">
+                                      Bhai, <strong>"5 NOT_FOUND"</strong> ka matlab hai ki aapka database abhi tak platform par fully create ya ready nahi hua hai. 
+                                      Isse fix karne ke liye:
+                                    </p>
+                                    <ul className="text-xs text-[#1A2C54] mt-2 space-y-1 list-disc list-inside opacity-80">
+                                      <li>AI Studio chat mein check karein agar koi <strong>"Set up Firebase"</strong> ka option hai.</li>
+                                      <li>Agar pehle connect kiya tha, toh thoda intezar karein, provisioning mein 2-3 minute lagte hain.</li>
+                                      <li>Apne app ko refresh (hard reload) karke dobara try karein.</li>
+                                    </ul>
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {firebaseStatus === 'Connected ✅' && (
+                                <div className="p-4 bg-green-50 border border-green-100 rounded-xl">
+                                  <p className="text-xs font-bold text-green-600 flex items-center">
+                                    <CheckCircle size={14} className="mr-2" /> Sab sahi hai bhai! Database successfully connected hai.
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="p-6 bg-ruby/5 rounded-2xl border border-ruby/10">
+                          <h4 className="text-sm font-bold text-[#1A2C54] mb-2">Technical Information</h4>
+                          <p className="text-xs text-gray-500 leading-relaxed mb-4">
+                            Firebase database backend functions ke liye zaroori hai (jaise Orders save karna, Users manage karna, etc). 
+                            Agar ye "Not Connected" hai toh app ke kuch features kaam thoda slow kar sakte hain ya fail ho sakte hain.
+                          </p>
+                        </div>
+                      </motion.div>
+                    )}
+
                     {activeSettingsTab === 'sheets' && (
                       <motion.div 
                         key="sheets"
@@ -6574,60 +6679,108 @@ export default function AdminDashboard() {
                         className="space-y-6"
                       >
                         <h3 className="text-lg font-bold text-[#1A2C54] flex items-center">
-                          <Mail size={20} className="mr-2 text-ruby" /> Email Service (Resend)
+                          <Mail size={20} className="mr-2 text-ruby" /> Email Service Configuration
                         </h3>
-                        <div className="space-y-4">
-                          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 space-y-2">
-                            <h4 className="text-[11px] font-bold text-blue-700 uppercase tracking-widest flex items-center">
-                              <Info size={14} className="mr-2" /> Important Instructions
+                        <div className="space-y-6">
+                          {/* Resend Configuration */}
+                          <div className="p-5 border border-gray-100 rounded-3xl space-y-4">
+                            <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-wider flex items-center gap-2">
+                              <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
+                              Service: Resend API (Professional)
                             </h4>
-                            <ul className="text-[10px] text-blue-600 space-y-1 font-medium leading-relaxed">
-                              <li>• By default, emails are sent using <b>your verified domain</b> (if configured) or the system default.</li>
-                              <li>• <b>Note:</b> Resend only allows sending to your own account email when using the default sender.</li>
-                              <li>• To send emails to customers, you <b>must</b> verify your domain on <a href="https://resend.com/domains" target="_blank" className="underline font-bold">Resend.com</a>.</li>
-                              <li>• <a href="https://resend.com/docs/dashboard/domains/introduction" target="_blank" className="text-blue-800 underline font-bold">Click here for Step-by-Step Domain Setup Guide</a></li>
-                              <li>• Once verified, update the "From Email" below with your verified address.</li>
-                            </ul>
+                            
+                            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 space-y-2">
+                              <h4 className="text-[11px] font-bold text-blue-700 uppercase tracking-widest flex items-center">
+                                <Info size={14} className="mr-2" /> Resend Instructions
+                              </h4>
+                              <ul className="text-[10px] text-blue-600 space-y-1 font-medium leading-relaxed">
+                                <li>• Visit <a href="https://resend.com" target="_blank" className="underline font-bold">Resend.com</a> to get your API Key.</li>
+                                <li>• Verify your domain to send emails to customers.</li>
+                              </ul>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Resend API Key</label>
+                                <input 
+                                  type="password" 
+                                  placeholder="re_..."
+                                  value={settings.resendApiKey || ''}
+                                  onChange={(e) => setSettings({...settings, resendApiKey: e.target.value})}
+                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">From Email (Verified Domain)</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="The Ruby <hello@yourdomain.com>"
+                                  value={settings.fromEmail || ''}
+                                  onChange={(e) => setSettings({...settings, fromEmail: e.target.value})}
+                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                />
+                              </div>
+                            </div>
                           </div>
 
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Resend API Key</label>
-                              <input 
-                                type="password" 
-                                placeholder="re_..."
-                                value={settings.resendApiKey || ''}
-                                onChange={(e) => setSettings({...settings, resendApiKey: e.target.value})}
-                                className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
-                              />
+                          {/* Gmail SMTP Configuration */}
+                          <div className="p-5 border border-ruby/10 bg-ruby/[0.02] rounded-3xl space-y-4">
+                            <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-wider flex items-center gap-2">
+                              <span className="w-2 h-2 bg-ruby rounded-full"></span>
+                              Service: Gmail SMTP (Simple)
+                            </h4>
+
+                            <div className="bg-ruby/[0.05] border border-ruby/10 rounded-2xl p-4 space-y-2">
+                              <h4 className="text-[11px] font-bold text-ruby uppercase tracking-widest flex items-center">
+                                <Info size={14} className="mr-2" /> Gmail Setup Instructions
+                              </h4>
+                              <ul className="text-[10px] text-ruby/80 space-y-1 font-medium leading-relaxed">
+                                <li>1. Enable <b>2-Step Verification</b> in your Google Account.</li>
+                                <li>2. Create an <b>App Password</b> (Security -&gt; App Passwords).</li>
+                                <li>3. Enter your Gmail and that 16-character code below.</li>
+                              </ul>
                             </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">From Email (Verified Domain)</label>
-                              <input 
-                                type="text" 
-                                placeholder="The Ruby <hello@yourdomain.com>"
-                                value={settings.fromEmail || ''}
-                                onChange={(e) => setSettings({...settings, fromEmail: e.target.value})}
-                                className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
-                              />
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Gmail Address</label>
+                                <input 
+                                  type="email" 
+                                  placeholder="yourname@gmail.com"
+                                  value={settings.smtpUser || ''}
+                                  onChange={(e) => setSettings({...settings, smtpUser: e.target.value})}
+                                  className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Gmail App Password</label>
+                                <input 
+                                  type="password" 
+                                  placeholder="xxxx xxxx xxxx xxxx"
+                                  value={settings.smtpPass || ''}
+                                  onChange={(e) => setSettings({...settings, smtpPass: e.target.value})}
+                                  className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                />
+                              </div>
                             </div>
                           </div>
-                          <div className="pt-4">
+
+                          <div className="pt-2 flex flex-col sm:flex-row gap-4">
+                            <button 
+                              onClick={handleSaveSettings}
+                              className="flex-1 bg-ruby text-white py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 active:scale-95"
+                            >
+                              Save All Settings
+                            </button>
                             <button 
                               onClick={handleTestEmail}
                               disabled={isTestingEmail}
-                              className="flex items-center space-x-2 px-6 py-3 bg-gray-50 text-gray-600 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-gray-100 transition-all disabled:opacity-50"
+                              className="px-8 py-4 bg-gray-900 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-black transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                             >
                               <Mail size={14} />
-                              <span>{isTestingEmail ? 'Sending...' : 'Send Test Email'}</span>
+                              <span>{isTestingEmail ? 'Sending...' : 'Test Connection'}</span>
                             </button>
                           </div>
-                          <button 
-                            onClick={handleSaveSettings}
-                            className="w-full bg-ruby text-white py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 active:scale-95 mt-4"
-                          >
-                            Save Settings
-                          </button>
                         </div>
                       </motion.div>
                     )}
