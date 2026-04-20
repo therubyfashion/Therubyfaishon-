@@ -25,11 +25,13 @@ let currentFirebaseProjectId = '';
 
 const initializeFirebase = async (force = false) => {
   if (db && !force) return;
-  // Silent Initialization: Non-blocking and non-erroring for user comfort.
   try {
     const rootPath = process.cwd();
     const configPath = path.join(rootPath, 'firebase-applet-config.json');
-    if (!fs.existsSync(configPath)) return;
+    if (!fs.existsSync(configPath)) {
+      console.log("ℹ️ Skipping Firebase Admin init: config file not found.");
+      return;
+    }
 
     let firestoreDatabaseId = '(default)';
     let firebaseProjectId = '';
@@ -38,43 +40,52 @@ const initializeFirebase = async (force = false) => {
       const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || firestoreDatabaseId;
       firebaseProjectId = firebaseConfig.projectId || '';
-    } catch (e) {}
+    } catch (e) {
+      console.error("❌ Failed to parse firebase-applet-config.json");
+    }
     
     currentFirestoreDatabaseId = firestoreDatabaseId;
     currentFirebaseProjectId = firebaseProjectId;
       
-    // Target Project Identification
     const targetProjectId = firebaseProjectId || process.env.PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-    if (!targetProjectId) return;
+    if (!targetProjectId) {
+      console.log("ℹ️ Skipping Firebase Admin init: No Project ID found.");
+      return;
+    }
 
     if (admin.apps.length > 0) {
       await Promise.all(admin.apps.map(a => a.delete().catch(() => {})));
     }
-      
-    adminApp = admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId: targetProjectId
-    });
-
-    // Lazy Connection Test: Only used during explicit diagnostics
-    const testDb = getFirestore(adminApp!, firestoreDatabaseId);
     
-    // Attempt a silent probe to see if it's truly ready
+    try {
+      console.log(`Attempting to initialize Firebase Admin for project: ${targetProjectId}`);
+      adminApp = admin.initializeApp({
+        credential: admin.credential.applicationDefault(),
+        projectId: targetProjectId
+      });
+      console.log("✅ Firebase Admin App initialized");
+    } catch (adminErr: any) {
+      console.error("⚠️ Firebase Admin App initialization failed (Local credentials might be missing):", adminErr.message);
+      // Fallback: Try initializing without credentials if in a specific environment, or just skip
+      return;
+    }
+
+    if (!adminApp) return;
+    const testDb = getFirestore(adminApp, firestoreDatabaseId);
+    
     try {
       await Promise.race([
         testDb.listCollections(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 3000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
       ]);
       db = testDb;
-      console.log("✅ Firebase Admin successfully connected (Silent Mode)");
+      console.log("✅ Firestore connected successfully");
     } catch (probeErr: any) {
-      const isNotFound = probeErr.message?.includes("NOT_FOUND") || probeErr.code === 5;
-      if (isNotFound) {
-        console.log(`ℹ️ Firestore [${firestoreDatabaseId}] not ready yet (NOT_FOUND). Will retry on next request.`);
-      }
-      db = null; // Still null, but app keeps running
+      console.log(`ℹ️ Firestore connection check failed or timed out. Status: ${probeErr.message}`);
+      db = null;
     }
-  } catch (err) {
+  } catch (err: any) {
+    console.error("❌ Critical error in initializeFirebase:", err.message);
     db = null;
   }
 };
@@ -135,7 +146,7 @@ let currentResendApiKey = process.env.RESEND_API_KEY;
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Initialize clients inside startServer for robustness
   resend = new Resend(currentResendApiKey);
@@ -157,14 +168,20 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-  // API routes
+  // Root route for Health Checks & Production Serving
+  app.get("/", (req, res, next) => {
+    if (process.env.NODE_ENV === "production") {
+      const distPath = path.join(process.cwd(), 'dist');
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        return res.sendFile(indexPath);
+      }
+    }
+    next();
+  });
+
   app.get("/api/health", (req, res) => {
-    res.json({ 
-      status: "ok", 
-      db: !!db, 
-      projectId: currentFirebaseProjectId,
-      databaseId: currentFirestoreDatabaseId
-    });
+    res.status(200).send("OK ✅");
   });
 
   app.post("/api/track-order", async (req, res) => {
