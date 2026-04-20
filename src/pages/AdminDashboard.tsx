@@ -1016,7 +1016,7 @@ export default function AdminDashboard() {
     siteTitle: 'The Ruby | Premium Clothing',
     metaDescription: 'Discover the latest trends in fashion at The Ruby.',
     resendApiKey: '',
-    fromEmail: '',
+    fromEmail: 'onboarding@rubyfashion.shop',
     smtpUser: '',
     smtpPass: '',
     fast2smsApiKey: '',
@@ -1344,12 +1344,20 @@ export default function AdminDashboard() {
 
   const handleSaveSettings = async () => {
     try {
+      // Logic: Ensure fromEmail is not using the Resend sandbox placeholder
+      let finalizedSettings = { ...settings };
+      if (finalizedSettings.fromEmail?.includes('resend.dev')) {
+        toast.info("Resend sandbox domain 'resend.dev' is restricted. Auto-correcting to verified store domain.");
+        finalizedSettings.fromEmail = 'onboarding@rubyfashion.shop';
+        setSettings(finalizedSettings);
+      }
+
       // Save to Firestore
       const settingsSnap = await getDocs(collection(db, 'settings'));
       if (settingsSnap.empty) {
-        await addDoc(collection(db, 'settings'), settings);
+        await addDoc(collection(db, 'settings'), finalizedSettings);
       } else {
-        await updateDoc(doc(db, 'settings', settingsSnap.docs[0].id), settings);
+        await updateDoc(doc(db, 'settings', settingsSnap.docs[0].id), finalizedSettings);
       }
       
       // Sync API Keys with server
@@ -1357,12 +1365,12 @@ export default function AdminDashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          resendApiKey: settings.resendApiKey,
-          razorpayKeyId: settings.razorpayKeyId,
-          razorpayKeySecret: settings.razorpayKeySecret,
-          fast2smsApiKey: settings.fast2smsApiKey,
-          oneSignalAppId: settings.oneSignalAppId,
-          oneSignalRestApiKey: settings.oneSignalRestApiKey
+          resendApiKey: finalizedSettings.resendApiKey,
+          razorpayKeyId: finalizedSettings.razorpayKeyId,
+          razorpayKeySecret: finalizedSettings.razorpayKeySecret,
+          fast2smsApiKey: finalizedSettings.fast2smsApiKey,
+          oneSignalAppId: finalizedSettings.oneSignalAppId,
+          oneSignalRestApiKey: finalizedSettings.oneSignalRestApiKey
         })
       });
       

@@ -4,7 +4,7 @@ import { auth, db } from '../firebase';
 import { doc, getDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
-import { Mail, ArrowRight, RefreshCw, LogOut, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Mail, ArrowRight, ArrowLeft, RefreshCw, LogOut, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export default function VerifyPrompt() {
   const navigate = useNavigate();
@@ -361,6 +361,14 @@ export default function VerifyPrompt() {
         animate={{ opacity: 1, y: 0 }}
         className="max-w-md w-full bg-white p-8 md:p-12 rounded-[2.5rem] shadow-[0_20px_50px_-20px_rgba(0,0,0,0.08)] border border-gray-50 relative z-10 text-center flex flex-col items-center"
       >
+        {/* Internal Back Button */}
+        <button 
+          onClick={handleSignOut}
+          className="absolute top-6 left-6 p-2 rounded-xl text-gray-400 hover:text-ruby hover:bg-ruby/5 transition-all outline-none"
+          title="Go back and change email"
+        >
+          <ArrowLeft size={20} />
+        </button>
         {urlMessage && (
           <div className="w-full mb-8 p-4 bg-red-50 border border-red-100 rounded-2xl flex flex-col items-start gap-2 text-left">
             <div className="flex items-center gap-2 text-red-600">

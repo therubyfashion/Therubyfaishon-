@@ -129,28 +129,44 @@ const SETTINGS_CACHE_TTL = 60000; // 1 minute
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-let currentResendApiKey = process.env.RESEND_API_KEY;
-let resend = new Resend(currentResendApiKey);
-
 let razorpay: Razorpay | null = null;
-const initialKeyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim();
-const initialKeySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)?.trim();
-
-if (initialKeyId && initialKeySecret) {
-  razorpay = new Razorpay({
-    key_id: initialKeyId,
-    key_secret: initialKeySecret,
-  });
-}
+let resend: Resend | null = null;
+let currentResendApiKey = process.env.RESEND_API_KEY;
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Initialize clients inside startServer for robustness
+  resend = new Resend(currentResendApiKey);
+  const initialKeyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim();
+  const initialKeySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)?.trim();
+
+  if (initialKeyId && initialKeySecret) {
+    try {
+      razorpay = new Razorpay({
+        key_id: initialKeyId,
+        key_secret: initialKeySecret,
+      });
+      console.log("✅ Razorpay initialized successfully");
+    } catch (err: any) {
+      console.error("❌ Razorpay initialization failed:", err.message);
+    }
+  }
+
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
   // API routes
+  app.get("/api/health", (req, res) => {
+    res.json({ 
+      status: "ok", 
+      db: !!db, 
+      projectId: currentFirebaseProjectId,
+      databaseId: currentFirestoreDatabaseId
+    });
+  });
+
   app.post("/api/track-order", async (req, res) => {
     const { orderId, email } = req.body;
     
@@ -160,6 +176,9 @@ async function startServer() {
 
     try {
       if (!db) await initializeFirebase();
+      if (!db) {
+        return res.status(503).json({ error: "Database abhi ready ho raha hai. 2-3 minute baad dobara try karein! 💎" });
+      }
       
       let orderData: any = null;
       const oid = String(orderId).trim();
@@ -423,14 +442,14 @@ async function startServer() {
             }
           }
         } catch (dbErr: any) {
-          // Silent fallback
+          console.error("Silent Firestore settings fetch failed:", dbErr.message);
         }
       }
 
       // Default settings fallback
       const effectiveSettings = cachedSettings || {
         storeName: 'The Ruby',
-        fromEmail: process.env.RESEND_FROM_EMAIL || 'onboarding@therubyfashion.shop',
+        fromEmail: process.env.RESEND_FROM_EMAIL || 'onboarding@rubyfashion.shop',
         resendApiKey: process.env.RESEND_API_KEY,
         smtpUser: process.env.SMTP_USER,
         smtpPass: process.env.SMTP_PASS
@@ -438,7 +457,16 @@ async function startServer() {
 
       // 2. Resolve From name and email
       let fromName = providedFromName || effectiveSettings.storeName || 'The Ruby';
-      let fromEmail = from || effectiveSettings.fromEmail || process.env.RESEND_FROM_EMAIL || `onboarding@therubyfashion.shop`;
+      
+      // Mandatory Domain Protection: Prevents 403 by avoiding the sandbox domain if a verified one is likely available
+      let rawFromEmail = from || effectiveSettings.fromEmail || process.env.RESEND_FROM_EMAIL || `onboarding@rubyfashion.shop`;
+      
+      if (rawFromEmail.includes('resend.dev')) {
+        console.warn("Blocking unverified 'resend.dev' domain. Defaulting to verified store domain.");
+        rawFromEmail = 'onboarding@rubyfashion.shop';
+      }
+      
+      const fromEmail = rawFromEmail;
       const formattedFrom = fromEmail.includes('<') ? fromEmail : `"${fromName}" <${fromEmail}>`;
 
       // 3. Choice of Service: SMTP (Gmail) vs API (Resend)
@@ -499,13 +527,21 @@ async function startServer() {
         let errorMessage = (error as any).message || "Resend failed to send email";
         const errLower = errorMessage.toLowerCase();
         
-        if (errLower.includes("not verified") || errLower.includes("onboarding") || errLower.includes("authorized") || errLower.includes("only send testing emails")) {
-          errorMessage = `Bhai, Resend Domain Verification Error!
+        // Detailed 403 Handling (Sandbox Restrictions)
+        if (errLower.includes("not verified") || 
+            errLower.includes("onboarding") || 
+            errLower.includes("authorized") || 
+            errLower.includes("testing emails") ||
+            errLower.includes("403") ||
+            errLower.includes("restricted")) {
+          
+          errorMessage = `Bhai, Resend 403 (Domain Error)!
           \nResend keh raha hai: "${errorMessage}"
           \nSamadhan:
-          1. Aapne Resend.com par jo bhi domain verify kiya hai (jaise 'rubyfashion.shop' ya 'therubyfashion.shop'), wahi email aap Admin -> Settings -> "From Email" mein use karein.
-          2. Check karein ki 'the' extra toh nahi hai. Dono domains alag hote hain.
-          3. Jab tak Resend par "Status: Verified" nahi aata, tab tak OTP customer ko nahi jayega.`;
+          1. Check karein ki Resend.com par aapka domain "Verified" hai ya nahi.
+          2. Aapne "onboarding@rubyfashion.shop" use kiya hai, magar shayad aapka verified domain "therubyfashion.shop" (with 'the') hai.
+          3. Admin Panel -> Settings mein jaa kar "From Email" ko apna verified domain wala email set karein.
+          4. Jab tak domain verify nahi hota, Resend kisi aur ko email nahi bhejta.`;
         }
 
         return res.status(400).json({ 
@@ -702,15 +738,33 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    } else {
+      app.get('*', (req, res) => {
+        res.status(404).send("Bhai, 'dist' folder nahi mila. App build nahi hui hai. AI Studio mein 'compile_applet' run karein.");
+      });
+    }
   }
+
+  // Global Error Handler
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("🔥 Global Server Error:", err);
+    res.status(500).json({ 
+      error: "Bhai, server mein kuch problem ayi hai.",
+      message: err.message,
+      stack: process.env.NODE_ENV === 'production' ? undefined : err.stack
+    });
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("🔥 CRITICAL: Server failed to start:", err);
+});
