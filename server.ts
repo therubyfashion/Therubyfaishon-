@@ -144,9 +144,22 @@ let razorpay: Razorpay | null = null;
 let resend: Resend | null = null;
 let currentResendApiKey = process.env.RESEND_API_KEY;
 
+// Global Unhandled Error Catchers
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🔥 Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('🔥 Uncaught Exception:', err);
+});
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
+  
+  console.log(`🚀 Starting server...`);
+  console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔌 Port: ${PORT}`);
 
   // Initialize clients inside startServer for robustness
   resend = new Resend(currentResendApiKey);
@@ -175,6 +188,9 @@ async function startServer() {
       const indexPath = path.join(distPath, 'index.html');
       if (fs.existsSync(indexPath)) {
         return res.sendFile(indexPath);
+      } else {
+        // Return 200 OK for Render Health Check even if dist is missing
+        return res.status(200).send("Server is UP, but 'dist' folder is missing. Bhai, please run 'npm run build'.");
       }
     }
     next();
