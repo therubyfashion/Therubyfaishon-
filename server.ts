@@ -58,34 +58,20 @@ const initializeFirebase = async (force = false) => {
     }
     
     try {
-      console.log(`Attempting to initialize Firebase Admin for project: ${targetProjectId}`);
+      console.log(`Starting Firebase Admin init for: ${targetProjectId}`);
+      // Only initialize, don't probe or check connections here
       adminApp = admin.initializeApp({
         credential: admin.credential.applicationDefault(),
         projectId: targetProjectId
       });
-      console.log("✅ Firebase Admin App initialized");
+      db = getFirestore(adminApp, firestoreDatabaseId);
+      console.log("✅ Firebase Admin App initialized (Lazy Mode)");
     } catch (adminErr: any) {
-      console.error("⚠️ Firebase Admin App initialization failed (Local credentials might be missing):", adminErr.message);
-      // Fallback: Try initializing without credentials if in a specific environment, or just skip
-      return;
-    }
-
-    if (!adminApp) return;
-    const testDb = getFirestore(adminApp, firestoreDatabaseId);
-    
-    try {
-      await Promise.race([
-        testDb.listCollections(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
-      ]);
-      db = testDb;
-      console.log("✅ Firestore connected successfully");
-    } catch (probeErr: any) {
-      console.log(`ℹ️ Firestore connection check failed or timed out. Status: ${probeErr.message}`);
+      console.error("⚠️ Firebase Admin skip: Credentials missing or invalid.");
       db = null;
     }
   } catch (err: any) {
-    console.error("❌ Critical error in initializeFirebase:", err.message);
+    console.error("❌ Firebase Init silent fail:", err.message);
     db = null;
   }
 };
