@@ -121,7 +121,7 @@ async function sendOneSignalNotification(notification: any) {
 // Cache for store settings to avoid frequent Firestore calls
 let cachedSettings: any = null;
 let lastSettingsFetch = 0;
-const SETTINGS_CACHE_TTL = 60000; // 1 minute
+const SETTINGS_CACHE_TTL = 5000; // 5 seconds for faster admin updates
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -493,9 +493,13 @@ async function startServer() {
       const smtpPass = effectiveSettings.smtpPass || process.env.SMTP_PASS;
 
       if (smtpUser && smtpPass) {
-        console.log("Using SMTP for email delivery...");
+        console.log("Using Gmail SMTP for delivery...");
+        
+        // Dedicated Gmail transport is more reliable for app passwords
         const transporter = nodemailer.createTransport({
-          service: 'gmail',
+          host: 'smtp.gmail.com',
+          port: 465,
+          secure: true, // use SSL
           auth: {
             user: smtpUser,
             pass: smtpPass
@@ -507,11 +511,11 @@ async function startServer() {
           to: Array.isArray(to) ? to.join(', ') : to,
           subject: subject,
           html: html,
-          replyTo: replyTo
+          replyTo: replyTo || smtpUser
         };
 
         const result = await transporter.sendMail(mailOptions);
-        console.log("✅ SMTP Email Sent Successfully:", result.messageId);
+        console.log("✅ Gmail SMTP Sent Successfully:", result.messageId);
         return res.json({ id: result.messageId, provider: 'smtp' });
       }
 

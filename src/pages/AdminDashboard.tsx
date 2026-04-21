@@ -1383,19 +1383,24 @@ export default function AdminDashboard() {
 
   const [isTestingEmail, setIsTestingEmail] = useState(false);
   const handleTestEmail = async () => {
-    if (!settings.resendApiKey) {
-      toast.error('Please enter a Resend API Key first');
+    if (!settings.resendApiKey && (!settings.smtpUser || !settings.smtpPass)) {
+      toast.error('Bhai, ya toh Resend API Key dalein, ya Gmail App Password configure karein pehle.');
       return;
     }
     
     setIsTestingEmail(true);
     try {
-      // Sync Resend API Key with server first
-      await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ resendApiKey: settings.resendApiKey })
-      });
+      // Sync Resend API Key with server if present
+      if (settings.resendApiKey) {
+        await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resendApiKey: settings.resendApiKey })
+        });
+      }
+
+      // Save all settings first to ensure server gets latest SMTP info
+      await handleSaveSettings();
 
       const response = await fetch('/api/send-email', {
         method: 'POST',
@@ -1414,11 +1419,11 @@ export default function AdminDashboard() {
                 <div style="text-align: center; margin-bottom: 40px;">
                   <div style="display: inline-block; background-color: #FDF2F8; color: #E11D48; padding: 12px 24px; border-radius: 100px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 24px;">Connection Test</div>
                   <h2 style="font-size: 28px; font-weight: bold; margin: 0 0 16px 0; color: #1A2C54;">Email Integration Successful! 🚀</h2>
-                  <p style="font-size: 16px; color: #666666; line-height: 1.6; margin: 0;">This is a test email to verify your Resend API configuration. If you're reading this, your store is ready to send professional notifications to your customers.</p>
+                  <p style="font-size: 16px; color: #666666; line-height: 1.6; margin: 0;">This is a test email to verify your email configuration. If you're reading this, your store is ready to send professional notifications to your customers.</p>
                 </div>
 
                 <div style="background-color: #F9FAFB; border-radius: 24px; padding: 32px; margin-bottom: 40px; border: 1px solid #F3F4F6;">
-                  <p style="font-size: 14px; color: #666666; margin: 0; text-align: center;">Your API Key is correctly configured and the server is ready to handle email requests.</p>
+                  <p style="font-size: 14px; color: #666666; margin: 0; text-align: center;">Your email service is correctly configured and the server is ready to handle requests.</p>
                 </div>
 
                 <div style="text-align: center; border-top: 1px solid #F0F0F0; pt-40px;">
