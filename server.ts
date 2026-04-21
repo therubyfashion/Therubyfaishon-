@@ -631,6 +631,7 @@ async function startServer() {
       // 2. Resolve From name and email
       const smtpUser = effectiveSettings.smtpUser || process.env.SMTP_USER;
       const smtpPass = effectiveSettings.smtpPass || process.env.SMTP_PASS;
+      const apiKey = effectiveSettings.resendApiKey || process.env.RESEND_API_KEY || currentResendApiKey;
 
       let fromName = providedFromName || effectiveSettings.storeName || 'The Ruby';
       
@@ -703,8 +704,6 @@ async function startServer() {
       }
 
       // 4. Default to Resend API if SMTP not configured
-      const apiKey = effectiveSettings.resendApiKey || process.env.RESEND_API_KEY || currentResendApiKey;
-      
       if (!apiKey) {
         console.error("Email configuration missing (No SMTP and no API Key).");
         return res.status(400).json({ 
