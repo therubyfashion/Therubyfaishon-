@@ -6208,12 +6208,50 @@ export default function AdminDashboard() {
                   <h2 className="text-2xl font-bold text-gray-800">Site Settings</h2>
                   <p className="text-sm text-gray-400">Configure your store's global parameters</p>
                 </div>
-                <button 
-                  onClick={handleSaveSettings}
-                  className="w-full md:w-auto bg-ruby text-white px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 active:scale-95"
-                >
-                  Save Changes
-                </button>
+                <div className="flex gap-3 w-full md:w-auto">
+                  <button 
+                    onClick={async () => {
+                      try {
+                        const res = await fetch('/api/system-health');
+                        const data = await res.json();
+                        toast.success(`System: ${data.status} | Email: ${data.services.email.activeProvider}`);
+                        console.log("Full Health Report:", data);
+                      } catch (e) {
+                        toast.error("Failed to fetch technical health report");
+                      }
+                    }}
+                    className="flex-1 md:flex-none border border-gray-200 text-[#1A2C54] px-4 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-gray-50 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Activity size={14} />
+                    Check Health
+                  </button>
+                  <button 
+                    onClick={handleSaveSettings}
+                    className="flex-1 md:flex-none bg-ruby text-white px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 active:scale-95"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+
+              {/* Technical Health Overview (Quick View) */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                   { label: 'Database', key: 'firebase', icon: Database },
+                   { label: 'Email', key: 'email', icon: Mail },
+                   { label: 'Payments', key: 'razorpay', icon: CreditCard },
+                   { label: 'Push', key: 'oneSignal', icon: Bell }
+                ].map((item) => (
+                  <div key={item.key} className="bg-white p-4 rounded-3xl border border-gray-100 shadow-sm flex items-center gap-3">
+                    <div className="w-10 h-10 bg-gray-50 rounded-2xl flex items-center justify-center text-[#1A2C54]/50 group-hover:text-ruby transition-all">
+                      <item.icon size={20} />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-1">{item.label}</p>
+                      <p className="text-[11px] font-bold text-[#1A2C54] truncate">Checking...</p> 
+                    </div>
+                  </div>
+                ))}
               </div>
 
               <div className="grid grid-cols-1 gap-8">

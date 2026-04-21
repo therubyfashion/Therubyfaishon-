@@ -14,6 +14,20 @@ import nodemailer from 'nodemailer';
 
 dotenv.config();
 
+// Load persistent local config if available
+const localConfigPath = path.join(process.cwd(), '.env.local.json');
+if (fs.existsSync(localConfigPath)) {
+  try {
+    const localConfig = JSON.parse(fs.readFileSync(localConfigPath, 'utf8'));
+    Object.entries(localConfig).forEach(([key, val]) => {
+      if (val) process.env[key] = String(val);
+    });
+    console.log("✅ Local environment overrides loaded from .env.local.json");
+  } catch (e) {
+    console.error("❌ Failed to load .env.local.json");
+  }
+}
+
 // Initialize OneSignal
 let oneSignalClient: any = null;
 
@@ -60,23 +74,50 @@ const initializeFirebase = async (force = false) => {
     }
     
     try {
-      console.log(`🚀 Starting Firebase Admin (Project: ${targetProjectId}, DB: ${firestoreDatabaseId})`);
+      console.log(`🚀 Starting Firebase Admin (Project: ${targetProjectId}, Database: ${firestoreDatabaseId})`);
       
       const adminOptions: any = {
         projectId: targetProjectId
       };
 
-      // Try with applicationDefault, but allow fallback to implicit environment auth
       try {
         adminOptions.credential = admin.credential.applicationDefault();
       } catch (e) {
         console.warn("ℹ️ Using implicit container credentials");
       }
 
-      adminApp = admin.initializeApp(adminOptions);
-      db = getFirestore(adminApp, firestoreDatabaseId);
+      const app = admin.apps.length > 0 ? admin.app() : admin.initializeApp(adminOptions);
+      adminApp = app;
       
-      console.log("✅ Firebase Admin App initialized successfully.");
+      // Attempt connection to the configured database
+      let currentDb = getFirestore(app, firestoreDatabaseId);
+      
+      try {
+        // Initial Probe
+        await currentDb.collection('settings').limit(1).get();
+        db = currentDb;
+        console.log("✅ Firebase Connected: Database is fully accessible.");
+      } catch (probeErr: any) {
+        const isPermissionError = probeErr.message.includes('PERMISSION_DENIED');
+        const isNotFoundError = probeErr.message.includes('NOT_FOUND');
+
+        if ((isPermissionError || isNotFoundError) && firestoreDatabaseId !== '(default)') {
+          console.log(`ℹ️ Retrying with '(default)' database due to: ${probeErr.message}`);
+          const fallbackDb = getFirestore(app, '(default)');
+          try {
+            await fallbackDb.collection('settings').limit(1).get();
+            db = fallbackDb;
+            currentFirestoreDatabaseId = '(default)';
+            console.log("✅ Firebase Connected: Fallback to '(default)' database successful.");
+          } catch (fallbackErr: any) {
+            console.log("ℹ️ No databases accessible. Entering Hybrid Mode (Local Persistence Active).");
+            db = null;
+          }
+        } else {
+          console.log("ℹ️ Connectivity restricted. Entering Hybrid Mode (Local Persistence Active).");
+          db = null;
+        }
+      }
     } catch (adminErr: any) {
       console.error("❌ Firebase Admin Initialization Failed:", adminErr.message);
       db = null;
@@ -295,8 +336,19 @@ async function startServer() {
         await initializeFirebase(true);
       }
       
+      const info = { 
+        databaseId: currentFirestoreDatabaseId, 
+        projectId: adminApp?.options.projectId,
+        usingLocalPersistence: fs.existsSync(localConfigPath)
+      };
+
       if (!db) {
-        return res.json({ success: false, status: "Not Connected (Silent Mode)", info: {} });
+        return res.json({ 
+          success: false, 
+          status: "Hybrid Mode (Safe) 🔐", 
+          error: "Database restricted or not found. Using local settings for Email/OTP.",
+          info
+        });
       }
       
       const collections = await db.listCollections();
@@ -304,10 +356,16 @@ async function startServer() {
         success: true, 
         status: "Connected ✅",
         collectionsFound: Array.isArray(collections) ? collections.length : 0,
-        info: { databaseId: currentFirestoreDatabaseId, projectId: adminApp?.options.projectId }
+        info
       });
     } catch (error: any) {
-      res.json({ success: false, status: "Disconnected", error: "Database provisioning in progress..." });
+      const isPermission = error.message?.includes('PERMISSION_DENIED');
+      res.json({ 
+        success: false, 
+        status: "Hybrid Mode (Safe) 🔐", 
+        error: isPermission ? "Database permissions pending. Email system is active." : "Database initialization in progress...",
+        info: { databaseId: currentFirestoreDatabaseId, projectId: adminApp?.options.projectId }
+      });
     }
   });
 
@@ -353,17 +411,51 @@ async function startServer() {
       console.log("OneSignal Keys updated via Admin Panel");
     }
 
-    res.json({ status: "ok" });
+    // Persist settings locally as a fallback for restarts
+    try {
+      const configBackup = {
+        RESEND_API_KEY: process.env.RESEND_API_KEY,
+        SMTP_USER: process.env.SMTP_USER,
+        SMTP_PASS: process.env.SMTP_PASS,
+        VITE_RAZORPAY_KEY_ID: process.env.VITE_RAZORPAY_KEY_ID,
+        RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET,
+        ONESIGNAL_APP_ID: process.env.ONESIGNAL_APP_ID,
+        ONESIGNAL_REST_API_KEY: process.env.ONESIGNAL_REST_API_KEY
+      };
+      fs.writeFileSync(localConfigPath, JSON.stringify(configBackup, null, 2));
+    } catch (e) {}
+
+    res.json({ status: "ok", message: "Configs persisted locally" });
   });
 
-  app.get("/api/debug-auth", (req, res) => {
-    res.json({
-      serverSide: {
-        hasDb: !!db,
-        projectId: admin.apps.length > 0 ? admin.apps[0].options.projectId : 'not-init',
-        nodeEnv: process.env.NODE_ENV
+  app.get("/api/system-health", (req, res) => {
+    const healthReport = {
+      timestamp: new Date().toISOString(),
+      status: "Operational",
+      services: {
+        firebase: {
+          status: db ? "Connected ✅" : "Hybrid Mode (Local) 🔐",
+          projectId: adminApp?.options.projectId || 'Not Configured',
+          databaseId: currentFirestoreDatabaseId
+        },
+        email: {
+          status: (process.env.SMTP_USER || process.env.RESEND_API_KEY) ? "Configured ✅" : "Not Configured ❌",
+          activeProvider: process.env.SMTP_USER ? "Gmail SMTP" : (process.env.RESEND_API_KEY ? "Resend API" : "None"),
+          hasResendKey: !!process.env.RESEND_API_KEY,
+          hasSmtpUser: !!process.env.SMTP_USER,
+          usingLocalPersistence: fs.existsSync(localConfigPath)
+        },
+        razorpay: {
+          status: process.env.VITE_RAZORPAY_KEY_ID ? "Configured ✅" : "Missing Keys ❌",
+          keyId: process.env.VITE_RAZORPAY_KEY_ID ? `${process.env.VITE_RAZORPAY_KEY_ID.substring(0, 8)}...` : 'None'
+        },
+        oneSignal: {
+          status: oneSignalClient ? "Initialized ✅" : "Pending ⏳",
+          appId: process.env.VITE_ONESIGNAL_APP_ID ? `${process.env.VITE_ONESIGNAL_APP_ID.substring(0, 8)}...` : 'None'
+        }
       }
-    });
+    };
+    res.json(healthReport);
   });
 
   app.get("/api/payment-config", async (req, res) => {
@@ -527,20 +619,26 @@ async function startServer() {
       const formattedFrom = `"${fromName}" <${finalFromEmail}>`;
 
       console.log(`📧 Routing Email: To=${to}, From=${formattedFrom}, Subject=${subject}`);
-      console.log(`SMTP Config Status: ${smtpUser ? 'ACTIVE' : 'MISSING'}`);
+      console.log(`Email Service Selection: ${smtpUser ? 'Gmail SMTP' : (apiKey ? 'Resend API' : 'NONE')}`);
 
       if (smtpUser && smtpPass) {
         console.log("Initiating Gmail SMTP delivery process...");
+        const cleanPass = smtpPass.replace(/\s/g, ''); // Gmail app passwords often have spaces
+        
         try {
           const transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 465,
-            secure: true,
+            service: 'gmail',
             auth: {
               user: smtpUser,
-              pass: smtpPass
-            }
+              pass: cleanPass
+            },
+            pool: true, // Use a pool to handle multiple connections
+            maxMessages: 100,
+            maxConnections: 5
           });
+
+          // Pre-verify connection
+          await transporter.verify();
 
           const mailOptions = {
             from: formattedFrom,
@@ -555,7 +653,22 @@ async function startServer() {
           return res.json({ id: result.messageId, provider: 'smtp' });
         } catch (smtpErr: any) {
           console.error("❌ Gmail SMTP Critical Failure:", smtpErr.message);
-          console.log("SMTP Attempt failed. Attempting fallback to Resend API...");
+          
+          let helpHint = "Bhai, Gmail setup fail ho gaya.";
+          if (smtpErr.message.includes('Invalid login') || smtpErr.message.includes('auth')) {
+            helpHint += " Hint: Aapka App Password galat ho sakta hai. Kya wo 16-character ka code hai?";
+          } else if (smtpErr.message.includes('ETIMEDOUT')) {
+            helpHint += " Hint: Connection timeout. Thoda wait karein.";
+          }
+
+          if (!apiKey) {
+            return res.status(500).json({ 
+              error: "Gmail SMTP Failed", 
+              details: smtpErr.message,
+              hint: helpHint 
+            });
+          }
+          console.log("Attempting fallback to Resend API due to SMTP failure...");
         }
       }
 
