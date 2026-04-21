@@ -53,10 +53,14 @@ export default function Login() {
       navigate('/');
     } catch (error: any) {
       console.error("Login error:", error);
+      if (error.code === 'auth/popup-closed-by-user') {
+        // Just return, no need to show error if user closed the window themselves
+        return;
+      }
       if (error.code === 'auth/account-exists-with-different-credential') {
-        toast.error("You already have an account with this email using a different login method (e.g., Google or Email). Please use your original method to sign in.");
+        toast.error("Aapka account pehle se bana hai kisi aur method se (Google ya Email). Wahi use karke login karein.");
       } else {
-        toast.error(error.message || "Failed to login. Please try again.");
+        toast.error("Login nahi ho paaya. Dobara try karein.");
       }
     } finally {
       setLoading(false);

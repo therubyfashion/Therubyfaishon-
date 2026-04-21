@@ -57,10 +57,14 @@ export default function Signup() {
       navigate('/');
     } catch (error: any) {
       console.error("Login error:", error);
+      if (error.code === 'auth/popup-closed-by-user') {
+        // No toast needed for this one
+        return;
+      }
       if (error.code === 'auth/account-exists-with-different-credential') {
-        toast.error("You already have an account with this email using a different login method (e.g., Google or Email). Please use your original method to sign in.");
+        toast.error("Aapka account pehle se bana hai kisi aur method se. Please wahi use karein.");
       } else {
-        toast.error("Failed to login. Please try again.");
+        toast.error("Account nahi ban paaya. Dobara try karein.");
       }
     } finally {
       setLoading(false);

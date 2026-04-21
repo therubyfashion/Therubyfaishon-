@@ -49,25 +49,36 @@ const initializeFirebase = async (force = false) => {
       
     const targetProjectId = firebaseProjectId || process.env.PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
     if (!targetProjectId) {
-      console.log("ℹ️ Skipping Firebase Admin init: No Project ID found.");
+      console.log("ℹ️ Skipping Firebase Admin init: No Project ID found in config or env.");
       return;
     }
 
     if (admin.apps.length > 0) {
-      await Promise.all(admin.apps.map(a => a.delete().catch(() => {})));
+      try {
+        await Promise.all(admin.apps.map(a => a.delete().catch(() => {})));
+      } catch (e) {}
     }
     
     try {
-      console.log(`Starting Firebase Admin init for: ${targetProjectId}`);
-      // Only initialize, don't probe or check connections here
-      adminApp = admin.initializeApp({
-        credential: admin.credential.applicationDefault(),
+      console.log(`🚀 Starting Firebase Admin (Project: ${targetProjectId}, DB: ${firestoreDatabaseId})`);
+      
+      const adminOptions: any = {
         projectId: targetProjectId
-      });
+      };
+
+      // Try with applicationDefault, but allow fallback to implicit environment auth
+      try {
+        adminOptions.credential = admin.credential.applicationDefault();
+      } catch (e) {
+        console.warn("ℹ️ Using implicit container credentials");
+      }
+
+      adminApp = admin.initializeApp(adminOptions);
       db = getFirestore(adminApp, firestoreDatabaseId);
-      console.log("✅ Firebase Admin App initialized (Lazy Mode)");
+      
+      console.log("✅ Firebase Admin App initialized successfully.");
     } catch (adminErr: any) {
-      console.error("⚠️ Firebase Admin skip: Credentials missing or invalid.");
+      console.error("❌ Firebase Admin Initialization Failed:", adminErr.message);
       db = null;
     }
   } catch (err: any) {
@@ -473,10 +484,16 @@ async function startServer() {
             if (!settingsSnap.empty) {
               cachedSettings = settingsSnap.docs[0].data();
               lastSettingsFetch = now;
+            } else {
+              // Mark as fetched even if empty to avoid constant retries on empty DB
+              lastSettingsFetch = now;
             }
           }
         } catch (dbErr: any) {
-          console.error("Silent Firestore settings fetch failed:", dbErr.message);
+          console.error("Firestore settings fetch failed:", dbErr.message);
+          // If we hit a permission error or similar, don't spam.
+          // Set a long cooldown (2 minutes) before trying firestore again.
+          lastSettingsFetch = now - (SETTINGS_CACHE_TTL - 120000); 
         }
       }
 
@@ -490,34 +507,35 @@ async function startServer() {
       };
 
       // 2. Resolve From name and email
-      let fromName = providedFromName || effectiveSettings.storeName || 'The Ruby';
-      
-      // Mandatory Domain Protection: Prevents 403 by avoiding the sandbox domain if a verified one is likely available
-      let rawFromEmail = from || effectiveSettings.fromEmail || process.env.RESEND_FROM_EMAIL || `onboarding@rubyfashion.shop`;
-      
-      if (rawFromEmail.includes('resend.dev')) {
-        console.warn("Blocking unverified 'resend.dev' domain. Defaulting to verified store domain.");
-        rawFromEmail = 'onboarding@rubyfashion.shop';
-      }
-      
-      const fromEmail = rawFromEmail;
-      const formattedFrom = fromEmail.includes('<') ? fromEmail : `"${fromName}" <${fromEmail}>`;
-
-      // 3. Choice of Service: SMTP (Gmail) vs API (Resend)
       const smtpUser = effectiveSettings.smtpUser || process.env.SMTP_USER;
       const smtpPass = effectiveSettings.smtpPass || process.env.SMTP_PASS;
 
+      let fromName = providedFromName || effectiveSettings.storeName || 'The Ruby';
+      
+      // Determine base from email
+      let rawFromEmail = from || effectiveSettings.fromEmail || process.env.RESEND_FROM_EMAIL || `onboarding@rubyfashion.shop`;
+      
+      // Mandatory Domain Protection for Resend
+      if (!smtpUser && rawFromEmail.includes('resend.dev')) {
+        console.warn("Blocking unverified 'resend.dev' domain for Resend. Defaulting to verified store domain if possible.");
+        rawFromEmail = 'onboarding@rubyfashion.shop';
+      }
+
+      // If using SMTP, ensure the 'from' matches the authenticated user to avoid rejection
+      const finalFromEmail = (smtpUser && smtpUser.includes('@gmail.com')) ? smtpUser : rawFromEmail;
+      
+      const formattedFrom = `"${fromName}" <${finalFromEmail}>`;
+
       console.log(`📧 Routing Email: To=${to}, From=${formattedFrom}, Subject=${subject}`);
-      console.log(`SMTP Config Present: ${smtpUser ? 'YES' : 'NO'} (${smtpUser || 'none'})`);
+      console.log(`SMTP Config Status: ${smtpUser ? 'ACTIVE' : 'MISSING'}`);
 
       if (smtpUser && smtpPass) {
-        console.log("Attempting Gmail SMTP delivery...");
+        console.log("Initiating Gmail SMTP delivery process...");
         try {
-          // Dedicated Gmail transport is more reliable for app passwords
           const transporter = nodemailer.createTransport({
             host: 'smtp.gmail.com',
             port: 465,
-            secure: true, // use SSL
+            secure: true,
             auth: {
               user: smtpUser,
               pass: smtpPass
@@ -533,11 +551,11 @@ async function startServer() {
           };
 
           const result = await transporter.sendMail(mailOptions);
-          console.log("✅ Gmail SMTP Sent Successfully:", result.messageId);
+          console.log("✅ Gmail SMTP Success:", result.messageId);
           return res.json({ id: result.messageId, provider: 'smtp' });
         } catch (smtpErr: any) {
-          console.error("❌ Gmail SMTP Error:", smtpErr.message);
-          console.log("Falling back to Resend API...");
+          console.error("❌ Gmail SMTP Critical Failure:", smtpErr.message);
+          console.log("SMTP Attempt failed. Attempting fallback to Resend API...");
         }
       }
 
