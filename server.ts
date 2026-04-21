@@ -301,20 +301,35 @@ async function startServer() {
   });
 
   app.post("/api/config", (req, res) => {
-    const { resendApiKey, razorpayKeyId, razorpayKeySecret, oneSignalAppId, oneSignalRestApiKey } = req.body;
+    const { 
+      resendApiKey, 
+      razorpayKeyId, 
+      razorpayKeySecret, 
+      oneSignalAppId, 
+      oneSignalRestApiKey,
+      smtpUser,
+      smtpPass 
+    } = req.body;
     
+    // Force cache refresh on next request
+    cachedSettings = null;
+    lastSettingsFetch = 0;
+
     if (resendApiKey) {
       currentResendApiKey = resendApiKey;
       resend = new Resend(currentResendApiKey);
+      process.env.RESEND_API_KEY = resendApiKey;
       console.log("Resend API Key updated");
     }
+
+    if (smtpUser) process.env.SMTP_USER = smtpUser;
+    if (smtpPass) process.env.SMTP_PASS = smtpPass;
 
     if (razorpayKeyId && razorpayKeySecret) {
       razorpay = new Razorpay({
         key_id: razorpayKeyId.trim(),
         key_secret: razorpayKeySecret.trim(),
       });
-      // Store in process.env for the diagnostic endpoint and other logic
       process.env.VITE_RAZORPAY_KEY_ID = razorpayKeyId.trim();
       process.env.RAZORPAY_KEY_SECRET = razorpayKeySecret.trim();
       console.log("Razorpay Keys updated via Admin Panel");
@@ -492,31 +507,38 @@ async function startServer() {
       const smtpUser = effectiveSettings.smtpUser || process.env.SMTP_USER;
       const smtpPass = effectiveSettings.smtpPass || process.env.SMTP_PASS;
 
+      console.log(`📧 Routing Email: To=${to}, From=${formattedFrom}, Subject=${subject}`);
+      console.log(`SMTP Config Present: ${smtpUser ? 'YES' : 'NO'} (${smtpUser || 'none'})`);
+
       if (smtpUser && smtpPass) {
-        console.log("Using Gmail SMTP for delivery...");
-        
-        // Dedicated Gmail transport is more reliable for app passwords
-        const transporter = nodemailer.createTransport({
-          host: 'smtp.gmail.com',
-          port: 465,
-          secure: true, // use SSL
-          auth: {
-            user: smtpUser,
-            pass: smtpPass
-          }
-        });
+        console.log("Attempting Gmail SMTP delivery...");
+        try {
+          // Dedicated Gmail transport is more reliable for app passwords
+          const transporter = nodemailer.createTransport({
+            host: 'smtp.gmail.com',
+            port: 465,
+            secure: true, // use SSL
+            auth: {
+              user: smtpUser,
+              pass: smtpPass
+            }
+          });
 
-        const mailOptions = {
-          from: formattedFrom,
-          to: Array.isArray(to) ? to.join(', ') : to,
-          subject: subject,
-          html: html,
-          replyTo: replyTo || smtpUser
-        };
+          const mailOptions = {
+            from: formattedFrom,
+            to: Array.isArray(to) ? to.join(', ') : to,
+            subject: subject,
+            html: html,
+            replyTo: replyTo || smtpUser
+          };
 
-        const result = await transporter.sendMail(mailOptions);
-        console.log("✅ Gmail SMTP Sent Successfully:", result.messageId);
-        return res.json({ id: result.messageId, provider: 'smtp' });
+          const result = await transporter.sendMail(mailOptions);
+          console.log("✅ Gmail SMTP Sent Successfully:", result.messageId);
+          return res.json({ id: result.messageId, provider: 'smtp' });
+        } catch (smtpErr: any) {
+          console.error("❌ Gmail SMTP Error:", smtpErr.message);
+          console.log("Falling back to Resend API...");
+        }
       }
 
       // 4. Default to Resend API if SMTP not configured

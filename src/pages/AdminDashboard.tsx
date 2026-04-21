@@ -1370,7 +1370,9 @@ export default function AdminDashboard() {
           razorpayKeySecret: finalizedSettings.razorpayKeySecret,
           fast2smsApiKey: finalizedSettings.fast2smsApiKey,
           oneSignalAppId: finalizedSettings.oneSignalAppId,
-          oneSignalRestApiKey: finalizedSettings.oneSignalRestApiKey
+          oneSignalRestApiKey: finalizedSettings.oneSignalRestApiKey,
+          smtpUser: finalizedSettings.smtpUser,
+          smtpPass: finalizedSettings.smtpPass
         })
       });
       
