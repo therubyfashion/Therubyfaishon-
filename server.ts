@@ -14,6 +14,12 @@ import nodemailer from 'nodemailer';
 
 dotenv.config();
 
+// Service instances
+let razorpay: Razorpay | null = null;
+let resend: Resend | null = null;
+let currentResendApiKey = process.env.RESEND_API_KEY;
+let oneSignalClient: any = null;
+
 // Load persistent local config if available
 const localConfigPath = path.join(process.cwd(), '.env.local.json');
 if (fs.existsSync(localConfigPath)) {
@@ -28,8 +34,36 @@ if (fs.existsSync(localConfigPath)) {
   }
 }
 
-// Initialize OneSignal
-let oneSignalClient: any = null;
+// Initialize clients from environment if available
+const initClientsFromEnv = () => {
+  if (process.env.RESEND_API_KEY) {
+    currentResendApiKey = process.env.RESEND_API_KEY;
+    resend = new Resend(currentResendApiKey);
+    console.log("✅ Resend API initialized from environment");
+  }
+
+  if (process.env.VITE_RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+    razorpay = new Razorpay({
+      key_id: process.env.VITE_RAZORPAY_KEY_ID.trim(),
+      key_secret: process.env.RAZORPAY_KEY_SECRET.trim(),
+    });
+    console.log("✅ Razorpay initialized from environment");
+  }
+
+  if (process.env.ONESIGNAL_APP_ID && process.env.ONESIGNAL_REST_API_KEY) {
+    try {
+      oneSignalClient = new OneSignal.Client(
+        process.env.ONESIGNAL_APP_ID.trim(), 
+        process.env.ONESIGNAL_REST_API_KEY.trim()
+      );
+      console.log("✅ OneSignal initialized from environment");
+    } catch (e) {
+      console.error("❌ OneSignal init failed:", e);
+    }
+  }
+};
+
+initClientsFromEnv();
 
 // Initialize Firebase Admin for server-side operations
 let db: any = null;
@@ -177,10 +211,6 @@ const SETTINGS_CACHE_TTL = 5000; // 5 seconds for faster admin updates
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-let razorpay: Razorpay | null = null;
-let resend: Resend | null = null;
-let currentResendApiKey = process.env.RESEND_API_KEY;
 
 // Global Unhandled Error Catchers
 process.on('unhandledRejection', (reason, promise) => {

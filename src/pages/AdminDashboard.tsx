@@ -1109,21 +1109,36 @@ export default function AdminDashboard() {
   const [firebaseDiagnostics, setFirebaseDiagnostics] = useState<any>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(false);
   const [firebaseStatus, setFirebaseStatus] = useState<string>('Checking...');
+  const [systemHealth, setSystemHealth] = useState<any>(null);
 
   const checkFirebaseStatus = async (force = false) => {
     setIsLoadingStatus(true);
     try {
-      const res = await fetch(`/api/firebase-status${force ? '?force=true' : ''}`);
+      const res = await fetch(`/api/system-health`);
       const data = await res.json();
-      if (data.success) {
-        setFirebaseStatus(data.status);
-        setFirebaseDiagnostics(data.info);
-      } else {
-        setFirebaseStatus(`Error: ${data.error}`);
-        setFirebaseDiagnostics(data.diagnostics);
+      setSystemHealth(data);
+      
+      // Legacy compatibility for firebase specific status if needed elsewhere
+      if (data.services?.firebase) {
+        setFirebaseStatus(data.services.firebase.status);
+        setFirebaseDiagnostics(data.services.firebase);
       }
     } catch (err: any) {
       setFirebaseStatus(`Error: ${err.message}`);
+    } finally {
+      setIsLoadingStatus(false);
+    }
+  };
+
+  const handleCheckFullHealth = async () => {
+    setIsLoadingStatus(true);
+    try {
+      const res = await fetch('/api/system-health');
+      const data = await res.json();
+      setSystemHealth(data);
+      toast.success(`System Health: ${data.status}`);
+    } catch (e) {
+      toast.error("Technical health check failed");
     } finally {
       setIsLoadingStatus(false);
     }
@@ -1446,7 +1461,9 @@ export default function AdminDashboard() {
         toast.success(`Test email sent to ${settings.supportEmail}`);
       } else {
         const data = await response.json();
-        if (data.name === 'validation_error') {
+        if (data.hint) {
+          toast.error(data.hint, { duration: 8000 });
+        } else if (data.name === 'validation_error') {
           toast.error('Resend Validation Error: Check if your "From Email" is verified or if you are sending to an unauthorized email.');
         } else {
           toast.error(data.error || 'Failed to send test email');
@@ -6210,20 +6227,12 @@ export default function AdminDashboard() {
                 </div>
                 <div className="flex gap-3 w-full md:w-auto">
                   <button 
-                    onClick={async () => {
-                      try {
-                        const res = await fetch('/api/system-health');
-                        const data = await res.json();
-                        toast.success(`System: ${data.status} | Email: ${data.services.email.activeProvider}`);
-                        console.log("Full Health Report:", data);
-                      } catch (e) {
-                        toast.error("Failed to fetch technical health report");
-                      }
-                    }}
-                    className="flex-1 md:flex-none border border-gray-200 text-[#1A2C54] px-4 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-gray-50 transition-all flex items-center justify-center gap-2"
+                    onClick={handleCheckFullHealth}
+                    disabled={isLoadingStatus}
+                    className="flex-1 md:flex-none border border-gray-200 text-[#1A2C54] px-4 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-gray-50 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                   >
-                    <Activity size={14} />
-                    Check Health
+                    <Activity size={14} className={isLoadingStatus ? 'animate-spin' : ''} />
+                    {isLoadingStatus ? 'Scanning...' : 'Check Health'}
                   </button>
                   <button 
                     onClick={handleSaveSettings}
@@ -6241,17 +6250,30 @@ export default function AdminDashboard() {
                    { label: 'Email', key: 'email', icon: Mail },
                    { label: 'Payments', key: 'razorpay', icon: CreditCard },
                    { label: 'Push', key: 'oneSignal', icon: Bell }
-                ].map((item) => (
-                  <div key={item.key} className="bg-white p-4 rounded-3xl border border-gray-100 shadow-sm flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gray-50 rounded-2xl flex items-center justify-center text-[#1A2C54]/50 group-hover:text-ruby transition-all">
-                      <item.icon size={20} />
+                ].map((item) => {
+                  const serviceStatus = systemHealth?.services?.[item.key]?.status || 'Checking...';
+                  const isSuccess = serviceStatus.includes('✅') || serviceStatus.includes('🔐') || serviceStatus.includes('Initialized');
+                  
+                  return (
+                    <div key={item.key} className="bg-white p-4 rounded-3xl border border-gray-100 shadow-sm flex items-center gap-3">
+                      <div className={cn(
+                        "w-10 h-10 rounded-2xl flex items-center justify-center transition-all",
+                        isSuccess ? "bg-green-50 text-green-600" : "bg-gray-50 text-gray-400"
+                      )}>
+                        <item.icon size={20} />
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-1">{item.label}</p>
+                        <p className={cn(
+                          "text-[11px] font-bold truncate",
+                          isSuccess ? "text-green-600" : "text-[#1A2C54]"
+                        )}>
+                          {serviceStatus}
+                        </p> 
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-1">{item.label}</p>
-                      <p className="text-[11px] font-bold text-[#1A2C54] truncate">Checking...</p> 
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="grid grid-cols-1 gap-8">
