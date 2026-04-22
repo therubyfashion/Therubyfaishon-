@@ -802,8 +802,22 @@ async function startServer() {
       };
 
       const response = await sendOneSignalNotification(notification, { appId, restKey });
-      console.log("OneSignal notification sent:", response.data);
-      res.json({ success: true, id: response.data.id });
+      const responseData = response.data;
+      console.log("OneSignal notification response:", responseData);
+
+      // Check if OneSignal returned a success status but with subscription errors
+      if (responseData.errors && Array.isArray(responseData.errors)) {
+        const errorMsg = responseData.errors.join(', ');
+        if (errorMsg.includes("not subscribed") || errorMsg.includes("no users")) {
+          return res.json({ 
+            success: true, 
+            warning: "Bhai, API keys sahi hain, par abhi tak koi user Subscribed nahi hai (No one clicked Allow yet). Pehle app khol kar notifications 'Allow' kijiye taaki msg jaye.", 
+            id: null 
+          });
+        }
+      }
+
+      res.json({ success: true, id: responseData.id });
     } catch (error: any) {
       const errorData = error.response?.data;
       const errorMsg = errorData?.errors ? (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : JSON.stringify(errorData.errors)) : error.message;

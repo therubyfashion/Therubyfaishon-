@@ -99,8 +99,15 @@ function AppContent() {
     
     const initOneSignal = async () => {
       try {
-        // @ts-ignore
-        let appId = import.meta.env.VITE_ONESIGNAL_APP_ID || settings?.oneSignalAppId;
+        let appId = (import.meta.env.VITE_ONESIGNAL_APP_ID || '').trim();
+        const settingsAppId = (settings?.oneSignalAppId || '').trim();
+        
+        const isPlaceholder = (id: string) => !id || id === 'dummy-id' || id === 'YOUR_ONESIGNAL_APP_ID' || id.length < 10;
+        
+        // Prefer settings from DB if env is a placeholder or missing
+        if (isPlaceholder(appId) && !isPlaceholder(settingsAppId)) {
+          appId = settingsAppId;
+        }
         
         if (!appId) {
           console.warn("OneSignal App ID is missing. Push notifications will not work.");
