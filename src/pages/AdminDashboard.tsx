@@ -1167,7 +1167,7 @@ export default function AdminDashboard() {
       });
       
       // Send real push notification via server
-      await fetch('/api/send-push', {
+      const response = await fetch('/api/send-push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1178,8 +1178,19 @@ export default function AdminDashboard() {
         })
       });
 
-      toast.success("Push notification sent successfully! 🚀");
-      setPushNotification({ title: '', body: '', type: 'all' });
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        if (data.warning) {
+          toast.warning(data.warning, { duration: 8000 });
+        } else {
+          toast.success("Push notification sent successfully! 🚀");
+        }
+        setPushNotification({ title: '', body: '', type: 'all' });
+      } else {
+        const errorMsg = data.hint || data.error || "Failed to send notification";
+        toast.error(errorMsg, { duration: 8000 });
+      }
     } catch (error) {
       console.error("Error sending notification:", error);
       toast.error("Failed to send notification");
@@ -1308,7 +1319,7 @@ export default function AdminDashboard() {
       if (data.success) {
         toast.success("OneSignal configuration is valid! ✅");
       } else {
-        toast.error(data.error || "OneSignal test failed");
+        toast.error(data.hint || data.error || "OneSignal test failed", { duration: 8000 });
       }
     } catch (error) {
       console.error("Error testing OneSignal:", error);
@@ -1335,10 +1346,15 @@ export default function AdminDashboard() {
         })
       });
       const data = await response.json();
-      if (data.success) {
-        toast.success("Test push sent! Check your device.");
+      if (response.ok && data.success) {
+        if (data.warning) {
+          toast.warning(data.warning, { duration: 8000 });
+        } else {
+          toast.success("Test push sent! Check your device.");
+        }
       } else {
-        toast.error(data.error || "Failed to send test push");
+        const errorMsg = data.hint || data.error || "Failed to send test push";
+        toast.error(errorMsg, { duration: 8000 });
       }
     } catch (error) {
       console.error("Error sending test push:", error);

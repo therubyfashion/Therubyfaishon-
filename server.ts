@@ -198,9 +198,12 @@ async function sendOneSignalNotification(notification: any) {
     throw new Error("OneSignal is not configured. Bhai, Admin Panel -> Settings mein 'OneSignal App ID' aur 'REST API Key' sahi se enter karein.");
   }
 
+  // Clean the key (remove 'Basic ' if user accidentally copied it)
+  const cleanRestKey = restKey.replace(/Basic\s+/i, '').trim();
+
   return await axios.post('https://onesignal.com/api/v1/notifications', 
     { ...notification, app_id: appId },
-    { headers: { 'Authorization': `Basic ${restKey}`, 'Content-Type': 'application/json' } }
+    { headers: { 'Authorization': `Basic ${cleanRestKey}`, 'Content-Type': 'application/json' } }
   );
 }
 
@@ -653,62 +656,46 @@ async function startServer() {
       console.log(`Email Service Selection: ${smtpUser ? 'Gmail SMTP' : (apiKey ? 'Resend API' : 'NONE')}`);
 
       if (smtpUser && smtpPass) {
-        console.log("🚀 Perfect SMTP mode activated: Initiating Gmail Ultra-Reliability delivery...");
+        console.log("📨 Normal Gmail SMTP mode: Sending OTP...");
         
-        // Ensure strictly trimmed credentials
         const cleanUser = String(smtpUser).trim();
         const cleanPass = String(smtpPass).replace(/\s/g, ''); 
         
-        // Gmail STRICT constraint: The sender MUST be the authenticated user
-        const authenticatedFrom = `"${fromName}" <${cleanUser}>`;
-
         const transporter = nodemailer.createTransport({
-          host: 'smtp.gmail.com',
-          port: 465,
-          secure: true, // Use SSL/TLS
+          service: 'gmail',
           auth: {
             user: cleanUser,
             pass: cleanPass
-          },
-          pool: true,
-          maxConnections: 5,
-          maxMessages: 100,
-          socketTimeout: 15000,
-          dnsTimeout: 10000,
-          connectionTimeout: 15000, 
-          greetingTimeout: 15000
+          }
         });
 
         try {
           const result = await transporter.sendMail({
-            from: authenticatedFrom,
+            from: `"${fromName}" <${cleanUser}>`,
             to: Array.isArray(to) ? to.join(', ') : to,
             subject: subject,
             html: html,
             replyTo: replyTo || cleanUser
           });
 
-          console.log("✨ GMAIL MASTER SUCCESS:", result.messageId);
-          return res.json({ id: result.messageId, provider: 'smtp', status: 'delivered' });
+          console.log("✅ GMAIL SENT:", result.messageId);
+          return res.json({ id: result.messageId, provider: 'smtp' });
         } catch (smtpErr: any) {
-          console.error("🔥 GMAIL MASTER ERROR:", smtpErr.code, smtpErr.message);
+          console.error("❌ GMAIL ERROR:", smtpErr.message);
           
-          let troubleshooting = "Bhai, Gmail ne block kiya hai. 🛑";
-          
+          let hint = "Bhai, Gmail login fail ho gaya. ";
           if (smtpErr.message.includes('Invalid login') || smtpErr.message.includes('Username and Password not accepted')) {
-            troubleshooting = "❌ ERROR: App Password Galat Hai! \nSamadhan: \n1. Google Account me jaein. \n2. Naya 'App Password' banayein. \n3. Us 16-letter code ko bina space ke Admin Panel me dalkar 'Save Changes' dabayein.";
-          } else if (smtpErr.message.includes('ETIMEDOUT') || smtpErr.message.includes('ECONNREFUSED')) {
-            troubleshooting = "❌ ERROR: Network Slow Hai! \nSamadhan: Server restart hone ka intezar karein ya 2 minute baad try karein.";
+            hint += "Pakka aapka 'App Password' galat hai. Google Account mein naya 16-letter code banayein.";
+          } else {
+            hint += smtpErr.message;
           }
 
-          if (!apiKey) {
-            return res.status(500).json({ 
-              error: "Gmail Delivery Failed", 
-              message: smtpErr.message,
-              hint: troubleshooting
-            });
-          }
-          console.log("🔄 Fallback: Auto-switching to Resend API...");
+          // Force stop here if SMTP was intended. No fallback to Resend to avoid confusing 403 errors.
+          return res.status(500).json({ 
+            error: "Gmail Delivery Failed", 
+            message: smtpErr.message,
+            hint: hint 
+          });
         }
       }
 
@@ -796,21 +783,34 @@ async function startServer() {
       const errorData = error.response?.data;
       const errorMsg = errorData?.errors ? (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : JSON.stringify(errorData.errors)) : error.message;
 
-      // Don't treat "not subscribed" as a hard crash
-      if (errorMsg.includes("not subscribed")) {
-        console.warn("OneSignal Broadcast Warning:", errorMsg);
-        return res.json({ success: true, warning: errorMsg, id: null });
+      console.error("OneSignal Broadcast Error Detail:", JSON.stringify(errorData || error.message, null, 2));
+
+      // Friendly mapping of common OneSignal errors
+      let userFriendlyError = "Broadcast notification fail ho gaya. 🔔";
+      let hint = "";
+
+      if (errorMsg.includes("not subscribed") || errorMsg.includes("no users") || errorMsg.includes("All Subscribed Users")) {
+        console.warn("OneSignal Broadcast Warning: No subscribed users yet.");
+        return res.json({ 
+          success: true, 
+          warning: "Bhai, abhi tak kisi ne Push Notifications ON nahi kiya hai (No one subscribed yet). Isliye msg kisi ko nahi gaya. Pehle mobile par app khol kar 'Allow' kijiye.", 
+          id: null 
+        });
       }
 
-      console.error("OneSignal Broadcast Error Detail:", JSON.stringify(errorData || error.message, null, 2));
-      let userFriendlyError = "Broadcast notification fail ho gaya.";
-      if (errorData?.errors) {
-        userFriendlyError = `OneSignal Error: ${errorMsg}`;
+      const errLower = errorMsg.toLowerCase();
+      if (errLower.includes("app_id not found") || errLower.includes("invalid app_id") || errLower.includes("app_id")) {
+        hint = "❌ ERROR: OneSignal App ID galat hai! \nSamadhan: Admin Panel -> Settings mein check karein ki 'OneSignal App ID' bilkul sahi hai.";
+      } else if (errLower.includes("rest api key") || errLower.includes("invalid rest api key") || errLower.includes("unauthorized")) {
+        hint = "❌ ERROR: REST API Key galat hai! \nSamadhan: OneSignal Settings -> Keys & IDs mein jaein, aur wo LAMBI waali key (REST API Key) copy karke Admin panel me dalein.";
+      } else if (errLower.includes("segment") || errLower.includes("filters")) {
+        hint = "❌ ERROR: OneSignal Segment Error! \nSamadhan: OneSignal Dashboard par check karein ki 'Subscribed Users' naam ka segment exist karta hai.";
       }
 
       res.status(500).json({ 
         error: userFriendlyError,
-        details: errorData || error.message
+        details: errorData || error.message,
+        hint: hint || `OneSignal Error Detail: ${errorMsg}`
       });
     }
   });
@@ -904,22 +904,25 @@ async function startServer() {
     try {
       // Get keys from request body or env
       const appId = (req.body.appId || process.env.ONESIGNAL_APP_ID)?.trim();
-      const restKey = (req.body.restKey || process.env.ONESIGNAL_REST_API_KEY)?.trim();
+      let restKey = (req.body.restKey || process.env.ONESIGNAL_REST_API_KEY)?.trim();
 
       if (!appId || !restKey || appId === 'dummy-id') {
         return res.status(400).json({ 
           success: false, 
           error: "OneSignal App ID or REST API Key is missing.",
-          details: "Bhai, App ID aur REST API Key enter karein, phir test karein."
+          hint: "Bhai, App ID aur REST API Key enter karein, phir test karein."
         });
       }
+
+      // Clean the key
+      const cleanRestKey = restKey.replace(/Basic\s+/i, '').trim();
 
       console.log(`Testing OneSignal with App ID: ${appId}`);
 
       // Direct axios call to verify keys
       const response = await axios.get(`https://onesignal.com/api/v1/players?app_id=${appId}&limit=1`, {
         headers: {
-          'Authorization': `Basic ${restKey}`,
+          'Authorization': `Basic ${cleanRestKey}`,
           'Content-Type': 'application/json'
         }
       });
@@ -933,12 +936,12 @@ async function startServer() {
       console.error("OneSignal test error:", error.response?.data || error.message);
       
       const apiErrors = error.response?.data?.errors;
-      const errorMessage = Array.isArray(apiErrors) ? apiErrors[0] : (error.response?.data?.error || error.message);
+      const errorDetail = Array.isArray(apiErrors) ? apiErrors[0] : (error.response?.data?.error || error.message);
       
       res.status(500).json({ 
         success: false, 
-        error: errorMessage || "Unknown error",
-        details: "Bhai, OneSignal REST API Key ya App ID galat ho sakti hai. Please check karein."
+        error: errorDetail || "Unknown error",
+        hint: "Bhai, ye key galat hai. OneSignal Dashboard -> Settings -> Keys & IDs mein jaein, aur 'REST API Key' copy karein. 'Key ID' mat copy karna!"
       });
     }
   });
