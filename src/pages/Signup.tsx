@@ -53,7 +53,7 @@ export default function Signup() {
         });
       }
       
-      toast.success("Welcome to The Ruby!");
+      toast.success("successfully account created 🎉", { position: 'bottom-center', duration: 5000 });
       navigate('/');
     } catch (error: any) {
       console.error("Login error:", error);

@@ -170,7 +170,7 @@ export default function VerifyPrompt() {
           })
         });
 
-        toast.success("Email verified successfully! Welcome email sent.");
+        toast.success("successfully account created 🎉", { position: 'bottom-center', duration: 5000 });
 
         // Trigger Welcome Push Notification (Delayed to allow OneSignal to sync)
         setTimeout(() => {

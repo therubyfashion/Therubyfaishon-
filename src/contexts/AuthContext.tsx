@@ -26,29 +26,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
-        const fetchProfile = async () => {
-          try {
-            const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-            const userData = userDoc.data() as UserProfile | undefined;
-            if (userDoc.exists()) {
-              setProfile(userData);
+        
+        // Use onSnapshot for real-time profile updates (essential for verification redirects)
+        unsubscribeProfile = onSnapshot(doc(db, 'users', firebaseUser.uid), 
+          (docSnap) => {
+            if (docSnap.exists()) {
+              setProfile(docSnap.data() as UserProfile);
             } else {
               setProfile(null);
             }
-          } catch (error) {
-            console.error("Error fetching profile:", error);
-          } finally {
+            setLoading(false);
+          },
+          (error) => {
+            console.error("Error listening to profile:", error);
             setLoading(false);
           }
-        };
-        fetchProfile();
+        );
       } else {
         setUser(null);
         setProfile(null);
-        if (unsubscribeProfile) unsubscribeProfile();
+        if (unsubscribeProfile) {
+          unsubscribeProfile();
+          unsubscribeProfile = null;
+        }
         setLoading(false);
       }
     });
