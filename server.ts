@@ -14,6 +14,10 @@ import nodemailer from 'nodemailer';
 
 dotenv.config();
 
+// Central Configuration for Email Integrity
+const VERIFIED_DOMAIN = "therubyfashion.shop";
+const DEFAULT_FROM_EMAIL = `support@${VERIFIED_DOMAIN}`;
+
 // Service instances
 let razorpay: Razorpay | null = null;
 let resend: Resend | null = null;
@@ -476,7 +480,9 @@ async function startServer() {
           activeProvider: process.env.SMTP_USER ? "Gmail SMTP" : (process.env.RESEND_API_KEY ? "Resend API" : "None"),
           hasResendKey: !!process.env.RESEND_API_KEY,
           hasSmtpUser: !!process.env.SMTP_USER,
-          usingLocalPersistence: fs.existsSync(localConfigPath)
+          usingLocalPersistence: fs.existsSync(localConfigPath),
+          verifiedDomain: VERIFIED_DOMAIN,
+          defaultFrom: DEFAULT_FROM_EMAIL
         },
         razorpay: {
           status: process.env.VITE_RAZORPAY_KEY_ID ? "Configured ✅" : "Missing Keys ❌",
@@ -625,7 +631,7 @@ async function startServer() {
       // Default settings fallback
       const effectiveSettings = cachedSettings || {
         storeName: 'The Ruby',
-        fromEmail: process.env.RESEND_FROM_EMAIL || 'onboarding@rubyfashion.shop',
+        fromEmail: process.env.RESEND_FROM_EMAIL || DEFAULT_FROM_EMAIL,
         resendApiKey: process.env.RESEND_API_KEY,
         smtpUser: process.env.SMTP_USER,
         smtpPass: process.env.SMTP_PASS
@@ -638,13 +644,18 @@ async function startServer() {
 
       let fromName = providedFromName || effectiveSettings.storeName || 'The Ruby';
       
-      // Determine base from email
-      let rawFromEmail = from || effectiveSettings.fromEmail || process.env.RESEND_FROM_EMAIL || `onboarding@rubyfashion.shop`;
+      // Determine base from email - EXPLICITLY REJECT rubyfashion.shop (missing 'the')
+      let rawFromEmail = from || effectiveSettings.fromEmail || DEFAULT_FROM_EMAIL;
       
+      if (rawFromEmail.includes('rubyfashion.shop') && !rawFromEmail.includes(VERIFIED_DOMAIN)) {
+        console.warn(`🛑 DETECTED TYPO DOMAIN: ${rawFromEmail}. Correcting to ${DEFAULT_FROM_EMAIL}`);
+        rawFromEmail = DEFAULT_FROM_EMAIL;
+      }
+
       // Mandatory Domain Protection for Resend
       if (!smtpUser && rawFromEmail.includes('resend.dev')) {
-        console.warn("Blocking unverified 'resend.dev' domain for Resend. Defaulting to verified store domain if possible.");
-        rawFromEmail = 'onboarding@rubyfashion.shop';
+        console.warn("Blocking unverified 'resend.dev' domain for Resend. Defaulting to verified store domain.");
+        rawFromEmail = DEFAULT_FROM_EMAIL;
       }
 
       // If using SMTP, ensure the 'from' matches the authenticated user to avoid rejection
@@ -654,6 +665,7 @@ async function startServer() {
 
       console.log(`📧 Routing Email: To=${to}, From=${formattedFrom}, Subject=${subject}`);
       console.log(`Email Service Selection: ${smtpUser ? 'Gmail SMTP' : (apiKey ? 'Resend API' : 'NONE')}`);
+      console.log(`DEBUG: Target Verified Domain is ${VERIFIED_DOMAIN}`);
 
       if (smtpUser && smtpPass) {
         console.log("📨 Normal Gmail SMTP mode: Sending OTP...");
@@ -739,9 +751,9 @@ async function startServer() {
           errorMessage = `Bhai, Resend 403 (Domain Error)!
           \nResend keh raha hai: "${errorMessage}"
           \nSamadhan:
-          1. Check karein ki Resend.com par aapka domain "Verified" hai ya nahi.
-          2. Aapne "onboarding@rubyfashion.shop" use kiya hai, magar shayad aapka verified domain "therubyfashion.shop" (with 'the') hai.
-          3. Admin Panel -> Settings mein jaa kar "From Email" ko apna verified domain wala email set karein.
+          1. Aapka verified domain "${VERIFIED_DOMAIN}" hai.
+          2. Aapne shayad "rubyfashion.shop" (missing 'the') use kiya hai jo Verified NAHI hai.
+          3. Admin Panel -> Settings mein jaa kar "From Email" ko "${DEFAULT_FROM_EMAIL}" set karein.
           4. Jab tak domain verify nahi hota, Resend kisi aur ko email nahi bhejta.`;
         }
 

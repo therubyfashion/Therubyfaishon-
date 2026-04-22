@@ -1016,7 +1016,7 @@ export default function AdminDashboard() {
     siteTitle: 'The Ruby | Premium Clothing',
     metaDescription: 'Discover the latest trends in fashion at The Ruby.',
     resendApiKey: '',
-    fromEmail: 'onboarding@rubyfashion.shop',
+    fromEmail: 'support@therubyfashion.shop',
     smtpUser: '',
     smtpPass: '',
     fast2smsApiKey: '',
@@ -1377,9 +1377,9 @@ export default function AdminDashboard() {
     try {
       // Logic: Ensure fromEmail is not using the Resend sandbox placeholder
       let finalizedSettings = { ...settings };
-      if (finalizedSettings.fromEmail?.includes('resend.dev')) {
-        toast.info("Resend sandbox domain 'resend.dev' is restricted. Auto-correcting to verified store domain.");
-        finalizedSettings.fromEmail = 'onboarding@rubyfashion.shop';
+      if (finalizedSettings.fromEmail?.includes('resend.dev') || (finalizedSettings.fromEmail?.includes('rubyfashion.shop') && !finalizedSettings.fromEmail?.includes('therubyfashion.shop'))) {
+        toast.info("Updating 'From Email' to use your verified domain: therubyfashion.shop");
+        finalizedSettings.fromEmail = 'support@therubyfashion.shop';
         setSettings(finalizedSettings);
       }
 
@@ -7006,7 +7006,7 @@ export default function AdminDashboard() {
                               <AlertTriangle size={18} className="mr-2" /> Custom Domain Login Issue?
                             </h4>
                             <p className="text-[11px] text-amber-700 leading-relaxed font-medium">
-                              If you are using a custom domain (like <b>rubyfashion.shop</b>) and login is failing, you must add your domain to the <b>Authorized Domains</b> list in your Firebase Console.
+                              If you are using a custom domain (like <b>therubyfashion.shop</b>) and login is failing, you must add your domain to the <b>Authorized Domains</b> list in your Firebase Console.
                             </p>
                             <div className="space-y-2">
                               <p className="text-[10px] text-amber-600 font-bold uppercase tracking-widest">Steps to fix:</p>
