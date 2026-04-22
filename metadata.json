@@ -1,5 +1,5 @@
 {
   "name": "The Ruby",
   "description": "Professional order fulfillment dashboard for The Ruby, featuring item tracking, shipment management, and delivery timelines.",
-  "requestFramePermissions": []
+  "requestFramePermissions": ["geolocation"]
 }

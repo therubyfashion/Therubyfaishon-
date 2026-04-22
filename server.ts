@@ -1,6 +1,10 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import geoip from "geoip-lite";
+import requestIp from "request-ip";
 import { Resend } from 'resend';
 import Razorpay from 'razorpay';
 import dotenv from 'dotenv';
@@ -243,7 +247,73 @@ process.on('uncaughtException', (err) => {
 
 async function startServer() {
   const app = express();
+  const httpServer = createServer(app);
+  const io = new Server(httpServer, {
+    cors: { origin: "*" }
+  });
   const PORT = Number(process.env.PORT) || 3000;
+  
+  // Real-time Analytics Store (Memory + Firestore)
+  const activeVisitors = new Map<string, any>();
+
+  io.on("connection", (socket) => {
+    // Listen for visitor data
+    socket.on("visitor_tracking", async (data) => {
+      const clientIp = requestIp.getClientIp(socket.request) || '';
+      const geo = geoip.lookup(clientIp);
+
+      const session = {
+        id: socket.id,
+        sessionId: data.sessionId,
+        userId: data.userId || null,
+        city: data.city || geo?.city || "Unknown",
+        region: data.region || geo?.region || "Unknown",
+        country: data.country || geo?.country || "Unknown",
+        lat: data.lat || geo?.ll?.[0] || 0,
+        lng: data.lng || geo?.ll?.[1] || 0,
+        path: data.path || "/",
+        userAgent: socket.handshake.headers["user-agent"],
+        connectedAt: new Date().toISOString(),
+        lastActive: new Date().toISOString()
+      };
+
+      activeVisitors.set(socket.id, session);
+      
+      // Update DB for persistence/metrics
+      if (db) {
+        try {
+          await db.collection('active_sessions').doc(socket.id).set(session);
+          
+          const today = new Date().toISOString().split('T')[0];
+          await db.collection('analytics_daily').doc(today).set({
+            total_users: admin.firestore.FieldValue.increment(1),
+            date: today
+          }, { merge: true });
+        } catch (e) {
+          console.error("Tracking DB error:", e);
+        }
+      }
+
+      // Broadcast update to all clients (including admins)
+      io.emit("live_analytics_update", {
+        activeCount: activeVisitors.size,
+        visitors: Array.from(activeVisitors.values())
+      });
+    });
+
+    socket.on("disconnect", async () => {
+      activeVisitors.delete(socket.id);
+      
+      if (db) {
+        db.collection('active_sessions').doc(socket.id).delete().catch(() => {});
+      }
+
+      io.emit("live_analytics_update", {
+        activeCount: activeVisitors.size,
+        visitors: Array.from(activeVisitors.values())
+      });
+    });
+  });
   
   console.log(`🚀 Starting server...`);
   console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -434,15 +504,15 @@ async function startServer() {
     cachedSettings = null;
     lastSettingsFetch = 0;
 
-    if (resendApiKey) {
+    if (resendApiKey !== undefined) {
       currentResendApiKey = resendApiKey;
-      resend = new Resend(currentResendApiKey);
-      process.env.RESEND_API_KEY = resendApiKey;
-      console.log("Resend API Key updated");
+      resend = resendApiKey ? new Resend(resendApiKey) : null;
+      process.env.RESEND_API_KEY = resendApiKey || '';
+      console.log("Resend API Key updated:", resendApiKey ? "Key Provided" : "Cleared");
     }
 
-    if (smtpUser) process.env.SMTP_USER = smtpUser;
-    if (smtpPass) process.env.SMTP_PASS = smtpPass;
+    if (smtpUser !== undefined) process.env.SMTP_USER = smtpUser || '';
+    if (smtpPass !== undefined) process.env.SMTP_PASS = smtpPass || '';
 
     if (razorpayKeyId && razorpayKeySecret) {
       razorpay = new Razorpay({
@@ -1013,7 +1083,7 @@ async function startServer() {
     });
   });
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

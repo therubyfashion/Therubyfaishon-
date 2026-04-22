@@ -23,17 +23,19 @@ const MOCK_ADDRESSES = [
     id: '1',
     type: 'Home',
     name: 'Priya Sharma',
+    email: 'priya.sharma@example.com',
     isDefault: true,
     address: 'Flat 402, Sunshine Apartments, Bandra West, Mumbai — 400050',
-    phone: '+91 98765 43210'
+    number: '+91 98765 43210'
   },
   {
     id: '2',
     type: 'Office',
     name: 'Office',
+    email: 'office@company.com',
     isDefault: false,
     address: 'Level 8, One BKC Tower, Bandra Kurla Complex, Mumbai — 400051',
-    phone: '+91 98765 43210'
+    number: '+91 98765 43210'
   }
 ];
 
@@ -338,7 +340,7 @@ export default function Checkout() {
             const settingsSnap = await getDocs(collection(db, 'settings'));
             if (!settingsSnap.empty) {
               const settingsData = settingsSnap.docs[0].data();
-              if (settingsData.resendApiKey && finalOrderData.address?.email) {
+              if ((settingsData.resendApiKey || (settingsData.smtpUser && settingsData.smtpPass)) && finalOrderData.address?.email) {
                 const emailHtml = `
                   <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #FAFAFA; padding: 40px 20px; color: #1A2C54;">
                     <div style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 40px; padding: 60px; box-shadow: 0 20px 50px -20px rgba(0,0,0,0.08); border: 1px solid #F0F0F0;">
@@ -436,22 +438,35 @@ export default function Checkout() {
                     </div>
                   </div>
                 `;
-                await fetch('/api/send-email', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    to: finalOrderData.address.email,
-                    from: settingsData.fromEmail || undefined,
-                    replyTo: settingsData.supportEmail || undefined,
-                    subject: `Order Confirmed! ${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`} ✨`,
-                    html: emailHtml
-                  })
-                });
+                  const emailResponse = await fetch('/api/send-email', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      to: finalOrderData.address.email,
+                      from: settingsData.fromEmail || undefined,
+                      replyTo: settingsData.supportEmail || undefined,
+                      subject: `Order Confirmed! ${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`} ✨`,
+                      html: emailHtml
+                    })
+                  });
+
+                  if (emailResponse.ok) {
+                    console.log('Order confirmation email sent successfully');
+                  } else {
+                    const errorData = await emailResponse.json();
+                    console.error('Failed to send order confirmation email:', errorData);
+                  }
+                } else {
+                  console.warn('Email skipped: Missing configuration or customer email', {
+                    hasResend: !!settingsData.resendApiKey,
+                    hasSmtp: !!(settingsData.smtpUser && settingsData.smtpPass),
+                    hasCustomerEmail: !!finalOrderData.address?.email
+                  });
+                }
               }
+            } catch (emailError) {
+              console.error('Error in email notification flow:', emailError);
             }
-          } catch (emailError) {
-            console.error('Error sending email notification:', emailError);
-          }
 
           setIsProcessingPayment(false);
           navigate('/order-success', {

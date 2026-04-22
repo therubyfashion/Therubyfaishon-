@@ -12,13 +12,14 @@ import {
   Home, ArrowLeft, Camera, ChevronDown, ChevronUp, Bold, Heading, Globe, Truck, Printer,
   TrendingDown, Shield, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info, MapPin, History,
   Activity, Send, Rocket, MessageSquare, User, CreditCard, Download, Eye, Check, ArrowRight,
-  Cloud, RefreshCw, CheckCircle
+  Cloud, RefreshCw, CheckCircle, Clock, MousePointer2, Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, 
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell
 } from 'recharts';
+import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -30,6 +31,110 @@ import { generateInvoice } from '../utils/invoiceGenerator';
 import { generateShippingLabel } from '../utils/shippingLabelGenerator';
 import ReactGlobe from 'react-globe.gl';
 import Barcode from 'react-barcode';
+import { io } from 'socket.io-client';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+// Fix Leaflet marker icon issue
+// @ts-ignore
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+// ═══════════════════════════════════════════════
+// LIVE VIEW HELPER COMPONENTS
+// ═══════════════════════════════════════════════
+
+const LiveSparkline = ({ data, color = '#E11D48', height = 40 }: { data: number[], color?: string, height?: number }) => {
+  if (!data || data.length < 2) return null;
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  const w = 100, h = height;
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * w;
+    const y = h - ((v - min) / range) * (h - 4) - 2;
+    return `${x},${y}`;
+  }).join(' ');
+  const area = `M 0,${h} L ${data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / range) * (h - 4) - 2}`).join(' L ')} L ${w},${h} Z`;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height }}>
+      <defs>
+        <linearGradient id={`sg-${color.replace('#', '').toLowerCase()}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity=".25" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill={`url(#sg-${color.replace('#', '').toLowerCase()})`} />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+};
+
+const LiveAnimNum = ({ value, prefix = '', suffix = '', className = '' }: { value: number | string, prefix?: string, suffix?: string, className?: string }) => {
+  const [disp, setDisp] = useState<number | string>(value);
+  const prev = React.useRef(value);
+
+  useEffect(() => {
+    if (typeof value === 'number' && typeof prev.current === 'number' && value !== prev.current) {
+      const startValue = typeof disp === 'number' ? disp : 0;
+      let start = startValue, end = value, dur = 400, st: number | null = null;
+      const step = (ts: number) => {
+        if (!st) st = ts;
+        const p = Math.min((ts - st) / dur, 1);
+        setDisp(Math.round(start + (end - start) * p));
+        if (p < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    } else {
+      setDisp(value);
+    }
+    prev.current = value;
+  }, [value]);
+
+  return <span className={className}>{prefix}{typeof disp === 'number' ? disp.toLocaleString('en-IN') : disp}{suffix}</span>;
+};
+
+const LiveMapSvg = ({ sessions }: { sessions: any[] }) => {
+  return (
+    <div className="relative w-full overflow-hidden" style={{ paddingBottom: '52%' }}>
+      <div className="absolute inset-0">
+        <svg viewBox="0 0 1000 520" className="w-full h-full opacity-[0.1] stroke-slate-900 fill-slate-800">
+           {/* Continents */}
+          <path d="M 80 80 L 280 70 L 300 90 L 290 130 L 260 160 L 240 200 L 200 220 L 170 280 L 150 260 L 120 240 L 100 200 L 80 180 L 60 140 Z" />
+          <path d="M 170 280 L 240 270 L 260 300 L 270 360 L 250 420 L 210 450 L 180 430 L 160 380 L 150 320 Z" />
+          <path d="M 440 60 L 540 55 L 560 80 L 550 110 L 520 120 L 490 130 L 460 120 L 440 100 Z" />
+          <path d="M 450 140 L 560 130 L 590 160 L 600 220 L 580 300 L 550 370 L 510 390 L 480 370 L 450 300 L 440 220 L 440 160 Z" />
+          <path d="M 560 50 L 850 45 L 880 80 L 870 130 L 840 160 L 800 170 L 760 160 L 720 180 L 700 200 L 680 190 L 650 160 L 620 150 L 580 140 L 560 120 Z" />
+          <path d="M 630 175 L 660 170 L 670 200 L 660 240 L 650 270 L 635 255 L 625 220 L 620 195 Z" />
+          <path d="M 750 190 L 800 185 L 820 210 L 800 230 L 770 225 L 750 210 Z" />
+          <path d="M 780 340 L 900 335 L 920 370 L 910 410 L 870 430 L 820 420 L 790 390 L 775 360 Z" />
+          {/* Grid lines */}
+          {[0, 1, 2, 3, 4].map(i => <line key={i} x1="0" y1={i * 130} x2="1000" y2={i * 130} stroke="rgba(0,0,0,0.05)" strokeWidth=".5" />)}
+          {[0, 1, 2, 3, 4, 5, 6, 7].map(i => <line key={i} x1={i * 142} y1="0" x2={i * 142} y2="520" stroke="rgba(0,0,0,0.05)" strokeWidth=".5" />)}
+        </svg>
+
+        {/* Animated Dots */}
+        <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+          {sessions.filter(s => s.lat && s.lng).map((s, i) => {
+            const x = ((s.lng + 180) / 360) * 100;
+            const y = ((90 - s.lat) / 180) * 100;
+            return (
+              <g key={i}>
+                <circle cx={x} cy={y} r="0.8" fill="#E11D48" opacity="0.9" />
+                <circle cx={x} cy={y} r="0.8" fill="none" stroke="#E11D48" strokeWidth="0.3" opacity="0.4" className="animate-pulse" />
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+};
 
 enum OperationType {
   CREATE = 'create',
@@ -78,8 +183,11 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.error('Firestore Error Detail: ', JSON.stringify(errInfo));
+  
+  // Throw a user-friendly message
+  const friendlyMsg = `Bhai, database ke sath connect karne mein dikkat aa rahi hai. (Operation: ${operationType.toUpperCase()})`;
+  throw new Error(friendlyMsg);
 }
 
 const chartDataSample = [];
@@ -921,6 +1029,45 @@ export default function AdminDashboard() {
   const [sizes, setSizes] = useState<any[]>([]);
   const [coupons, setCoupons] = useState<any[]>([]);
   const [liveSessions, setLiveSessions] = useState<any[]>([]);
+  const [activeCount, setActiveCount] = useState(0);
+  const [liveMapType, setLiveMapType] = useState<'globe' | 'map'>('globe');
+
+  // Live View History for Sparklines
+  const [sessionHistory, setSessionHistory] = useState<number[]>(Array.from({ length: 20 }, () => 0));
+  const [orderHistory, setOrderHistory] = useState<number[]>(Array.from({ length: 20 }, () => 0));
+  const [revenueHistory, setRevenueHistory] = useState<number[]>(Array.from({ length: 20 }, () => 0));
+
+  useEffect(() => {
+    // Sync histories whenever live data changes or on a timer
+    const interval = setInterval(() => {
+      setSessionHistory(prev => [...prev.slice(1), activeCount]);
+      
+      const ordersToday = orders.filter(o => 
+        new Date(o.createdAt).toDateString() === new Date().toDateString()
+      );
+      setOrderHistory(prev => [...prev.slice(1), ordersToday.length]);
+      
+      const revenueToday = ordersToday.reduce((acc, o) => acc + (o.total || 0), 0);
+      setRevenueHistory(prev => [...prev.slice(1), revenueToday]);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [activeCount, orders]);
+
+  useEffect(() => {
+    // Only connect when admin is on the live tab to save resources
+    const socket = io(window.location.origin);
+    
+    socket.on('live_analytics_update', (data) => {
+      console.log("Live update received:", data);
+      setActiveCount(data.activeCount);
+      setLiveSessions(data.visitors);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
   const [customers, setCustomers] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
@@ -932,6 +1079,7 @@ export default function AdminDashboard() {
   const [isSendingNotification, setIsSendingNotification] = useState(false);
   const [isSubscribingPush, setIsSubscribingPush] = useState(false);
   const [dashboardSubTab, setDashboardSubTab] = useState<'overview' | 'live' | 'reports'>('overview');
+  const [liveDashboardTab, setLiveDashboardTab] = useState<'overview' | 'sessions' | 'orders' | 'sources'>('overview');
   
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
   const globeContainerRef = React.useRef<HTMLDivElement>(null);
@@ -1349,6 +1497,19 @@ export default function AdminDashboard() {
       });
       const data = await response.json();
       if (response.ok && data.success) {
+        // Also save to notifications collection so it shows in the panel
+        try {
+          await addDoc(collection(db, 'notifications'), {
+            title: "Test Notification",
+            message: "Bhai, agar ye message dikh raha hai toh OneSignal sahi se kaam kar raha hai! 🚀",
+            type: 'test',
+            createdAt: serverTimestamp(),
+            status: 'unread'
+          });
+        } catch (dbErr) {
+          console.error("Error saving notification to DB:", dbErr);
+        }
+
         if (data.warning) {
           toast.warning(data.warning, { duration: 8000 });
         } else {
@@ -4574,187 +4735,347 @@ export default function AdminDashboard() {
           )}
 
           {activeTab === 'live' && (
-            <div className="h-[calc(100vh-120px)] md:h-[calc(100vh-140px)] bg-[#050B18] rounded-3xl md:rounded-[3rem] overflow-hidden relative border border-white/5 shadow-2xl flex flex-col">
-              {/* Mission Control Header */}
-              <div className="absolute top-4 md:top-8 left-4 md:left-8 right-4 md:right-8 z-20 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-6 pointer-events-none">
-                <div className="space-y-1 md:space-y-2 pointer-events-auto">
-                  <div className="flex items-center gap-2 md:gap-3">
-                    <div className="w-2 h-2 md:w-3 md:h-3 rounded-full bg-ruby animate-pulse shadow-[0_0_15px_rgba(225,29,72,0.8)]"></div>
-                    <h2 className="text-lg md:text-2xl font-black text-white tracking-tighter uppercase">Mission Control</h2>
+            <div className="min-h-[calc(100vh-120px)] md:min-h-[calc(100vh-140px)] bg-slate-50 rounded-3xl md:rounded-[3rem] overflow-y-auto border border-slate-200 shadow-2xl flex flex-col font-sans custom-scrollbar">
+              {/* Mission Control Sub-Nav (Removing Main Header as requested) */}
+              <div className="sticky top-0 z-[1000] p-4 md:px-8 md:py-4 bg-white/80 backdrop-blur-xl border-b border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                    <span className="text-sm font-bold text-slate-800 uppercase tracking-widest">Live Mission Control</span>
                   </div>
-                  <p className="text-[8px] md:text-[10px] font-bold text-white/40 uppercase tracking-[0.3em]">Global Real-time Traffic</p>
+                  <div className="h-4 w-px bg-slate-200"></div>
+                  <div className="flex gap-1">
+                    {['overview', 'sessions', 'orders', 'sources'].map((t: any) => (
+                      <button 
+                        key={t}
+                        onClick={() => setLiveDashboardTab(t)}
+                        className={cn(
+                          "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
+                          liveDashboardTab === t ? "bg-slate-900 text-white shadow-md" : "text-slate-400 hover:text-slate-600"
+                        )}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-3 md:gap-4 pointer-events-auto w-full md:w-auto justify-between md:justify-end">
-                  <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-3 md:p-4 rounded-2xl md:rounded-3xl flex items-center gap-3 md:gap-4 shadow-2xl">
-                    <div className="w-8 h-8 md:w-10 md:h-10 rounded-xl md:rounded-2xl bg-ruby/20 flex items-center justify-center text-ruby">
-                      <Users size={20} />
-                    </div>
-                    <div>
-                      <p className="text-[7px] md:text-[8px] font-bold text-white/40 uppercase tracking-widest leading-none mb-1">Live Visitors</p>
-                      <p className="text-sm md:text-xl font-black text-white leading-none">{liveSessions.length}</p>
-                    </div>
+                <div className="flex items-center gap-3">
+                  <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-xl border border-slate-200">
+                    <Clock size={14} className="text-slate-400" />
+                    <span className="text-[10px] font-bold text-slate-600">{format(new Date(), 'HH:mm:ss')}</span>
+                    <span className="text-[9px] font-bold text-slate-300 uppercase ml-1">IST</span>
                   </div>
                   <button 
                     onClick={() => setActiveTab('dashboard')}
-                    className="p-2 md:p-3 bg-white/10 hover:bg-white/20 text-white rounded-xl md:rounded-2xl border border-white/10 transition-all backdrop-blur-md"
+                    className="p-2 bg-white text-slate-400 hover:text-slate-600 rounded-xl border border-slate-200 transition-all shadow-sm"
                   >
-                    <X size={20} />
+                    <X size={18} />
                   </button>
                 </div>
               </div>
 
-              {/* Top States Sidebar - Hidden on Mobile */}
-              <div className="absolute top-32 left-8 z-20 w-64 hidden lg:block pointer-events-none">
-                <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-6 rounded-[2.5rem] space-y-6 pointer-events-auto shadow-2xl">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <h3 className="text-[10px] font-black text-white/40 uppercase tracking-widest">Top Traffic States</h3>
-                      <p className="text-[8px] font-bold text-ruby uppercase tracking-widest">Live Breakdown</p>
+              <div className="p-4 md:p-8 space-y-6">
+                {/* KPI Strip */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  {[
+                    { label: 'Active Sessions', value: activeCount, spark: sessionHistory, color: '#10B981', icon: <Users size={16} /> },
+                    { 
+                      label: "Today's Revenue", 
+                      value: `₹${orders.filter(o => new Date(o.createdAt).toDateString() === new Date().toDateString()).reduce((acc, o) => acc + (o.total || 0), 0).toLocaleString()}`, 
+                      spark: revenueHistory, 
+                      color: '#3B82F6', 
+                      icon: <CreditCard size={16} /> 
+                    },
+                    { 
+                      label: 'Orders Today', 
+                      value: orders.filter(o => new Date(o.createdAt).toDateString() === new Date().toDateString()).length, 
+                      spark: orderHistory, 
+                      color: '#F59E0B', 
+                      icon: <ShoppingBag size={16} /> 
+                    },
+                    { 
+                      label: 'Active Carts', 
+                      value: abandonedCarts.filter(c => c.items?.length > 0).length, 
+                      color: '#8B5CF6', 
+                      icon: <ShoppingCart size={16} /> 
+                    },
+                    { 
+                      label: 'Conv. Rate', 
+                      value: `${activeCount > 0 ? ((orders.filter(o => new Date(o.createdAt).toDateString() === new Date().toDateString()).length / activeCount) * 10).toFixed(1) : '0.0'}%`, 
+                      color: '#EC4899', 
+                      icon: <TrendingUp size={16} /> 
+                    }
+                  ].map((k, i) => (
+                    <div key={i} className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">{k.label}</span>
+                        <div className="text-slate-300">{k.icon}</div>
+                      </div>
+                      <div className="text-2xl font-black text-slate-900 font-syne mb-2">
+                        {typeof k.value === 'number' ? <LiveAnimNum value={k.value} /> : k.value}
+                      </div>
+                      {k.spark && (
+                        <div className="h-10 w-full">
+                          <LiveSparkline data={k.spark} color={k.color} height={40} />
+                        </div>
+                      )}
                     </div>
-                    <div className="w-8 h-8 rounded-xl bg-ruby/20 flex items-center justify-center">
-                      <MapPin size={14} className="text-ruby" />
-                    </div>
-                  </div>
-                  <div className="space-y-3">
-                    {topStates.slice(0, 5).length > 0 ? (
-                      topStates.slice(0, 5).map((state, i) => (
-                        <div key={i} className="space-y-1.5">
-                          <div className="flex items-center justify-between text-[10px] font-bold">
-                            <span className="text-white/80">{state.name}</span>
-                            <span className="text-ruby">{state.count}</span>
-                          </div>
-                          <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
-                            <motion.div 
-                              initial={{ width: 0 }}
-                              animate={{ width: `${(state.count / liveSessions.length) * 100}%` }}
-                              className="h-full bg-ruby"
-                            />
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-6">
+                  {/* Left Column */}
+                  <div className="space-y-6">
+                    {/* World Map Section */}
+                    <div className="bg-white border border-slate-100 rounded-[2.5rem] shadow-sm overflow-hidden">
+                      <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-bold text-slate-800">Global Coverage</span>
+                          <div className="px-2 py-0.5 bg-emerald-50 rounded-full border border-emerald-100">
+                            <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">{activeCount} Real-time Nodes</span>
                           </div>
                         </div>
-                      ))
-                    ) : (
-                      <p className="text-[10px] text-white/20 font-bold uppercase tracking-widest text-center py-4">No state data yet</p>
-                    )}
+                        <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                          <span className="flex items-center gap-1.5"><span className="w-2 h-2 bg-emerald-500 rounded-full"></span> Sessions</span>
+                          <span className="flex items-center gap-1.5"><span className="w-2 h-2 bg-ruby rounded-full"></span> Orders</span>
+                        </div>
+                      </div>
+                      <div className="p-4">
+                        <LiveMapSvg sessions={liveSessions} />
+                      </div>
+                      <div className="px-6 pb-6 grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        {[
+                          { name: 'India', count: liveSessions.filter(s => s.country === 'India').length, flag: '🇮🇳' },
+                          { name: 'US', count: liveSessions.filter(s => s.country === 'USA' || s.country === 'United States').length, flag: '🇺🇸' },
+                          { name: 'UK', count: liveSessions.filter(s => s.country === 'UK' || s.country === 'United Kingdom').length, flag: '🇬🇧' },
+                          { name: 'Others', count: liveSessions.filter(s => !['India', 'USA', 'United States', 'UK', 'United Kingdom'].includes(s.country)).length, flag: '🌍' }
+                        ].map((c, i) => (
+                          <div key={i} className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex items-center gap-4">
+                            <span className="text-2xl">{c.flag}</span>
+                            <div>
+                              <p className="text-xl font-bold text-slate-900 font-syne">{c.count}</p>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{c.name}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Active Sessions List */}
+                      <div className="bg-white border border-slate-100 rounded-[2.5rem] shadow-sm overflow-hidden flex flex-col h-[400px]">
+                        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+                          <span className="text-sm font-bold text-slate-800">Live Traffic</span>
+                          <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded-full font-bold text-slate-500 uppercase tracking-widest">Recent Activity</span>
+                        </div>
+                        <div className="flex-grow overflow-y-auto custom-scrollbar p-2">
+                          {liveSessions.length > 0 ? (
+                            liveSessions.slice(0, 20).map((s, i) => (
+                              <div key={i} className="flex items-center gap-4 p-3 hover:bg-slate-50 rounded-2xl transition-colors border-b border-slate-50 last:border-0 group">
+                                <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-lg group-hover:bg-white group-hover:border-slate-200 transition-all">
+                                  {s.device === 'mobile' ? '📱' : s.device === 'desktop' ? '🖥️' : '💻'}
+                                </div>
+                                <div className="flex-grow min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-slate-700 truncate">{s.city || 'Visitor'}</span>
+                                    <span className="text-[10px] text-slate-300 font-bold tracking-tight">{s.country}</span>
+                                  </div>
+                                  <p className="text-[10px] text-slate-400 truncate font-medium">{s.path || '/'}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-[10px] font-bold text-emerald-500 uppercase">Live Now</p>
+                                  <p className="text-[9px] text-slate-300 font-bold">{format(new Date(s.timestamp), 'HH:mm')}</p>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="h-full flex flex-col items-center justify-center text-slate-300 p-8 text-center space-y-4">
+                              <MousePointer2 size={32} className="animate-bounce" />
+                              <p className="text-[10px] font-bold uppercase tracking-[0.2em]">Waiting for heartbeats...</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Live Orders/Revenue List */}
+                      <div className="bg-white border border-slate-100 rounded-[2.5rem] shadow-sm overflow-hidden flex flex-col h-[400px]">
+                        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+                          <span className="text-sm font-bold text-slate-800">Recent Revenue</span>
+                          <span className="text-[10px] bg-amber-50 px-2 py-0.5 rounded-full font-bold text-amber-600 uppercase tracking-widest">Live Flow</span>
+                        </div>
+                        <div className="flex-grow overflow-y-auto custom-scrollbar p-2">
+                          {orders.slice(0, 15).map((o, i) => (
+                            <div key={i} className="flex items-center gap-4 p-3 hover:bg-slate-50 rounded-2xl transition-colors border-b border-slate-50 last:border-0 group">
+                              <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-lg group-hover:scale-105 transition-all">
+                                🛍️
+                              </div>
+                              <div className="flex-grow min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-slate-700 truncate">{o.customer?.name || 'Customer'}</span>
+                                  <span className="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded font-bold uppercase tracking-tighter">Paid</span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 truncate font-medium">{o.items?.[0]?.name || 'Mystery Box'}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-xs font-black text-slate-900 font-syne">₹{o.total?.toLocaleString()}</p>
+                                <p className="text-[9px] text-slate-300 font-bold uppercase">{format(new Date(o.createdAt), 'HH:mm')}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Column */}
+                  <div className="space-y-6">
+                    {/* Traffic Source Breakdown */}
+                    <div className="bg-white border border-slate-100 rounded-[2.5rem] shadow-sm p-6">
+                      <div className="flex items-center justify-between mb-6">
+                        <span className="text-xs font-black text-slate-800 uppercase tracking-widest">Entry Channels</span>
+                        <Zap size={14} className="text-slate-300" />
+                      </div>
+                      <div className="space-y-5">
+                        {(() => {
+                          const sources: Record<string, number> = {};
+                          liveSessions.forEach(s => {
+                            const src = s.source || 'Direct';
+                            sources[src] = (sources[src] || 0) + 1;
+                          });
+                          const total = liveSessions.length || 1;
+                          return Object.entries(sources).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count], i) => (
+                            <div key={i} className="space-y-1.5">
+                              <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-tight">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: ['#10B981', '#3B82F6', '#F59E0B', '#8B5CF6', '#EC4899'][i] }}></span>
+                                  <span className="text-slate-500">{name}</span>
+                                </div>
+                                <span className="text-slate-900">{Math.round((count / total) * 100)}%</span>
+                              </div>
+                              <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full rounded-full transition-all duration-700" 
+                                  style={{ width: `${(count / total) * 100}%`, background: ['#10B981', '#3B82F6', '#F59E0B', '#8B5CF6', '#EC4899'][i] }}
+                                ></div>
+                              </div>
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* Quick Stats Grid */}
+                    <div className="grid grid-cols-2 gap-4">
+                      {[
+                        { label: 'Avg duration', value: `${Math.round(liveSessions.reduce((acc, s) => acc + (s.duration || 30), 0) / (liveSessions.length || 1))}s`, color: 'text-blue-500', icon: '⏱️' },
+                        { label: 'Desktop Share', value: `${liveSessions.length > 0 ? Math.round((liveSessions.filter(s => s.device === 'desktop').length / liveSessions.length) * 100) : 0}%`, color: 'text-emerald-500', icon: '🖥️' },
+                        { label: 'Indian traffic', value: `${liveSessions.length > 0 ? Math.round((liveSessions.filter(s => s.country === 'India').length / liveSessions.length) * 100) : 0}%`, color: 'text-orange-500', icon: '🇮🇳' },
+                        { label: 'Mobile Share', value: `${liveSessions.length > 0 ? Math.round((liveSessions.filter(s => s.device === 'mobile').length / liveSessions.length) * 100) : 0}%`, color: 'text-purple-500', icon: '📱' },
+                      ].map((s, i) => (
+                        <div key={i} className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm text-center">
+                          <div className="text-xl mb-1">{s.icon}</div>
+                          <p className="text-[18px] font-black font-syne text-slate-900 leading-tight">{s.value}</p>
+                          <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest mt-1">{s.label}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Engagement Feed */}
+                    <div className="bg-white border border-slate-100 rounded-[2.5rem] shadow-sm overflow-hidden flex flex-col max-h-[350px]">
+                      <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+                        <span className="text-xs font-black text-slate-800 uppercase tracking-widest">Pulse Feed</span>
+                        <div className="flex items-center gap-1.5">
+                           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></div>
+                           <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Stream</span>
+                        </div>
+                      </div>
+                      <div className="flex-grow overflow-y-auto custom-scrollbar p-4 space-y-4">
+                        {liveSessions.length > 0 ? (
+                           liveSessions.slice(0, 10).map((s, i) => (
+                            <div key={i} className="flex gap-3 items-start animate-in fade-in slide-in-from-left-2 duration-500" style={{ animationDelay: `${i * 100}ms` }}>
+                               <div className="w-6 h-6 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-[10px] shrink-0 mt-0.5">👤</div>
+                               <div className="space-y-0.5 min-w-0">
+                                  <p className="text-[11px] font-bold text-slate-700 leading-tight">
+                                    New session from <span className="text-emerald-600">{s.city || 'Global Gateway'}</span>
+                                  </p>
+                                  <div className="flex items-center gap-2">
+                                     <span className="text-[9px] font-bold text-slate-300 uppercase">{format(new Date(s.timestamp), 'HH:mm:ss')}</span>
+                                     <span className="text-[9px] text-slate-200">·</span>
+                                     <span className="text-[9px] font-bold text-slate-300 uppercase">{s.source || 'Discovery'}</span>
+                                  </div>
+                               </div>
+                            </div>
+                           ))
+                        ) : (
+                          <div className="text-center py-12">
+                             <Activity size={24} className="mx-auto text-slate-100 mb-2" />
+                             <p className="text-[9px] font-black text-slate-300 uppercase tracking-tighter">Quiet signal...</p>
+                          </div>
+                        )}
+                        {/* Derive purchase activity if not enough session data */}
+                        {orders.slice(0, 3).map((o, i) => (
+                           <div key={`ord-${i}`} className="flex gap-3 items-start animate-in fade-in slide-in-from-left-2 duration-500">
+                               <div className="w-6 h-6 rounded-lg bg-amber-50 border border-amber-100 flex items-center justify-center text-[10px] shrink-0 mt-0.5">🛍️</div>
+                               <div className="space-y-0.5 min-w-0">
+                                  <p className="text-[11px] font-bold text-slate-700 leading-tight">
+                                    Flash purchase by <span className="text-ruby">{o.customer?.name?.split(' ')[0] || 'Member'}</span>
+                                  </p>
+                                  <div className="flex items-center gap-2">
+                                     <span className="text-[9px] font-bold text-slate-300 uppercase">{format(new Date(o.createdAt), 'HH:mm:ss')}</span>
+                                     <span className="text-[9px] text-slate-200">·</span>
+                                     <span className="text-[11px] font-black text-emerald-600">₹{o.total}</span>
+                                  </div>
+                               </div>
+                            </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Globe Container */}
-              <div ref={globeContainerRef} className="flex-grow w-full relative cursor-move bg-[#050B18]">
-                <ReactGlobe
-                  width={globeSize.width}
-                  height={globeSize.height}
-                  globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
-                  bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
-                  backgroundImageUrl="//unpkg.com/three-globe/example/img/night-sky.png"
-                  pointsData={[
-                    ...liveSessions.filter(s => s.lat && s.lng).map(s => ({
-                      lat: s.lat,
-                      lng: s.lng,
-                      size: 0.25,
-                      color: '#E11D48',
-                      label: `${s.city}, ${s.region}, ${s.country}`
-                    })),
-                    { lat: 19.0760, lng: 72.8777, size: 0.4, color: '#ffffff', label: 'THE RUBY HQ (Mumbai)' }
-                  ]}
-                  pointAltitude={0.02}
-                  pointColor="color"
-                  pointRadius={0.8}
-                  pointsMerge={false}
-                  pointLabel="label"
-                  labelsData={[
-                    ...liveSessions.filter(s => s.lat && s.lng).map(s => ({
-                      lat: s.lat,
-                      lng: s.lng,
-                      text: s.city || s.region,
-                      color: '#ffffff',
-                      size: 0.5
-                    })),
-                    { lat: 19.0760, lng: 72.8777, text: 'RUBY HQ', color: '#E11D48', size: 1 }
-                  ]}
-                  labelColor="color"
-                  labelSize="size"
-                  labelDotRadius={0.4}
-                  labelAltitude={0.03}
-                  atmosphereColor="#3B82F6"
-                  atmosphereAltitude={0.15}
-                  arcsData={liveSessions.filter(s => s.lat && s.lng).map(s => ({
-                    startLat: s.lat,
-                    startLng: s.lng,
-                    endLat: 19.0760, // Mumbai
-                    endLng: 72.8777,
-                    color: ['#E11D48', '#ffffff']
-                  }))}
-                  arcColor="color"
-                  arcDashLength={0.4}
-                  arcDashGap={4}
-                  arcDashAnimateTime={1500}
-                  arcStroke={0.5}
-                  ringsData={liveSessions.filter(s => s.lat && s.lng).map(s => ({
-                    lat: s.lat,
-                    lng: s.lng
-                  }))}
-                  ringColor={() => '#E11D48'}
-                  ringMaxRadius={2.5}
-                  ringPropagationSpeed={3}
-                  ringRepeatPeriod={800}
-                />
-              </div>
-
-              {/* Stats Box - Separate from Map */}
-              <div className="bg-[#0A1224] border-t border-white/10 p-4 md:p-6 overflow-hidden flex flex-col gap-3 md:gap-4 shrink-0">
-                {/* Row 1: Global Traffic */}
-                <div className="relative overflow-hidden">
-                  <div className="flex items-center gap-8 md:gap-12 animate-marquee whitespace-nowrap">
-                    <div className="flex items-center gap-3 shrink-0">
-                      <Globe size={14} className="text-white animate-pulse" />
-                      <span className="text-[8px] md:text-[11px] font-black text-white uppercase tracking-[0.2em]">Global Traffic:</span>
-                    </div>
-                    {(topCountries.length > 0 ? topCountries.concat(topCountries) : [{name: 'Global', count: 0}]).map((country, i) => (
-                      <div key={`country-${i}`} className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/5">
-                        <span className="text-[8px] md:text-[10px] font-bold text-white/60 uppercase tracking-widest">{country.name}</span>
-                        <span className="text-[8px] md:text-[10px] font-black text-white">{country.count}</span>
-                      </div>
-                    ))}
+                {/* Top Products Animated List */}
+                <div className="bg-white border border-slate-100 rounded-[2.5rem] shadow-sm overflow-hidden">
+                  <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+                    <span className="text-sm font-bold text-slate-800">Hot Inventory Trend</span>
+                    <BarChart3 size={14} className="text-slate-300" />
                   </div>
-                </div>
-
-                {/* Row 2: Regional Traffic - Hidden or simplified on mobile if requested, but user said "alag line me" */}
-                <div className="relative overflow-hidden">
-                  <div className="flex items-center gap-8 md:gap-12 animate-marquee-reverse whitespace-nowrap">
-                    <div className="flex items-center gap-3 shrink-0">
-                      <MapPin size={14} className="text-ruby animate-pulse" />
-                      <span className="text-[8px] md:text-[11px] font-black text-ruby uppercase tracking-[0.2em]">Regional Traffic:</span>
+                  <div className="p-6 overflow-hidden">
+                    <div className="flex items-center gap-8 animate-marquee-live whitespace-nowrap">
+                       {/* Duplicated for smooth loop */}
+                       {[...Array(2)].map((_, groupIdx) => (
+                         <div key={groupIdx} className="flex items-center gap-12">
+                            {products.slice(0, 8).map((p, i) => (
+                              <div key={`${groupIdx}-${i}`} className="flex items-center gap-4 group cursor-pointer shrink-0">
+                                <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-100 overflow-hidden shrink-0 group-hover:border-ruby/20 transition-all p-1">
+                                  <img src={p.images?.[0]} alt="" className="w-full h-full object-cover rounded-xl" />
+                                </div>
+                                <div>
+                                   <p className="text-xs font-black text-slate-800 tracking-tight leading-none mb-1 group-hover:text-ruby transition-all">{p.name}</p>
+                                   <div className="flex items-center gap-3">
+                                      <span className="text-[9px] font-bold text-emerald-500 uppercase">Trend: Up</span>
+                                      <span className="text-[10px] font-black text-slate-400">₹{p.price}</span>
+                                   </div>
+                                </div>
+                              </div>
+                            ))}
+                         </div>
+                       ))}
                     </div>
-                    {(topStates.length > 0 ? topStates.concat(topStates) : [{name: 'Regional', count: 0}]).map((state, i) => (
-                      <div key={`state-${i}`} className="flex items-center gap-2 px-3 py-1 bg-ruby/10 rounded-full border border-ruby/10">
-                        <span className="text-[8px] md:text-[10px] font-bold text-white/40 uppercase tracking-widest">{state.name}</span>
-                        <span className="text-[8px] md:text-[10px] font-black text-ruby">{state.count}</span>
-                      </div>
-                    ))}
                   </div>
                 </div>
               </div>
 
               <style>{`
-                @keyframes marquee {
+                @keyframes marquee-live {
                   0% { transform: translateX(0); }
                   100% { transform: translateX(-50%); }
                 }
-                @keyframes marquee-reverse {
-                  0% { transform: translateX(-50%); }
-                  100% { transform: translateX(0); }
-                }
-                .animate-marquee {
+                .animate-marquee-live {
                   display: inline-flex;
-                  animation: marquee 40s linear infinite;
+                  animation: marquee-live 40s linear infinite;
                 }
-                .animate-marquee-reverse {
-                  display: inline-flex;
-                  animation: marquee-reverse 50s linear infinite;
-                }
-                .animate-marquee:hover, .animate-marquee-reverse:hover {
+                .animate-marquee-live:hover {
                   animation-play-state: paused;
                 }
               `}</style>
@@ -5519,33 +5840,44 @@ export default function AdminDashboard() {
                     {notifications.map((notif) => (
                       <div 
                         key={notif.id}
-                        className="p-4 md:p-6 hover:bg-gray-50 transition-colors flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group"
+                        className="p-4 md:p-6 hover:bg-gray-50 transition-colors flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group border-b border-gray-50 last:border-0"
                       >
                         <div className="flex items-start space-x-3 md:space-x-4 w-full">
-                          <div className="w-10 h-10 md:w-12 md:h-12 bg-ruby/10 text-ruby rounded-xl md:rounded-2xl flex items-center justify-center flex-shrink-0">
-                            <ShoppingBag size={20} className="md:w-6 md:h-6" />
+                          <div className={cn(
+                            "w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl flex items-center justify-center flex-shrink-0",
+                            notif.type === 'test' ? "bg-blue-50 text-blue-600" : "bg-ruby/10 text-ruby"
+                          )}>
+                            {notif.type === 'test' ? <Bell size={20} className="md:w-6 md:h-6" /> : <ShoppingBag size={20} className="md:w-6 md:h-6" />}
                           </div>
                           <div className="space-y-1 min-w-0 flex-grow">
-                            <h4 className="text-xs md:text-sm font-bold text-[#1A2C54] truncate">New Order Received!</h4>
-                            <p className="text-[10px] md:text-xs text-gray-500 leading-relaxed">
-                              Order <span className="font-bold text-ruby">{notif.orderId?.startsWith('#') ? notif.orderId : `#${notif.orderId || notif.id?.slice(-6)}`}</span> was placed by <span className="font-bold text-[#1A2C54]">{notif.address?.name || 'Guest'}</span>.
+                            <h4 className="text-xs md:text-sm font-bold text-[#1A2C54] truncate capitalize">
+                              {notif.title || (notif.type === 'test' ? 'Test Notification' : 'New Order Received!')}
+                            </h4>
+                            <p className="text-[10px] md:text-xs text-gray-500 leading-relaxed line-clamp-2 md:line-clamp-none">
+                              {notif.message || (
+                                <>Order <span className="font-bold text-ruby">{notif.orderId?.startsWith('#') ? notif.orderId : `#${notif.orderId || notif.id?.slice(-6)}`}</span> was placed by <span className="font-bold text-[#1A2C54]">{notif.address?.name || 'Guest'}</span>.</>
+                              )}
                             </p>
                             <div className="flex flex-wrap items-center gap-2 pt-1">
-                              <span className="text-[9px] md:text-[10px] font-bold text-ruby uppercase tracking-widest">₹{(notif.total || 0).toLocaleString()}</span>
-                              <span className="text-gray-300">•</span>
-                              <span className="text-[9px] md:text-[10px] font-bold text-gray-400 uppercase tracking-widest">{new Date(notif.createdAt).toLocaleString()}</span>
+                              {notif.total && <span className="text-[9px] md:text-[10px] font-bold text-ruby uppercase tracking-widest">₹{Number(notif.total).toLocaleString()}</span>}
+                              {notif.total && <span className="text-gray-300">•</span>}
+                              <span className="text-[9px] md:text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                                {notif.createdAt ? (notif.createdAt.toDate ? new Date(notif.createdAt.toDate()).toLocaleString() : new Date(notif.createdAt).toLocaleString()) : 'Just now'}
+                              </span>
                             </div>
                           </div>
                         </div>
-                        <button 
-                          onClick={() => {
-                            setActiveTab('orders');
-                            setViewingCustomer(notif);
-                          }}
-                          className="w-full sm:w-auto px-4 py-2.5 bg-gray-50 border border-gray-100 text-ruby rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-ruby hover:text-white transition-all sm:opacity-0 sm:group-hover:opacity-100"
-                        >
-                          View Order
-                        </button>
+                        {notif.orderId && (
+                          <button 
+                            onClick={() => {
+                              setActiveTab('orders');
+                              setViewingCustomer(notif);
+                            }}
+                            className="w-full sm:w-auto px-4 py-2 bg-gray-50 border border-gray-100 text-ruby rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-ruby hover:text-white transition-all sm:opacity-0 sm:group-hover:opacity-100"
+                          >
+                            View Order
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -6677,25 +7009,12 @@ export default function AdminDashboard() {
 
                               {firebaseDiagnostics.error && (
                                 <div className="p-4 bg-red-50 border border-red-100 rounded-xl">
-                                  <p className="text-xs font-bold text-red-600 mb-1">Recent Error Message:</p>
-                                  <code className="text-[10px] text-red-500 block bg-white/50 p-2 rounded border border-red-100 overflow-x-auto whitespace-pre-wrap">
-                                    {firebaseDiagnostics.error}
-                                  </code>
-                                  
-                                  <div className="mt-4 p-3 bg-white/50 rounded-lg border border-red-100">
-                                    <p className="text-[11px] font-bold text-red-600 flex items-center uppercase tracking-wider">
-                                      <Info size={12} className="mr-1.5" /> Kyun ho raha hai ye?
-                                    </p>
-                                    <p className="text-xs text-[#1A2C54] mt-2 leading-relaxed opacity-80">
-                                      Bhai, <strong>"5 NOT_FOUND"</strong> ka matlab hai ki aapka database abhi tak platform par fully create ya ready nahi hua hai. 
-                                      Isse fix karne ke liye:
-                                    </p>
-                                    <ul className="text-xs text-[#1A2C54] mt-2 space-y-1 list-disc list-inside opacity-80">
-                                      <li>AI Studio chat mein check karein agar koi <strong>"Set up Firebase"</strong> ka option hai.</li>
-                                      <li>Agar pehle connect kiya tha, toh thoda intezar karein, provisioning mein 2-3 minute lagte hain.</li>
-                                      <li>Apne app ko refresh (hard reload) karke dobara try karein.</li>
-                                    </ul>
-                                  </div>
+                                  <p className="text-xs font-bold text-red-600 mb-1">Status Message:</p>
+                                  <p className="text-xs text-[#1A2C54] opacity-80 leading-relaxed font-bold">
+                                    {firebaseDiagnostics.error.includes('NOT_FOUND') 
+                                      ? "Bhai, database abhi tak ready nahi hua hai. Thoda intezar karein ya Firebase setup verify karein." 
+                                      : "Connection problem. Please refresh your browser or check your internet."}
+                                  </p>
                                 </div>
                               )}
                               

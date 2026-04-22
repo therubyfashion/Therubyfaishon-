@@ -99,6 +99,7 @@ function AppContent() {
     
     const initOneSignal = async () => {
       try {
+        // @ts-ignore
         let appId = (import.meta.env.VITE_ONESIGNAL_APP_ID || '').trim();
         const settingsAppId = (settings?.oneSignalAppId || '').trim();
         
