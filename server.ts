@@ -172,42 +172,55 @@ setTimeout(() => {
 }, 2000);
 
 // Helper to send OneSignal notifications via axios
-async function sendOneSignalNotification(notification: any) {
-  let appId = (process.env.ONESIGNAL_APP_ID || process.env.VITE_ONESIGNAL_APP_ID || '').trim();
-  let restKey = (process.env.ONESIGNAL_REST_API_KEY || '').trim();
-
+async function sendOneSignalNotification(notification: any, config?: { appId?: string, restKey?: string }) {
+  let appId = (config?.appId || '').trim();
+  let restKey = (config?.restKey || '').trim();
+  
   const isPlaceholder = (val: string) => !val || val === 'dummy-id' || val === 'YOUR_ONESIGNAL_APP_ID' || val === 'placeholder' || val.length < 10;
 
-  // If not in env or seems to be a placeholder, try to fetch from Firestore
-  if (isPlaceholder(appId) || isPlaceholder(restKey)) {
+  // 1. If overrides not provided, try Firestore first (Dynamic settings)
+  if (!appId || isPlaceholder(appId)) {
     if (db) {
       try {
-        console.log("OneSignal configuration missing or invalid in env, attempting to fetch from Firestore 'settings'...");
         const settingsSnap = await db.collection('settings').limit(1).get();
         if (!settingsSnap.empty) {
           const settings = settingsSnap.docs[0].data();
-          if (settings.oneSignalAppId && settings.oneSignalRestApiKey) {
+          if (settings.oneSignalAppId && !isPlaceholder(settings.oneSignalAppId)) {
             appId = String(settings.oneSignalAppId).trim();
-            restKey = String(settings.oneSignalRestApiKey).trim();
-            console.log("OneSignal config successfully loaded from Firestore.");
+            restKey = String(settings.oneSignalRestApiKey || restKey || '').trim();
+            console.log("OneSignal: Using configuration from Firestore 'settings' collection.");
           }
         }
       } catch (e: any) {
-        console.error("Failed to fetch OneSignal settings from DB:", e.message);
+        console.error("OneSignal: Failed to fetch settings from DB:", e.message);
       }
     }
   }
 
-  if (isPlaceholder(appId) || isPlaceholder(restKey)) {
-    throw new Error("OneSignal is not configured. Bhai, Admin Panel -> Settings mein 'OneSignal App ID' aur 'REST API Key' sahi se enter karein.");
+  // 2. Fallback to Environment Variables (Static settings)
+  if (!appId || isPlaceholder(appId)) {
+    appId = (process.env.ONESIGNAL_APP_ID || process.env.VITE_ONESIGNAL_APP_ID || '').trim();
+    restKey = (restKey || process.env.ONESIGNAL_REST_API_KEY || '').trim();
+    if (appId && !isPlaceholder(appId)) {
+      console.log("OneSignal: Using configuration from Environment Variables (Secrets).");
+    }
+  }
+
+  if (isPlaceholder(appId) || (restKey && isPlaceholder(restKey))) {
+    throw new Error("OneSignal is not configured properly.");
   }
 
   // Clean the key (remove 'Basic ' if user accidentally copied it)
-  const cleanRestKey = restKey.replace(/Basic\s+/i, '').trim();
+  const cleanRestKey = restKey ? restKey.replace(/Basic\s+/i, '').trim() : '';
+
+  const headers: any = { 'Content-Type': 'application/json' };
+  if (cleanRestKey) {
+    headers['Authorization'] = `Basic ${cleanRestKey}`;
+  }
 
   return await axios.post('https://onesignal.com/api/v1/notifications', 
     { ...notification, app_id: appId },
-    { headers: { 'Authorization': `Basic ${cleanRestKey}`, 'Content-Type': 'application/json' } }
+    { headers }
   );
 }
 
@@ -772,7 +785,7 @@ async function startServer() {
   });
 
   app.post("/api/send-push", async (req, res) => {
-    const { title, body, url, type } = req.body;
+    const { title, body, url, type, appId, restKey } = req.body;
     
     try {
       console.log("OneSignal: Sending broadcast notification...");
@@ -788,7 +801,7 @@ async function startServer() {
         included_segments: type === 'all' ? ['Subscribed Users'] : (type === 'active' ? ['Active Users'] : ['Subscribed Users']),
       };
 
-      const response = await sendOneSignalNotification(notification);
+      const response = await sendOneSignalNotification(notification, { appId, restKey });
       console.log("OneSignal notification sent:", response.data);
       res.json({ success: true, id: response.data.id });
     } catch (error: any) {
@@ -914,11 +927,9 @@ async function startServer() {
 
   app.post("/api/test-onesignal", async (req, res) => {
     try {
-      // Get keys from request body or env
-      const appId = (req.body.appId || process.env.ONESIGNAL_APP_ID)?.trim();
-      let restKey = (req.body.restKey || process.env.ONESIGNAL_REST_API_KEY)?.trim();
-
-      if (!appId || !restKey || appId === 'dummy-id') {
+      const { appId, restKey } = req.body;
+      
+      if (!appId || !restKey) {
         return res.status(400).json({ 
           success: false, 
           error: "OneSignal App ID or REST API Key is missing.",
@@ -926,12 +937,11 @@ async function startServer() {
         });
       }
 
-      // Clean the key
-      const cleanRestKey = restKey.replace(/Basic\s+/i, '').trim();
-
       console.log(`Testing OneSignal with App ID: ${appId}`);
 
-      // Direct axios call to verify keys
+      // Use unified function but with a dummy notification to check keys
+      // Actually players endpoint is better for just testing keys
+      const cleanRestKey = restKey.replace(/Basic\s+/i, '').trim();
       const response = await axios.get(`https://onesignal.com/api/v1/players?app_id=${appId}&limit=1`, {
         headers: {
           'Authorization': `Basic ${cleanRestKey}`,

@@ -1342,7 +1342,9 @@ export default function AdminDashboard() {
         body: JSON.stringify({
           title: "Test Notification",
           body: "Bhai, agar ye message dikh raha hai toh OneSignal sahi se kaam kar raha hai! 🚀",
-          type: 'all'
+          type: 'all',
+          appId: settings.oneSignalAppId,
+          restKey: settings.oneSignalRestApiKey
         })
       });
       const data = await response.json();
@@ -1366,8 +1368,12 @@ export default function AdminDashboard() {
 
   const handlePromptPermission = () => {
     const OneSignal = (window as any).OneSignal;
-    if (OneSignal) {
+    if (OneSignal?.Notifications) {
       OneSignal.Notifications.requestPermission();
+    } else if (OneSignal?.push) {
+      OneSignal.push(() => {
+        OneSignal.showNativePrompt?.() || OneSignal.registerForPushNotifications?.();
+      });
     } else {
       toast.error("OneSignal SDK not loaded yet. Please refresh.");
     }
@@ -2843,6 +2849,7 @@ export default function AdminDashboard() {
                         >
                           {[
                             { id: 'store', label: 'Store Setting', icon: Settings },
+                            { id: 'push', label: 'Push Notification', icon: Bell },
                             { id: 'firebase', label: 'Firebase Status', icon: Cloud },
                             { id: 'sheets', label: 'Google Sheet URL', icon: Database },
                             { id: 'email', label: 'Email Settings', icon: Mail },
@@ -6407,109 +6414,6 @@ export default function AdminDashboard() {
                           </div>
 
                           <div className="pt-4 border-t border-gray-50">
-                            <div className="flex items-center justify-between mb-4">
-                              <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-widest">OneSignal Push Settings</h4>
-                              <div className="flex gap-2">
-                                <button 
-                                  onClick={handlePromptPermission}
-                                  className="px-3 py-1.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded-lg hover:bg-blue-200 transition-colors uppercase tracking-wider"
-                                >
-                                  Enable Notifications
-                                </button>
-                                <button 
-                                  onClick={handleSendTestPush}
-                                  disabled={isSendingTestPush}
-                                  className="px-3 py-1.5 bg-green-100 text-green-700 text-[10px] font-bold rounded-lg hover:bg-green-200 transition-colors uppercase tracking-wider disabled:opacity-50"
-                                >
-                                  {isSendingTestPush ? 'Sending...' : 'Send Test Push'}
-                                </button>
-                                <button 
-                                  onClick={handleTestOneSignal}
-                                  disabled={isTestingOneSignal}
-                                  className="px-3 py-1.5 bg-ruby/10 text-ruby text-[10px] font-bold rounded-lg hover:bg-ruby/20 transition-colors uppercase tracking-wider disabled:opacity-50"
-                                >
-                                  {isTestingOneSignal ? 'Testing...' : 'Test Configuration'}
-                                </button>
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">OneSignal App ID</label>
-                                <input 
-                                  type="text" 
-                                  placeholder="Enter OneSignal App ID"
-                                  value={settings.oneSignalAppId || ''}
-                                  onChange={(e) => setSettings({...settings, oneSignalAppId: e.target.value})}
-                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">OneSignal REST API Key</label>
-                                <input 
-                                  type="password" 
-                                  placeholder="Enter REST API Key"
-                                  value={settings.oneSignalRestApiKey || ''}
-                                  onChange={(e) => setSettings({...settings, oneSignalRestApiKey: e.target.value})}
-                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
-                                />
-                              </div>
-                            </div>
-                            <p className="text-[10px] text-gray-400 mt-2 leading-relaxed italic">
-                              Get these from OneSignal Dashboard &gt; Settings &gt; Keys & IDs.
-                            </p>
-                            
-                            {/* Diagnostic Section */}
-                            <div className="mt-4 p-3 bg-blue-50 rounded-xl border border-blue-100">
-                              <h5 className="text-[10px] font-bold text-blue-700 uppercase tracking-widest mb-2">OneSignal Diagnostics</h5>
-                              <div className="space-y-1">
-                                <div className="flex items-center justify-between text-[10px]">
-                                  <span className="text-blue-600">SDK Loaded:</span>
-                                  <span className={(window as any).OneSignal ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
-                                    {(window as any).OneSignal ? "Yes" : "No"}
-                                  </span>
-                                </div>
-                                <div className="flex items-center justify-between text-[10px]">
-                                  <span className="text-blue-600">App ID Configured:</span>
-                                  <span className={settings.oneSignalAppId ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
-                                    {settings.oneSignalAppId ? "Yes" : "No"}
-                                  </span>
-                                </div>
-                                <div className="flex items-center justify-between text-[10px]">
-                                  <span className="text-blue-600">REST API Key Configured:</span>
-                                  <span className={settings.oneSignalRestApiKey ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
-                                    {settings.oneSignalRestApiKey ? "Yes" : "No"}
-                                  </span>
-                                </div>
-                                <div className="flex items-center justify-between text-[10px]">
-                                  <span className="text-blue-600">Browser Permission:</span>
-                                  <span className={(window as any).OneSignal?.Notifications?.permission === 'granted' ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
-                                    {(window as any).OneSignal?.Notifications?.permission || 'Not Prompted'}
-                                  </span>
-                                </div>
-                                <div className="flex items-center justify-between text-[10px] pt-1 border-t border-blue-100 mt-1">
-                                  <span className="text-blue-600">Firebase Server:</span>
-                                  <span className={firebaseStatus.includes('Connected') ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
-                                    {firebaseStatus}
-                                  </span>
-                                </div>
-                                {firebaseStatus.includes('Error') && (
-                                  <div className="mt-1 space-y-1">
-                                    <p className="text-[8px] text-red-500 italic">
-                                      {firebaseStatus.includes('PERMISSION_DENIED') ? "Bhai, settings mein 'Set up Firebase' button dubara click karein permissions fix karne ke liye." : "Check server logs or re-run Firebase setup."}
-                                    </p>
-                                    <button 
-                                      onClick={() => window.location.reload()}
-                                      className="text-[8px] bg-red-100 text-red-600 px-2 py-0.5 rounded uppercase font-bold"
-                                    >
-                                      Retry Check
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="pt-4 border-t border-gray-50">
                             <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-widest mb-4">Footer Contact Info</h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                               <div>
@@ -6619,6 +6523,103 @@ export default function AdminDashboard() {
                                   })}
                                   className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
                                 />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {activeSettingsTab === 'push' && (
+                      <motion.div 
+                        key="push"
+                        initial={{ opacity: 0, x: 10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -10 }}
+                        className="space-y-6"
+                      >
+                        <h3 className="text-lg font-bold text-[#1A2C54] flex items-center">
+                          <Bell size={20} className="mr-2 text-ruby" /> OneSignal Push Settings
+                        </h3>
+                        
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                            <div>
+                              <p className="text-xs font-bold text-[#1A2C54]">Push Notifications</p>
+                              <p className="text-[10px] text-gray-400 leading-relaxed italic">Enable admin alerts for new orders and messages</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={handlePromptPermission}
+                                className="px-3 py-1.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded-lg hover:bg-blue-200 transition-colors uppercase tracking-wider"
+                              >
+                                Enable Notifications
+                              </button>
+                              <button 
+                                onClick={handleSendTestPush}
+                                disabled={isSendingTestPush}
+                                className="px-3 py-1.5 bg-green-100 text-green-700 text-[10px] font-bold rounded-lg hover:bg-green-200 transition-colors uppercase tracking-wider disabled:opacity-50"
+                              >
+                                {isSendingTestPush ? 'Sending...' : 'Send Test Push'}
+                              </button>
+                              <button 
+                                onClick={handleTestOneSignal}
+                                disabled={isTestingOneSignal}
+                                className="px-3 py-1.5 bg-ruby/10 text-ruby text-[10px] font-bold rounded-lg hover:bg-ruby/20 transition-colors uppercase tracking-wider disabled:opacity-50"
+                              >
+                                {isTestingOneSignal ? 'Testing...' : 'Test Configuration'}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">OneSignal App ID</label>
+                              <input 
+                                type="text" 
+                                placeholder="Enter OneSignal App ID"
+                                value={settings.oneSignalAppId || ''}
+                                onChange={(e) => setSettings(prev => ({...prev, oneSignalAppId: e.target.value}))}
+                                className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">OneSignal REST API Key</label>
+                              <input 
+                                type="password" 
+                                placeholder="Enter REST API Key"
+                                value={settings.oneSignalRestApiKey || ''}
+                                onChange={(e) => setSettings(prev => ({...prev, oneSignalRestApiKey: e.target.value}))}
+                                className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                              />
+                            </div>
+                          </div>
+                          
+                          <p className="text-[10px] text-gray-400 leading-relaxed italic">
+                            Get these from OneSignal Dashboard &gt; Settings &gt; Keys & IDs.
+                          </p>
+
+                          {/* Diagnostic Section */}
+                          <div className="mt-4 p-4 bg-blue-50 rounded-2xl border border-blue-100">
+                            <h5 className="text-[10px] font-bold text-blue-700 uppercase tracking-widest mb-3">Service Health Diagnostics</h5>
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-[10px]">
+                                <span className="text-blue-600">OneSignal SDK:</span>
+                                <span className={(window as any).OneSignal ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
+                                  {(window as any).OneSignal ? "Ready" : "Not Loaded"}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-[10px]">
+                                <span className="text-blue-600">Permissions:</span>
+                                <span className={String((window as any).OneSignal?.Notifications?.permission) === 'granted' ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
+                                  {String((window as any).OneSignal?.Notifications?.permission || 'Not Requested')}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-[10px] pt-2 border-t border-blue-100">
+                                <span className="text-blue-600">Firebase Status:</span>
+                                <span className={firebaseStatus.includes('Connected') ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
+                                  {firebaseStatus}
+                                </span>
                               </div>
                             </div>
                           </div>
