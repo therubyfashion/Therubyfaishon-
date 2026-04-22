@@ -653,53 +653,62 @@ async function startServer() {
       console.log(`Email Service Selection: ${smtpUser ? 'Gmail SMTP' : (apiKey ? 'Resend API' : 'NONE')}`);
 
       if (smtpUser && smtpPass) {
-        console.log("Initiating Gmail SMTP delivery process...");
-        const cleanPass = smtpPass.replace(/\s/g, ''); // Gmail app passwords often have spaces
+        console.log("🚀 Perfect SMTP mode activated: Initiating Gmail Ultra-Reliability delivery...");
         
+        // Ensure strictly trimmed credentials
+        const cleanUser = String(smtpUser).trim();
+        const cleanPass = String(smtpPass).replace(/\s/g, ''); 
+        
+        // Gmail STRICT constraint: The sender MUST be the authenticated user
+        const authenticatedFrom = `"${fromName}" <${cleanUser}>`;
+
+        const transporter = nodemailer.createTransport({
+          host: 'smtp.gmail.com',
+          port: 465,
+          secure: true, // Use SSL/TLS
+          auth: {
+            user: cleanUser,
+            pass: cleanPass
+          },
+          pool: true,
+          maxConnections: 5,
+          maxMessages: 100,
+          socketTimeout: 15000,
+          dnsTimeout: 10000,
+          connectionTimeout: 15000, 
+          greetingTimeout: 15000
+        });
+
         try {
-          const transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-              user: smtpUser,
-              pass: cleanPass
-            },
-            pool: true, // Use a pool to handle multiple connections
-            maxMessages: 100,
-            maxConnections: 5
-          });
-
-          // Pre-verify connection
-          await transporter.verify();
-
-          const mailOptions = {
-            from: formattedFrom,
+          const result = await transporter.sendMail({
+            from: authenticatedFrom,
             to: Array.isArray(to) ? to.join(', ') : to,
             subject: subject,
             html: html,
-            replyTo: replyTo || smtpUser
-          };
+            replyTo: replyTo || cleanUser
+          });
 
-          const result = await transporter.sendMail(mailOptions);
-          console.log("✅ Gmail SMTP Success:", result.messageId);
-          return res.json({ id: result.messageId, provider: 'smtp' });
+          console.log("✨ GMAIL MASTER SUCCESS:", result.messageId);
+          return res.json({ id: result.messageId, provider: 'smtp', status: 'delivered' });
         } catch (smtpErr: any) {
-          console.error("❌ Gmail SMTP Critical Failure:", smtpErr.message);
+          console.error("🔥 GMAIL MASTER ERROR:", smtpErr.code, smtpErr.message);
           
-          let helpHint = "Bhai, Gmail setup fail ho gaya.";
-          if (smtpErr.message.includes('Invalid login') || smtpErr.message.includes('auth')) {
-            helpHint += " Hint: Aapka App Password galat ho sakta hai. Kya wo 16-character ka code hai?";
-          } else if (smtpErr.message.includes('ETIMEDOUT')) {
-            helpHint += " Hint: Connection timeout. Thoda wait karein.";
+          let troubleshooting = "Bhai, Gmail ne block kiya hai. 🛑";
+          
+          if (smtpErr.message.includes('Invalid login') || smtpErr.message.includes('Username and Password not accepted')) {
+            troubleshooting = "❌ ERROR: App Password Galat Hai! \nSamadhan: \n1. Google Account me jaein. \n2. Naya 'App Password' banayein. \n3. Us 16-letter code ko bina space ke Admin Panel me dalkar 'Save Changes' dabayein.";
+          } else if (smtpErr.message.includes('ETIMEDOUT') || smtpErr.message.includes('ECONNREFUSED')) {
+            troubleshooting = "❌ ERROR: Network Slow Hai! \nSamadhan: Server restart hone ka intezar karein ya 2 minute baad try karein.";
           }
 
           if (!apiKey) {
             return res.status(500).json({ 
-              error: "Gmail SMTP Failed", 
-              details: smtpErr.message,
-              hint: helpHint 
+              error: "Gmail Delivery Failed", 
+              message: smtpErr.message,
+              hint: troubleshooting
             });
           }
-          console.log("Attempting fallback to Resend API due to SMTP failure...");
+          console.log("🔄 Fallback: Auto-switching to Resend API...");
         }
       }
 
