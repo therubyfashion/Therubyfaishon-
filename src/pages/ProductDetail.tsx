@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { doc, getDoc, collection, addDoc, query, where, onSnapshot, orderBy, serverTimestamp, updateDoc, increment, getDocs, limit } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Product, Review } from '../types';
@@ -330,6 +331,15 @@ export default function ProductDetail() {
 
   return (
     <div id="product-detail" className="bg-gray-50 min-h-screen pb-20">
+      <Helmet>
+        <title>{`${product.name} | The Ruby Fashion`}</title>
+        <meta name="description" content={product.description.replace(/<[^>]*>/g, '').substring(0, 160)} />
+        <meta property="og:title" content={`${product.name} | The Ruby`} />
+        <meta property="og:description" content={product.description.replace(/<[^>]*>/g, '').substring(0, 160)} />
+        <meta property="og:image" content={product.images[0]} />
+        <meta property="og:url" content={`https://therubyfashion.shop/product/${product.id}`} />
+        <link rel="canonical" href={`https://therubyfashion.shop/product/${product.id}`} />
+      </Helmet>
       {/* Breadcrumb */}
       <div className="max-w-7xl mx-auto px-[5%] py-5 flex items-center gap-2 text-[13px] text-gray-400 font-medium">
         <button onClick={() => navigate('/')} className="hover:text-ruby transition-colors">Home</button>

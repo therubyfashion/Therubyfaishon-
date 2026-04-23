@@ -141,8 +141,8 @@ export default function ChatWidget() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 1024 * 1024) { // 1MB limit
-      toast.error("Image size must be less than 1MB");
+    if (file.size > 5 * 1024 * 1024) { // 5MB limit
+      toast.error("Image size must be less than 5MB");
       return;
     }
 

@@ -1,5 +1,5 @@
 {
   "name": "The Ruby",
-  "description": "Professional order fulfillment dashboard for The Ruby, featuring item tracking, shipment management, and delivery timelines.",
-  "requestFramePermissions": ["geolocation"]
+  "description": "Premium Women's Fashion Store | The Ruby - Shop the latest curation of high-quality women's clothing, ethnic wear, and accessories in India.",
+  "requestFramePermissions": ["geolocation", "camera"]
 }

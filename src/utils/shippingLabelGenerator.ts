@@ -1,141 +1,169 @@
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import QRCode from 'qrcode';
+import JsBarcode from 'jsbarcode';
 
 export const generateShippingLabel = async (order: any, settings?: any) => {
-  const labelElement = document.createElement('div');
-  labelElement.style.width = '380px';
-  labelElement.style.padding = '24px';
-  labelElement.style.background = 'white';
-  labelElement.style.color = '#1A2C54';
-  labelElement.style.fontFamily = 'Inter, ui-sans-serif, system-ui, sans-serif';
-  labelElement.style.border = '1px solid #E5E7EB';
-  labelElement.style.borderRadius = '16px';
-  labelElement.style.position = 'absolute';
-  labelElement.style.left = '-9999px';
-  labelElement.style.boxSizing = 'border-box';
-  labelElement.style.overflow = 'hidden';
+  const doc = new jsPDF({
+    unit: 'mm',
+    format: [101.6, 152.4] // 4x6 inches
+  });
+
+  const width = doc.internal.pageSize.getWidth();
+  const height = doc.internal.pageSize.getHeight();
+  const margin = 5;
+
+  // Draw Main Border
+  doc.setDrawColor(0);
+  doc.setLineWidth(0.5);
+  doc.rect(2, 2, width - 4, height - 4, 'S');
+
+  // Header Section
+  // Logo & Store Name
+  doc.setFont('times', 'bold');
+  doc.setFontSize(18);
+  doc.text('Thr Ruby', margin + 2, margin + 8);
+  doc.setFont('times', 'normal');
+  doc.setFontSize(7);
+  doc.text('Timeless Elegance, Crafted for You', margin + 2, margin + 12);
+
+  // E-Kart Logistics Info
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text('E-Kart Logistics', width - margin - 2, margin + 6, { align: 'right' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }), width - margin - 2, margin + 11, { align: 'right' });
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text('PREPAID', width - margin - 2, margin + 17, { align: 'right' });
+
+  // Divider
+  doc.line(2, 25, width - 2, 25);
+  doc.line(width / 2 + 5, 2, width / 2 + 5, 25); // Vertical split in header
+
+  // QR Code Generation
+  const qrData = JSON.stringify({
+    orderId: order.orderId,
+    customer: order.address?.name,
+    email: order.address?.email || order.email || order.customerEmail,
+    address: `${order.address?.address}, ${order.address?.city}, ${order.address?.state} - ${order.address?.pincode}`,
+    courier: 'E-Kart Logistics',
+    tracking: order.trackingNumber || 'FMPC170203456789'
+  });
+
+  const qrUrl = await QRCode.toDataURL(qrData);
+  doc.addImage(qrUrl, 'PNG', width - 40, 28, 35, 35);
+
+  // Shipping Address Section
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text('Shipping/Customer Address:', margin + 2, 32);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text(order.address?.name || 'Customer Name', margin + 2, 38);
   
-  const isCOD = order.paymentMethod === 'Cash on Delivery' || order.paymentMethod === 'COD';
-  const trackingNumber = order.trackingNumber || '';
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  const addressLines = doc.splitTextToSize(`${order.address?.address || 'N/A'}, ${order.address?.city || ''}, ${order.address?.state || ''} - ${order.address?.pincode || ''}\nIndia`, 50);
+  doc.text(addressLines, margin + 2, 44);
   
-  labelElement.innerHTML = `
-    <div style="position: relative; padding: 24px; box-sizing: border-box; background: white; height: 100%;">
-      <!-- FROM Section -->
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
-        <div style="flex: 1;">
-          <p style="font-size: 10px; color: #6B7280; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 6px 0;">FROM</p>
-          <p style="font-size: 16px; font-weight: 800; color: #1A2C54; margin: 0;">${settings?.storeName || 'THE RUBY'}</p>
-          <p style="font-size: 11px; color: #4B5563; margin: 4px 0 0 0; line-height: 1.4;">
-            ${settings?.footerContact?.address || 'Mumbai, MH 400001'}
-          </p>
-        </div>
-        <div style="width: 50px; height: 50px; background-color: #FFF7ED; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-           <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#EA580C" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
-        </div>
-      </div>
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Phone: +91 ${order.address?.phone || order.address?.number || 'N/A'}`, margin + 2, 60);
 
-      <!-- Divider -->
-      <div style="border-top: 1.5px dashed #D1D5DB; margin-bottom: 24px;"></div>
+  // Barcode Section Border
+  doc.line(2, 65, width - 2, 65);
+  doc.text('Seller Name:', margin + 2, 69);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Thr Ruby', margin + 2, 73);
+  doc.line(2, 75, width - 2, 75);
 
-      <!-- TO Section -->
-      <div style="margin-bottom: 32px;">
-        <p style="font-size: 10px; color: #6B7280; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 8px 0;">TO (DELIVERY TO)</p>
-        <p style="font-size: 20px; font-weight: 900; color: #1A2C54; text-transform: uppercase; margin: 0 0 8px 0;">${order.address?.name || order.customerName || 'CUSTOMER'}</p>
-        <div style="font-size: 13px; color: #4B5563; line-height: 1.6; font-weight: 500;">
-          ${order.address?.address || order.shippingAddress?.line1}<br/>
-          ${order.address?.landmark ? order.address?.landmark + '<br/>' : ''}
-          ${order.address?.city || order.shippingAddress?.city}, ${order.address?.state || order.shippingAddress?.state} – ${order.address?.pincode || '400058'}
-        </div>
-        <p style="font-size: 14px; font-weight: 800; color: #1A2C54; margin: 12px 0 0 0; display: flex; align-items: center;">
-          <span style="font-size: 10px; color: #6B7280; margin-right: 6px;">TEL:</span>
-          ${order.address?.phone || order.address?.number || '+91 98765 43210'}
-        </p>
-      </div>
-
-      <!-- Barcode / Tracking Section -->
-      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 32px;">
-        ${trackingNumber ? `
-          <div style="background: white; padding: 10px; border: 1px solid #F3F4F6; border-radius: 8px; margin-bottom: 12px; width: 100%; display: flex; flex-direction: column; align-items: center;">
-            <!-- Stylized Barcode Stripes -->
-            <div style="width: 280px; height: 75px; background: repeating-linear-gradient(90deg, #1A2C54, #1A2C54 3px, transparent 3px, transparent 5px, #1A2C54 5px, #1A2C54 6px, transparent 6px, transparent 8px); box-sizing: border-box;"></div>
-            <p style="font-size: 12px; font-family: 'Courier New', Courier, monospace; font-weight: bold; color: #1A2C54; letter-spacing: 0.5em; text-transform: uppercase; margin: 12px 0 0 0;">${trackingNumber}</p>
-          </div>
-        ` : `
-          <div style="padding: 30px; text-align: center; font-size: 13px; color: #9CA3AF; background-color: #F9FAFB; border: 2px dashed #E5E7EB; border-radius: 16px; width: 100%;">
-            <p style="margin: 0; font-weight: 600;">TRACKING DETAILS PENDING</p>
-            <p style="margin: 4px 0 0 0; font-size: 11px;">Assign carrier & AWB in dashboard</p>
-          </div>
-        `}
-      </div>
-
-      <!-- Footer Info -->
-      <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto; border-top: 1px solid #F3F4F6; padding-top: 20px;">
-        <div>
-           <p style="font-size: 11px; color: #6B7280; font-weight: 700; margin: 0;">Order: ${order.orderId || order.id || 'NEW'}</p>
-           <p style="font-size: 11px; color: #6B7280; font-weight: 700; margin: 4px 0 0 0;">Date: ${new Date().toLocaleDateString('en-IN')}</p>
-        </div>
-        <div style="padding: 6px 14px; background-color: ${isCOD ? '#FEF2F2' : '#F0FDF4'}; border-radius: 8px; border: 1px solid ${isCOD ? '#FEE2E2' : '#DCFCE7'}; text-align: right;">
-           <p style="font-size: 10px; color: ${isCOD ? '#EF4444' : '#16A34A'}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 2px 0;">Payment</p>
-           <p style="font-size: 14px; font-weight: 900; color: ${isCOD ? '#EF4444' : '#16A34A'}; margin: 0;">${isCOD ? 'COD: ₹' + order.total?.toLocaleString() : 'PREPAID'}</p>
-        </div>
-      </div>
-
-      <!-- Watermark -->
-      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-15deg); font-size: 48px; font-weight: 900; color: rgba(26, 44, 84, 0.04); white-space: nowrap; pointer-events: none; z-index: 0; text-transform: uppercase;">
-        ${settings?.storeName || 'THE RUBY'}
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(labelElement);
-  
-  // Workaround for html2canvas failing on modern CSS features like oklch (Tailwind 4)
-  const styleTags = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'));
-  const disabledStyles: (HTMLStyleElement | HTMLLinkElement)[] = [];
-  
+  // Tracking Barcode #1 (Middle)
+  const trackingNumber = order.trackingNumber || 'FMPC170203456789';
+  const barcodeCanvas1 = document.createElement('canvas');
   try {
-    // Temporarily disable style/link tags that might use modern CSS to prevent html2canvas parser from crashing
-    styleTags.forEach(tag => {
-      let shouldDisable = false;
-      if (tag instanceof HTMLStyleElement) {
-        if (tag.innerHTML.includes('oklch') || tag.innerHTML.includes('@theme')) {
-          shouldDisable = true;
-        }
-      } else if (tag instanceof HTMLLinkElement) {
-        // We can't easily read external CSS, so we disable stylesheets that look like they're from our app
-        // or just disable all external sheets to be safe during the capture
-        if (tag.href.includes(window.location.origin) || !tag.href.startsWith('http')) {
-          shouldDisable = true;
-        }
-      }
-
-      if (shouldDisable) {
-        (tag as HTMLStyleElement | HTMLLinkElement).disabled = true;
-        disabledStyles.push(tag as any);
-      }
+    JsBarcode(barcodeCanvas1, trackingNumber, {
+      format: "CODE128",
+      displayValue: false,
+      margin: 0,
+      height: 40
     });
-
-    const canvas = await html2canvas(labelElement, {
-      scale: 2,
-      useCORS: true,
-      logging: false,
-      backgroundColor: '#ffffff'
-    });
-    
-    const imgData = canvas.toDataURL('image/png');
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'px',
-      format: [canvas.width / 2, canvas.height / 2]
-    });
-    
-    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width / 2, canvas.height / 2);
-    pdf.save(`Shipping_Label_${order.orderId}.pdf`);
-  } catch (error) {
-    console.error('Error generating shipping label:', error);
-  } finally {
-    // Re-enable styles
-    disabledStyles.forEach(tag => tag.disabled = false);
-    document.body.removeChild(labelElement);
+    const barcode1Url = barcodeCanvas1.toDataURL('image/png');
+    doc.addImage(barcode1Url, 'PNG', margin + 2, 78, 55, 18);
+    doc.setFontSize(8);
+    doc.text(trackingNumber, margin + 25, 99, { align: 'center' });
+  } catch (e) {
+    console.error('Barcode generation error', e);
   }
+
+  // Tracking ID / Order ID text
+  doc.line(65, 75, 65, 103); // Vertical sep for barcode
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Tracking ID:', 67, 80);
+  doc.setFont('helvetica', 'bold');
+  doc.text(trackingNumber, 67, 84);
+  
+  doc.setFont('helvetica', 'normal');
+  doc.text('Order ID:', 67, 91);
+  doc.setFont('helvetica', 'bold');
+  doc.text(order.orderId || 'ORD42851', 67, 95);
+
+  // Handover Section
+  doc.line(2, 103, width - 2, 103);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text('Handover to E-Kart Logistics', margin + 2, 109);
+  doc.rect(width - 25, 105, 20, 8);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.text('REG', width - 15, 111, { align: 'center' });
+
+  // Bottom Section
+  doc.line(2, 115, width - 2, 115);
+  doc.line(width / 2 + 5, 115, width / 2 + 5, 138); // Vertical sep
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text('E-Kart Logistics - Surface', margin + 2, 121);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Delivery By: ${new Date(Date.now() + 7*24*60*60*1000).toLocaleDateString('en-GB')}`, margin + 2, 127);
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('Pickup From:', width / 2 + 7, 120);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6);
+  const pickupAddr = [
+    'Thr Ruby',
+    'D-12, First Floor, Sector-7',
+    'Noida, Gautam Buddha Nagar',
+    'Uttar Pradesh - 201301',
+    'India',
+    'Phone: +91 98765 43210'
+  ];
+  pickupAddr.forEach((line, i) => {
+    doc.text(line, width / 2 + 7, 123 + (i * 2.5));
+  });
+
+  // Sorting Barcode #2 (Bottom)
+  doc.line(2, 138, width - 2, 138);
+  const sortingCode = `SORT-${order.address?.pincode || '123456'}`;
+  const barcodeCanvas2 = document.createElement('canvas');
+  try {
+    JsBarcode(barcodeCanvas2, sortingCode, {
+      format: "CODE128",
+      displayValue: false,
+      margin: 0,
+      height: 30
+    });
+    const barcode2Url = barcodeCanvas2.toDataURL('image/png');
+    doc.addImage(barcode2Url, 'PNG', margin + 2, 140, 70, 10);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text('(N) DEL/DEL', width - margin - 2, 146, { align: 'right' });
+  } catch (e) {
+    console.error('Barcode 2 generation error', e);
+  }
+
+  // Save
+  doc.save(`Shipping_Label_${order.orderId}.pdf`);
 };

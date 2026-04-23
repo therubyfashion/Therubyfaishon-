@@ -247,11 +247,14 @@ process.on('uncaughtException', (err) => {
 
 async function startServer() {
   const app = express();
+  console.log(`🚀 Starting server setup...`);
   const httpServer = createServer(app);
+  console.log(`✅ HTTP Server created.`);
   const io = new Server(httpServer, {
     cors: { origin: "*" }
   });
-  const PORT = Number(process.env.PORT) || 3000;
+  console.log(`✅ Socket.IO initialized.`);
+  const PORT = 3000;
   
   // Real-time Analytics Store (Memory + Firestore)
   const activeVisitors = new Map<string, any>();
@@ -315,12 +318,16 @@ async function startServer() {
     });
   });
   
-  console.log(`🚀 Starting server...`);
   console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔌 Port: ${PORT}`);
 
   // Initialize clients inside startServer for robustness
-  resend = new Resend(currentResendApiKey);
+  try {
+    resend = new Resend(currentResendApiKey || 'dummy');
+    console.log("✅ Resend initialized (maybe dummy key)");
+  } catch (e) {
+    console.error("❌ Resend init failed:", e);
+  }
   const initialKeyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim();
   const initialKeySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)?.trim();
 
@@ -336,8 +343,10 @@ async function startServer() {
     }
   }
 
+  console.log("⚙️  Applying middleware...");
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
+  console.log("✅ Middleware applied.");
 
   // Root route for Health Checks & Production Serving
   app.get("/", (req, res, next) => {
@@ -360,51 +369,130 @@ async function startServer() {
 
   app.post("/api/track-order", async (req, res) => {
     const { orderId, email } = req.body;
+    console.log(`🔍 Order tracking request: ID=${orderId}, Email=${email}`);
     
     if (!orderId || !email) {
       return res.status(400).json({ error: "Bhai, Order ID aur Email dono zaroori hain." });
     }
 
     try {
-      if (!db) await initializeFirebase();
+      if (!db) {
+        console.log("⏳ Initializing Firebase Admin for tracking...");
+        await initializeFirebase();
+      }
+      
       if (!db) {
         return res.status(503).json({ error: "Database abhi ready ho raha hai. 2-3 minute baad dobara try karein! 💎" });
       }
       
       let orderData: any = null;
-      const oid = String(orderId).trim();
+      const inputOid = String(orderId).trim();
+      const cleanOid = inputOid.replace(/^#/, '').trim(); // Remove leading # if present
+      const hashedOid = `#${cleanOid}`;
       const targetEmail = String(email).trim().toLowerCase();
 
-      // 1. Try finding by document ID first
-      if (oid.length > 15) {
-        const docSnap = await db.collection('orders').doc(oid).get();
-        if (docSnap.exists) {
-          orderData = { id: docSnap.id, ...docSnap.data() };
+      console.log(`🔍 Tracking Attempt: ID=${inputOid} (Clean=${cleanOid}), Email=${targetEmail}`);
+
+      // 1. Try finding by document ID first (if cleanOid looks like a Firestore ID)
+      if (cleanOid.length > 15) {
+        try {
+          const docSnap = await db.collection('orders').doc(cleanOid).get();
+          if (docSnap.exists) {
+            const data = docSnap.data();
+            const customerEmail = String(data?.email || data?.address?.email || data?.customerEmail || '').trim().toLowerCase();
+            if (customerEmail === targetEmail) {
+              orderData = { id: docSnap.id, ...data };
+            }
+          }
+        } catch (e) {
+          console.log("Doc fetch failed, moving to query search...");
         }
       }
 
-      // 2. Try finding by custom orderId field
+      // 2. Query search by variants of orderId field
       if (!orderData) {
-        const querySnap = await db.collection('orders')
-          .where('orderId', '==', oid.toUpperCase())
-          .limit(1)
-          .get();
+        // Search for both #0001 AND 0001, and case variations
+        const variants = [
+          hashedOid, 
+          cleanOid, 
+          hashedOid.toUpperCase(), 
+          cleanOid.toUpperCase(),
+          inputOid
+        ];
         
-        if (!querySnap.empty) {
-          const doc = querySnap.docs[0];
-          orderData = { id: doc.id, ...doc.data() };
+        // Remove duplicates and empty strings
+        const uniqueVariants = [...new Set(variants.filter(v => v))];
+        console.log(`🔍 Checking variations: ${JSON.stringify(uniqueVariants)}`);
+
+        for (const variant of uniqueVariants) {
+          const querySnap = await db.collection('orders')
+            .where('orderId', '==', variant)
+            .limit(5) // Get a few to check email in memory if needed
+            .get();
+          
+          if (!querySnap.empty) {
+            // Check emails for each result in the variant set
+            for (const doc of querySnap.docs) {
+              const data = doc.data();
+              const customerEmail = String(data?.email || data?.address?.email || data?.customerEmail || '').trim().toLowerCase();
+              if (customerEmail === targetEmail) {
+                orderData = { id: doc.id, ...data };
+                break;
+              }
+            }
+            if (orderData) break;
+          }
+        }
+      }
+
+      // 3. Fallback: Search by EMAIL first, then filter by Order ID in memory
+      // This is helpful if the field name is slightly off or casing is weird
+      if (!orderData) {
+        console.log("🔍 Fallback: Searching by email first...");
+        const emailOptions = ['email', 'address.email', 'customerEmail'];
+        for (const field of emailOptions) {
+          const emailSnap = await db.collection('orders')
+            .where(field, '==', targetEmail) // Match the lowercase target
+            .limit(20)
+            .get();
+            
+          if (!emailSnap.empty) {
+            for (const doc of emailSnap.docs) {
+              const data = doc.data();
+              const dbOid = String(data.orderId || '').trim();
+              const dbCleanOid = dbOid.replace(/^#/, '');
+              
+              if (dbOid === inputOid || dbOid === hashedOid || dbCleanOid === cleanOid || doc.id === cleanOid) {
+                orderData = { id: doc.id, ...data };
+                console.log(`✅ Fallback found order: ${dbOid}`);
+                break;
+              }
+            }
+          }
+          if (orderData) break;
         }
       }
 
       if (!orderData) {
-        return res.status(404).json({ error: "Order nahi mila. Please Order ID check karein." });
+        // One last check: maybe the user provided email is matched against the address sub-object
+        // Firestore where('address.email'...) works if address is a map. 
+        // Logic above handles it.
+        
+        return res.status(404).json({ 
+          error: "Order nahi mila. Please check Order ID aur Email.",
+          hint: "Bhai, ya to Order ID galat hai ya Email. Kya aapne Checkout ke waqt yahi details dali thi?" 
+        });
       }
 
-      // 3. Verify Email match
-      const customerEmail = (orderData.email || orderData.address?.email || orderData.customerEmail || '').toLowerCase();
+      // Verification already happened in the loops above, but one final safety check
+      const customerEmail = String(orderData.email || orderData.address?.email || orderData.customerEmail || '').trim().toLowerCase();
       
       if (customerEmail !== targetEmail) {
-        return res.status(403).json({ error: "Email address is Order ID se match nahi kar raha hai." });
+        console.log(`❌ Email mismatch: Found ${customerEmail}, expected ${targetEmail}`);
+        return res.status(403).json({ 
+          error: "Email match nahi kar raha.",
+          details: `Is Order ID ke liye Email "${customerEmail.substring(0, 3)}***${customerEmail.substring(customerEmail.indexOf('@'))}" registered hai.`
+        });
       }
 
       // Return order (sanitized - remove sensitive internal data if any, but usually orders are fine)
@@ -699,28 +787,48 @@ async function startServer() {
               cachedSettings = settingsSnap.docs[0].data();
               lastSettingsFetch = now;
             } else {
-              // Mark as fetched even if empty to avoid constant retries on empty DB
               lastSettingsFetch = now;
             }
           }
         } catch (dbErr: any) {
           console.error("Firestore settings fetch failed:", dbErr.message);
-          // If we hit a permission error or similar, don't spam.
-          // Set a long cooldown (2 minutes) before trying firestore again.
           lastSettingsFetch = now - (SETTINGS_CACHE_TTL - 120000); 
         }
       }
 
-      // Default settings fallback
       const effectiveSettings = cachedSettings || {
         storeName: 'The Ruby',
         fromEmail: process.env.RESEND_FROM_EMAIL || DEFAULT_FROM_EMAIL,
         resendApiKey: process.env.RESEND_API_KEY,
         smtpUser: process.env.SMTP_USER,
-        smtpPass: process.env.SMTP_PASS
+        smtpPass: process.env.SMTP_PASS,
+        otpMonthlyLimit: 9999
       };
 
-      // 2. Resolve From name and email
+      // 2. USAGE LIMIT CHECK (Safety Guard for Billing)
+      const monthlyLimit = effectiveSettings.otpMonthlyLimit || 9999;
+      const currentMonth = new Date().toISOString().substring(0, 7); // "YYYY-MM"
+      
+      if (db) {
+        try {
+          const usageRef = db.collection('system_stats').doc('communications');
+          const usageSnap = await usageRef.get();
+          const usageData = usageSnap.data() || {};
+          const currentUsage = usageData[currentMonth] || 0;
+
+          if (currentUsage >= monthlyLimit) {
+            console.warn(`🛑 LIMIT REACHED: Monthly OTP limit (${monthlyLimit}) hit for ${currentMonth}. Blocking send.`);
+            return res.status(429).json({ 
+              error: "Monthly Limit Reached", 
+              message: `Bhai, safety limit (${monthlyLimit}) hit ho gayi hai taaki extra charges na lagein. Admin Panel -> Settings -> Security mein jaakar limit badhaein.` 
+            });
+          }
+        } catch (limitErr) {
+          console.error("Usage limit check bypassed due to error:", limitErr);
+        }
+      }
+
+      // 3. Resolve From name and email
       const smtpUser = effectiveSettings.smtpUser || process.env.SMTP_USER;
       const smtpPass = effectiveSettings.smtpPass || process.env.SMTP_PASS;
       const apiKey = effectiveSettings.resendApiKey || process.env.RESEND_API_KEY || currentResendApiKey;
@@ -774,6 +882,15 @@ async function startServer() {
           });
 
           console.log("✅ GMAIL SENT:", result.messageId);
+          
+          // Increment Usage Counter
+          if (db) {
+            const currentMonth = new Date().toISOString().substring(0, 7);
+            db.collection('system_stats').doc('communications').set({
+              [currentMonth]: admin.firestore.FieldValue.increment(1)
+            }, { merge: true }).catch(e => console.error("Stats increment failed:", e));
+          }
+
           return res.json({ id: result.messageId, provider: 'smtp' });
         } catch (smtpErr: any) {
           console.error("❌ GMAIL ERROR:", smtpErr.message);
@@ -818,6 +935,13 @@ async function startServer() {
       console.log("--- Resend API Attempt ---");
       const { data, error } = await dynamicResend.emails.send(emailPayload);
       
+      if (!error && db) {
+        const currentMonth = new Date().toISOString().substring(0, 7);
+        db.collection('system_stats').doc('communications').set({
+          [currentMonth]: admin.firestore.FieldValue.increment(1)
+        }, { merge: true }).catch(e => console.error("Stats increment failed:", e));
+      }
+
       if (error) {
         console.error("Resend API Error Detail:", JSON.stringify(error, null, 2));
         let errorMessage = (error as any).message || "Resend failed to send email";
@@ -1054,25 +1178,35 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+    console.log("🛠️  Initializing Vite Development Server...");
+    try {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+      console.log("✅ Vite Middleware applied.");
+    } catch (e) {
+      console.error("❌ Vite Initialization Failed:", e);
+    }
   } else {
+    console.log("📦 Serving production build...");
     const distPath = path.join(process.cwd(), 'dist');
     if (fs.existsSync(distPath)) {
       app.use(express.static(distPath));
       app.get('*', (req, res) => {
         res.sendFile(path.join(distPath, 'index.html'));
       });
+      console.log("✅ Production static middleware applied.");
     } else {
       app.get('*', (req, res) => {
         res.status(404).send("Bhai, 'dist' folder nahi mila. App build nahi hui hai. AI Studio mein 'compile_applet' run karein.");
       });
+      console.warn("⚠️  dist folder missing in production mode.");
     }
   }
 
+  console.log("🔗 Binding Global Error Handler...");
   // Global Error Handler
   app.use((err: any, req: any, res: any, next: any) => {
     console.error("🔥 Global Server Error:", err);
@@ -1083,8 +1217,9 @@ async function startServer() {
     });
   });
 
+  console.log(`📡 Attempting to listen on port ${PORT}...`);
   httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`✅ SERVER IS LIVE: http://localhost:${PORT}`);
   });
 }
 

@@ -426,7 +426,7 @@ export default function Checkout() {
                       <div style="text-align: center; border-top: 1px solid #F0F0F0; padding-top: 40px;">
                         <p style="font-size: 14px; color: #9CA3AF; margin-bottom: 24px;">Need help with your order? Reply to this email or visit our support center.</p>
                         <div style="margin-bottom: 32px;">
-                          <a href="${window.location.origin}/profile" style="display: inline-block; background-color: #1A2C54; color: #FFFFFF; padding: 18px 36px; border-radius: 16px; text-decoration: none; font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; box-shadow: 0 10px 20px -5px rgba(26,44,84,0.3);">Track Your Order</a>
+                          <a href="${window.location.origin}/track/${finalOrderData.orderId.replace('#', '')}?email=${finalOrderData.address.email}" style="display: inline-block; background-color: #1A2C54; color: #FFFFFF; padding: 18px 36px; border-radius: 16px; text-decoration: none; font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; box-shadow: 0 10px 20px -5px rgba(26,44,84,0.3);">Track Your Order</a>
                         </div>
                         <p style="font-size: 16px; font-weight: bold; color: #1A2C54; margin: 0;">Happy Shopping!</p>
                         <p style="font-size: 14px; color: #E11D48; font-weight: bold; margin: 4px 0 0 0;">Team ${settingsData.storeName || 'The Ruby'}</p>
