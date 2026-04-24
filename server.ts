@@ -1002,7 +1002,7 @@ async function startServer() {
       // Check if OneSignal returned a success status but with subscription errors
       if (responseData.errors && Array.isArray(responseData.errors)) {
         const errorMsg = responseData.errors.join(', ');
-        if (errorMsg.includes("not subscribed") || errorMsg.includes("no users")) {
+        if (errorMsg.includes("not subscribed") || errorMsg.includes("no users") || errorMsg.includes("players are not subscribed")) {
           return res.json({ 
             success: true, 
             warning: "Bhai, API keys sahi hain, par abhi tak koi user Subscribed nahi hai (No one clicked Allow yet). Pehle app khol kar notifications 'Allow' kijiye taaki msg jaye.", 
@@ -1022,7 +1022,7 @@ async function startServer() {
       let userFriendlyError = "Broadcast notification fail ho gaya. 🔔";
       let hint = "";
 
-      if (errorMsg.includes("not subscribed") || errorMsg.includes("no users") || errorMsg.includes("All Subscribed Users")) {
+      if (errorMsg.includes("not subscribed") || errorMsg.includes("no users") || errorMsg.includes("players are not subscribed")) {
         console.warn("OneSignal Broadcast Warning: No subscribed users yet.");
         return res.json({ 
           success: true, 
@@ -1071,13 +1071,23 @@ async function startServer() {
       };
 
       const response = await sendOneSignalNotification(notification);
-      res.json({ success: true, id: response.data.id });
+      const responseData = response.data;
+      console.log(`OneSignal targeted response for ${userId}:`, responseData);
+
+      if (responseData.errors && Array.isArray(responseData.errors)) {
+        const errorMsg = responseData.errors.join(', ');
+        if (errorMsg.includes("not subscribed") || errorMsg.includes("not found") || errorMsg.includes("players are not subscribed")) {
+          return res.json({ success: true, warning: "User not yet subscribed to push notifications.", id: null });
+        }
+      }
+
+      res.json({ success: true, id: responseData.id });
     } catch (error: any) {
       const errorData = error.response?.data;
       const errorMsg = errorData?.errors ? (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : JSON.stringify(errorData.errors)) : error.message;
 
       // Specific user error: usually means user hasn't accepted push permissions yet or synced yet
-      if (errorMsg.includes("not subscribed") || errorMsg.includes("not found")) {
+      if (errorMsg.includes("not subscribed") || errorMsg.includes("not found") || errorMsg.includes("players are not subscribed")) {
         console.warn(`OneSignal Targeted Push Warning for ${userId}:`, errorMsg);
         return res.json({ success: true, warning: "User not yet subscribed to push notifications.", id: null });
       }
@@ -1116,15 +1126,28 @@ async function startServer() {
       };
 
       const response = await sendOneSignalNotification(notification);
-      res.json({ success: true, id: response.data.id });
+      const responseData = response.data;
+      console.log(`OneSignal admin response:`, responseData);
+
+      if (responseData.errors && Array.isArray(responseData.errors)) {
+        const errorMsg = responseData.errors.join(', ');
+        if (errorMsg.includes("not subscribed") || errorMsg.includes("no users") || errorMsg.includes("players are not subscribed")) {
+          return res.json({ success: true, warning: "Bhai, koi bhi Admin abhi subscribed nahi hai (No admin has 'Allow' notifications yet).", id: null });
+        }
+      }
+
+      res.json({ success: true, id: responseData.id });
     } catch (error: any) {
       const errorData = error.response?.data;
+      const errorMsg = errorData?.errors ? (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : JSON.stringify(errorData.errors)) : error.message;
+      
       console.error("OneSignal Admin Push Error Detail:", JSON.stringify(errorData || error.message, null, 2));
+
+      if (errorMsg.includes("not subscribed") || errorMsg.includes("no users") || errorMsg.includes("players are not subscribed")) {
+        return res.json({ success: true, warning: "Bhai, koi bhi Admin abhi subscribed nahi hai.", id: null });
+      }
       
       let userFriendlyError = "Admin notification fail ho gaya.";
-      if (errorData?.errors) {
-        userFriendlyError = `OneSignal Error: ${errorData.errors.join(', ')}`;
-      }
 
       res.status(500).json({ 
         error: userFriendlyError,
