@@ -186,13 +186,27 @@ async function sendOneSignalNotification(notification: any, config?: { appId?: s
   if (!appId || isPlaceholder(appId)) {
     if (db) {
       try {
-        const settingsSnap = await db.collection('settings').limit(1).get();
-        if (!settingsSnap.empty) {
-          const settings = settingsSnap.docs[0].data();
+        // Try 'general' doc first, as it's the standard for settings
+        const settingsDoc = await db.collection('settings').doc('general').get();
+        if (settingsDoc.exists) {
+          const settings = settingsDoc.data();
           if (settings.oneSignalAppId && !isPlaceholder(settings.oneSignalAppId)) {
             appId = String(settings.oneSignalAppId).trim();
             restKey = String(settings.oneSignalRestApiKey || restKey || '').trim();
-            console.log("OneSignal: Using configuration from Firestore 'settings' collection.");
+            console.log(`OneSignal: Loaded config from settings/general (${appId.substring(0, 8)}...)`);
+          }
+        }
+        
+        // Fallback to searching collection if doc ID isn't exactly 'general'
+        if (!appId || isPlaceholder(appId)) {
+          const settingsSnap = await db.collection('settings').limit(1).get();
+          if (!settingsSnap.empty) {
+            const settings = settingsSnap.docs[0].data();
+            if (settings.oneSignalAppId && !isPlaceholder(settings.oneSignalAppId)) {
+              appId = String(settings.oneSignalAppId).trim();
+              restKey = String(settings.oneSignalRestApiKey || restKey || '').trim();
+              console.log(`OneSignal: Loaded config from settings collection (${appId.substring(0, 8)}...)`);
+            }
           }
         }
       } catch (e: any) {
@@ -204,9 +218,11 @@ async function sendOneSignalNotification(notification: any, config?: { appId?: s
   // 2. Fallback to Environment Variables (Static settings)
   if (!appId || isPlaceholder(appId)) {
     appId = (process.env.ONESIGNAL_APP_ID || process.env.VITE_ONESIGNAL_APP_ID || '').trim();
-    restKey = (restKey || process.env.ONESIGNAL_REST_API_KEY || '').trim();
+    if (!restKey || isPlaceholder(restKey)) {
+      restKey = (process.env.ONESIGNAL_REST_API_KEY || '').trim();
+    }
     if (appId && !isPlaceholder(appId)) {
-      console.log("OneSignal: Using configuration from Environment Variables (Secrets).");
+      console.log(`OneSignal: Using configuration from Environment Variables (${appId.substring(0, 8)}...)`);
     }
   }
 

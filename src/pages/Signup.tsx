@@ -81,13 +81,7 @@ export default function Signup() {
       
       await setPersistence(auth, browserLocalPersistence);
 
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      const isStandalone = (window as any).navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
-
-      if (isMobile || isStandalone) {
-        console.log("APK/Mobile detected, initiating redirect signup...");
-        await signInWithRedirect(auth, provider);
-      } else {
+      try {
         const { user } = await signInWithPopup(auth, provider);
         const userDoc = await getDoc(doc(db, 'users', user.uid));
         if (!userDoc.exists()) {
@@ -102,6 +96,15 @@ export default function Signup() {
         }
         toast.success("successfully account created 🎉", { position: 'bottom-center', duration: 5000 });
         navigate('/');
+      } catch (popupError: any) {
+        if (popupError.code === 'auth/popup-blocked' || 
+            popupError.code === 'auth/operation-not-supported-in-this-environment' ||
+            popupError.code === 'auth/cancelled-popup-request') {
+          console.log("Popup blocked or not supported, falling back to redirect...");
+          await signInWithRedirect(auth, provider);
+        } else {
+          throw popupError;
+        }
       }
     } catch (error: any) {
       console.error("Login error:", error);

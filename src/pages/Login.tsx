@@ -37,9 +37,10 @@ export default function Login() {
     };
     fetchSettings();
 
-    // Handle Redirect Result
+    // Handle Redirect Result (Fallback)
     const handleRedirect = async () => {
       try {
+        // Only run if we actually have a redirect result pending
         const result = await getRedirectResult(auth);
         if (result?.user) {
           const user = result.user;
@@ -59,6 +60,7 @@ export default function Login() {
         }
       } catch (error: any) {
         console.error("Redirect result error:", error);
+        // Don't show toast for "no result" errors
       }
     };
     handleRedirect();
@@ -70,21 +72,13 @@ export default function Login() {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ 
         prompt: 'select_account',
-        // Important for some webviews
         display: 'touch'
       });
       
-      // Mandatory for Native Apps persistence
       await setPersistence(auth, browserLocalPersistence);
 
-      // Detect if standalone/webview
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      const isStandalone = (window as any).navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
-
-      if (isMobile || isStandalone) {
-        console.log("APK/Mobile detected, initiating redirect login...");
-        await signInWithRedirect(auth, provider);
-      } else {
+      // Best practice for WebViews: Try popup first, fallback to redirect
+      try {
         const { user } = await signInWithPopup(auth, provider);
         const userDoc = await getDoc(doc(db, 'users', user.uid));
         if (!userDoc.exists()) {
@@ -99,6 +93,15 @@ export default function Login() {
         }
         toast.success("Welcome back to The Ruby!");
         navigate('/');
+      } catch (popupError: any) {
+        if (popupError.code === 'auth/popup-blocked' || 
+            popupError.code === 'auth/operation-not-supported-in-this-environment' ||
+            popupError.code === 'auth/cancelled-popup-request') {
+          console.log("Popup blocked or not supported, falling back to redirect...");
+          await signInWithRedirect(auth, provider);
+        } else {
+          throw popupError;
+        }
       }
     } catch (error: any) {
       console.error("Login error:", error);
