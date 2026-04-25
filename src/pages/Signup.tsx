@@ -47,6 +47,7 @@ export default function Signup() {
     const handleRedirect = async () => {
       try {
         const result = await getRedirectResult(auth);
+        console.log("Checking signup redirect result:", result);
         if (result?.user) {
           const user = result.user;
           const userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -81,29 +82,36 @@ export default function Signup() {
       
       await setPersistence(auth, browserLocalPersistence);
 
-      try {
-        const { user } = await signInWithPopup(auth, provider);
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (!userDoc.exists()) {
-          await setDoc(doc(db, 'users', user.uid), {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            role: 'user',
-            isVerified: true,
-            createdAt: new Date().toISOString()
-          });
-        }
-        toast.success("successfully account created 🎉", { position: 'bottom-center', duration: 5000 });
-        navigate('/');
-      } catch (popupError: any) {
-        if (popupError.code === 'auth/popup-blocked' || 
-            popupError.code === 'auth/operation-not-supported-in-this-environment' ||
-            popupError.code === 'auth/cancelled-popup-request') {
-          console.log("Popup blocked or not supported, falling back to redirect...");
-          await signInWithRedirect(auth, provider);
-        } else {
-          throw popupError;
+      const isWebView = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || 
+                       (window as any).navigator.standalone || 
+                       window.matchMedia('(display-mode: standalone)').matches;
+
+      if (isWebView) {
+        console.log("WebView/App detected, using redirect...");
+        await signInWithRedirect(auth, provider);
+      } else {
+        try {
+          const { user } = await signInWithPopup(auth, provider);
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (!userDoc.exists()) {
+            await setDoc(doc(db, 'users', user.uid), {
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              role: 'user',
+              isVerified: true,
+              createdAt: new Date().toISOString()
+            });
+          }
+          toast.success("successfully account created 🎉", { position: 'bottom-center', duration: 5000 });
+          navigate('/');
+        } catch (popupError: any) {
+          if (popupError.code === 'auth/popup-blocked' || 
+              popupError.code === 'auth/operation-not-supported-in-this-environment') {
+            await signInWithRedirect(auth, provider);
+          } else {
+            throw popupError;
+          }
         }
       }
     } catch (error: any) {

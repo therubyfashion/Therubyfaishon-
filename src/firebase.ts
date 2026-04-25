@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getMessaging } from 'firebase/messaging';
@@ -8,6 +8,13 @@ import firebaseConfig from '../firebase-applet-config.json';
 const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
+
+// Set persistence globally
+if (typeof window !== 'undefined') {
+  setPersistence(auth, browserLocalPersistence).catch(err => {
+    console.error("Persistence failed:", err);
+  });
+}
 
 // Use initializeFirestore with experimentalForceLongPolling to bypass potential WebSocket blockages
 export const db = initializeFirestore(app, {

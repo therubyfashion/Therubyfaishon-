@@ -40,8 +40,8 @@ export default function Login() {
     // Handle Redirect Result (Fallback)
     const handleRedirect = async () => {
       try {
-        // Only run if we actually have a redirect result pending
         const result = await getRedirectResult(auth);
+        console.log("Checking redirect result:", result);
         if (result?.user) {
           const user = result.user;
           const userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -60,7 +60,9 @@ export default function Login() {
         }
       } catch (error: any) {
         console.error("Redirect result error:", error);
-        // Don't show toast for "no result" errors
+        if (error.code === 'auth/account-exists-with-different-credential') {
+          toast.error("Account linked to another method. Use that to login.");
+        }
       }
     };
     handleRedirect();
@@ -75,32 +77,39 @@ export default function Login() {
         display: 'touch'
       });
       
+      // Strict persistence check
       await setPersistence(auth, browserLocalPersistence);
 
-      // Best practice for WebViews: Try popup first, fallback to redirect
-      try {
-        const { user } = await signInWithPopup(auth, provider);
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (!userDoc.exists()) {
-          await setDoc(doc(db, 'users', user.uid), {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            role: 'user',
-            isVerified: true,
-            createdAt: new Date().toISOString()
-          });
-        }
-        toast.success("Welcome back to The Ruby!");
-        navigate('/');
-      } catch (popupError: any) {
-        if (popupError.code === 'auth/popup-blocked' || 
-            popupError.code === 'auth/operation-not-supported-in-this-environment' ||
-            popupError.code === 'auth/cancelled-popup-request') {
-          console.log("Popup blocked or not supported, falling back to redirect...");
-          await signInWithRedirect(auth, provider);
-        } else {
-          throw popupError;
+      const isWebView = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || 
+                       (window as any).navigator.standalone || 
+                       window.matchMedia('(display-mode: standalone)').matches;
+
+      if (isWebView) {
+        console.log("WebView/App detected, using redirect...");
+        await signInWithRedirect(auth, provider);
+      } else {
+        try {
+          const { user } = await signInWithPopup(auth, provider);
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (!userDoc.exists()) {
+            await setDoc(doc(db, 'users', user.uid), {
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              role: 'user',
+              isVerified: true,
+              createdAt: new Date().toISOString()
+            });
+          }
+          toast.success("Welcome back!");
+          navigate('/');
+        } catch (popupError: any) {
+          if (popupError.code === 'auth/popup-blocked' || 
+              popupError.code === 'auth/operation-not-supported-in-this-environment') {
+            await signInWithRedirect(auth, provider);
+          } else {
+            throw popupError;
+          }
         }
       }
     } catch (error: any) {
