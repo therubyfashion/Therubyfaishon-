@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword } from 'firebase/auth';
+import { 
+  signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
+  GoogleAuthProvider, 
+  signInWithEmailAndPassword,
+  setPersistence,
+  browserLocalPersistence 
+} from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { toast } from 'sonner';
@@ -28,32 +36,70 @@ export default function Login() {
       }
     };
     fetchSettings();
-  }, []);
+
+    // Handle Redirect Result
+    const handleRedirect = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result?.user) {
+          const user = result.user;
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (!userDoc.exists()) {
+            await setDoc(doc(db, 'users', user.uid), {
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              role: 'user',
+              isVerified: true,
+              createdAt: new Date().toISOString()
+            });
+          }
+          toast.success("Welcome back to The Ruby!");
+          navigate('/');
+        }
+      } catch (error: any) {
+        console.error("Redirect result error:", error);
+      }
+    };
+    handleRedirect();
+  }, [navigate]);
 
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
       const provider = new GoogleAuthProvider();
-      // Add custom parameters to handle some webview issues
-      provider.setCustomParameters({ prompt: 'select_account' });
+      provider.setCustomParameters({ 
+        prompt: 'select_account',
+        // Important for some webviews
+        display: 'touch'
+      });
       
-      const { user } = await signInWithPopup(auth, provider);
-      
-      // Ensure profile exists
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      if (!userDoc.exists()) {
-        await setDoc(doc(db, 'users', user.uid), {
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName,
-          role: 'user',
-          isVerified: true, // Google accounts are pre-verified
-          createdAt: new Date().toISOString()
-        });
+      // Mandatory for Native Apps persistence
+      await setPersistence(auth, browserLocalPersistence);
+
+      // Detect if standalone/webview
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const isStandalone = (window as any).navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+
+      if (isMobile || isStandalone) {
+        console.log("APK/Mobile detected, initiating redirect login...");
+        await signInWithRedirect(auth, provider);
+      } else {
+        const { user } = await signInWithPopup(auth, provider);
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (!userDoc.exists()) {
+          await setDoc(doc(db, 'users', user.uid), {
+            uid: user.uid,
+            email: user.email,
+            displayName: user.displayName,
+            role: 'user',
+            isVerified: true,
+            createdAt: new Date().toISOString()
+          });
+        }
+        toast.success("Welcome back to The Ruby!");
+        navigate('/');
       }
-      
-      toast.success("Welcome back to The Ruby!");
-      navigate('/');
     } catch (error: any) {
       console.error("Login error:", error);
       if (error.code === 'auth/popup-closed-by-user') {

@@ -180,7 +180,7 @@ async function sendOneSignalNotification(notification: any, config?: { appId?: s
   let appId = (config?.appId || '').trim();
   let restKey = (config?.restKey || '').trim();
   
-  const isPlaceholder = (val: string) => !val || val === 'dummy-id' || val === 'YOUR_ONESIGNAL_APP_ID' || val === 'placeholder' || val.length < 10;
+  const isPlaceholder = (val: string) => !val || val === 'dummy-id' || val === 'YOUR_ONESIGNAL_APP_ID' || val === 'placeholder';
 
   // 1. If overrides not provided, try Firestore first (Dynamic settings)
   if (!appId || isPlaceholder(appId)) {
@@ -210,17 +210,25 @@ async function sendOneSignalNotification(notification: any, config?: { appId?: s
     }
   }
 
-  if (isPlaceholder(appId) || (restKey && isPlaceholder(restKey))) {
-    throw new Error("OneSignal is not configured properly.");
+  if (isPlaceholder(appId)) {
+    console.error("❌ OneSignal ERROR: App ID is missing or a placeholder.");
+    throw new Error("OneSignal is not configured properly: App ID is missing.");
+  }
+
+  if (!restKey || isPlaceholder(restKey)) {
+    console.error("❌ OneSignal ERROR: REST API Key is missing or a placeholder.");
+    throw new Error("OneSignal is not configured properly: REST API Key is missing.");
   }
 
   // Clean the key (remove 'Basic ' if user accidentally copied it)
-  const cleanRestKey = restKey ? restKey.replace(/Basic\s+/i, '').trim() : '';
+  const cleanRestKey = restKey.replace(/Basic\s+/i, '').trim();
 
-  const headers: any = { 'Content-Type': 'application/json' };
-  if (cleanRestKey) {
-    headers['Authorization'] = `Basic ${cleanRestKey}`;
-  }
+  const headers: any = { 
+    'Content-Type': 'application/json',
+    'Authorization': `Basic ${cleanRestKey}`
+  };
+
+  console.log(`🚀 Sending OneSignal notification (Target App ID: ${appId.substring(0, 8)}...)`);
 
   return await axios.post('https://onesignal.com/api/v1/notifications', 
     { ...notification, app_id: appId },
