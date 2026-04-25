@@ -85,6 +85,7 @@ service cloud.firestore {
         (
           (request.auth.token.email != null && (
             request.auth.token.email == "mdsagaransari65670@gmail.com" ||
+            request.auth.token.email.lower() == "mdsagaransari65670@gmail.com" ||
             request.auth.token.email.lower().matches(".*rubi.*")
           )) ||
           (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
@@ -156,12 +157,12 @@ service cloud.firestore {
 
     function isValidNotification(data) {
       return data.keys().hasAll(['title', 'body', 'type', 'createdAt']) &&
-             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
-             data.body is string && data.body.size() > 0 && data.body.size() < 1000 &&
-             data.type in ['all', 'active', 'new'] &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 500 &&
+             data.body is string && data.body.size() > 0 && data.body.size() < 2000 &&
+             data.type in ['all', 'active', 'new', 'customer'] &&
              data.createdAt is string &&
-             (!('sentBy' in data) || data.sentBy is string) &&
-             (!('status' in data) || data.status is string);
+             (!('sentBy' in data) || data.sentBy == null || data.sentBy is string) &&
+             (!('status' in data) || data.status == null || data.status is string);
     }
 
     // Rules

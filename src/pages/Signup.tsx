@@ -38,6 +38,9 @@ export default function Signup() {
     setLoading(true);
     try {
       const provider = new GoogleAuthProvider();
+      // Add custom parameters to handle some webview issues
+      provider.setCustomParameters({ prompt: 'select_account' });
+
       const { user } = await signInWithPopup(auth, provider);
       
       // Ensure profile exists

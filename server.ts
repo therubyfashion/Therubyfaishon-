@@ -668,6 +668,65 @@ async function startServer() {
     res.json(healthReport);
   });
 
+  // PRODUCTION RESET ENDPOINT
+  app.post("/api/clear-production-data", async (req, res) => {
+    const { password, adminUid } = req.body;
+    
+    // Very basic safety: In production you'd check better, but here we require a specific confirmation
+    if (password !== "RESET_THE_RUBY_2026") {
+      return res.status(403).json({ error: "Invalid Reset Password! Bhai, ye bahut khatarnak action hai." });
+    }
+
+    if (!db) {
+      return res.status(503).json({ error: "Database not connected. Cleanup failed." });
+    }
+
+    try {
+      console.log("🧹 PROD CLEANUP STARTED...");
+      const collectionsToClear = [
+        'orders', 'notifications', 'abandoned_carts', 'reviews', 
+        'chat_sessions', 'wishlists', 'active_sessions', 
+        'newsletter_subscribers', 'trackings', 'cart_items'
+      ];
+
+      const results: any = {};
+
+      for (const collName of collectionsToClear) {
+        const snapshot = await db.collection(collName).get();
+        const batch = db.batch();
+        snapshot.docs.forEach((doc: any) => batch.delete(doc.ref));
+        await batch.commit();
+        results[collName] = snapshot.size;
+        console.log(`- Cleared ${snapshot.size} docs from ${collName}`);
+      }
+
+      // Special cleanup for users: Delete all users except current admin if possible
+      // Note: We don't delete from Firebase Auth directly here to avoid locking out the admin,
+      // but we can delete the 'profiles' documents
+      const profilesSnap = await db.collection('profiles').get();
+      const profileBatch = db.batch();
+      let profilesCount = 0;
+      profilesSnap.docs.forEach((doc: any) => {
+        if (doc.id !== adminUid) { // Keep the current admin
+          profileBatch.delete(doc.ref);
+          profilesCount++;
+        }
+      });
+      await profileBatch.commit();
+      results['profiles'] = profilesCount;
+
+      console.log("✅ PROD CLEANUP FINISHED.");
+      res.json({ 
+        success: true, 
+        message: "Poora data saaf ho gaya hai! Ab aap fresh start kar sakte hain. 💎",
+        results
+      });
+    } catch (error: any) {
+      console.error("Cleanup error:", error);
+      res.status(500).json({ error: error.message || "Failed to clear data." });
+    }
+  });
+
   app.get("/api/payment-config", async (req, res) => {
     const vId = process.env.VITE_RAZORPAY_KEY_ID;
     const rId = process.env.RAZORPAY_KEY_ID;

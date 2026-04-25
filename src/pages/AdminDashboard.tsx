@@ -1613,6 +1613,45 @@ export default function AdminDashboard() {
     }
   };
 
+  const [isResettingData, setIsResettingData] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetPassword, setResetPassword] = useState('');
+
+  const handleProductionReset = async () => {
+    if (resetPassword !== "RESET_THE_RUBY_2026") {
+      toast.error("Galat Password! Reset karne ke liye sahi password daalein.");
+      return;
+    }
+
+    setIsResettingData(true);
+    try {
+      const response = await fetch('/api/clear-production-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          password: resetPassword,
+          adminUid: auth.currentUser?.uid
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        toast.success(data.message, { duration: 6000 });
+        setShowResetConfirm(false);
+        setResetPassword('');
+        // Trigger a reload to refresh all data counts
+        setTimeout(() => window.location.reload(), 2000);
+      } else {
+        toast.error(data.error || "Reset failed");
+      }
+    } catch (error) {
+      console.error("Reset error:", error);
+      toast.error("Cleanup failed due to server error.");
+    } finally {
+      setIsResettingData(false);
+    }
+  };
+
   const handlePromptPermission = () => {
     const OneSignal = (window as any).OneSignal;
     if (OneSignal?.Notifications) {
@@ -6973,7 +7012,17 @@ export default function AdminDashboard() {
                             </div>
                           </div>
                           
-                          <p className="text-[10px] text-gray-400 leading-relaxed italic">
+                          <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 space-y-2">
+                             <h4 className="text-[11px] font-bold text-amber-700 uppercase tracking-widest flex items-center">
+                               <Smartphone size={14} className="mr-2" /> Native App (APK) Setup
+                             </h4>
+                             <p className="text-[10px] text-amber-600 font-medium leading-relaxed">
+                               Bhai, agar aap APK ke liye notifications chahte hain, toh OneSignal Dashboard mein <b>Google Android (FCM)</b> setup zaroori hai. 
+                               Wahan aapko <b>Firebase Console</b> se nikali hui <b>Service Account JSON</b> file upload karni hogi.
+                             </p>
+                           </div>
+                           
+                           <p className="text-[10px] text-gray-400 leading-relaxed italic">
                             Get these from OneSignal Dashboard &gt; Settings &gt; Keys & IDs.
                           </p>
 
@@ -7484,6 +7533,60 @@ export default function AdminDashboard() {
                       </motion.div>
                     )}
                   </AnimatePresence>
+
+                  {/* Production Reset (Danger Zone) */}
+                  <div className="mt-12 pt-12 border-t-2 border-dashed border-gray-100">
+                    <div className="bg-red-50 border border-red-100 rounded-3xl p-6 md:p-8 space-y-6">
+                      <div className="flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
+                        <div className="flex gap-4">
+                          <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center shrink-0">
+                            <AlertTriangle size={24} />
+                          </div>
+                          <div>
+                            <h4 className="text-lg font-black text-red-900 tracking-tight">Danger Zone: Production Reset</h4>
+                            <p className="text-xs text-red-700 leading-relaxed font-medium max-w-md">
+                              Bhai, ye feature test data (orders, abandoned carts, users) ko saaf karne ke liye hai. Ek baar reset karne par pura data permanently delete ho jayega. Sirf production launch se pehle chalayein!
+                            </p>
+                          </div>
+                        </div>
+                        
+                        {!showResetConfirm ? (
+                          <button 
+                            onClick={() => setShowResetConfirm(true)}
+                            className="w-full md:w-auto px-8 py-4 bg-red-600 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-red-200 active:scale-95 flex items-center justify-center gap-2"
+                          >
+                            <Trash2 size={16} />
+                            Clean Store Data
+                          </button>
+                        ) : (
+                          <div className="w-full md:w-auto flex flex-col sm:flex-row gap-2 bg-white p-2 rounded-2xl border border-red-200 shadow-sm">
+                            <input 
+                              type="password"
+                              placeholder="Enter RESET Password"
+                              value={resetPassword}
+                              onChange={(e) => setResetPassword(e.target.value)}
+                              className="px-4 py-3 bg-gray-50 border-none rounded-xl text-xs font-bold focus:ring-2 focus:ring-red-200 transition-all outline-none"
+                            />
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={handleProductionReset}
+                                disabled={isResettingData}
+                                className="flex-1 sm:flex-none px-6 py-3 bg-red-600 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-black transition-all disabled:opacity-50"
+                              >
+                                {isResettingData ? 'Cleaning...' : 'CONFIRM RESET'}
+                              </button>
+                              <button 
+                                onClick={() => { setShowResetConfirm(false); setResetPassword(''); }}
+                                className="px-4 py-3 bg-gray-100 text-gray-500 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-gray-200 transition-all"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
