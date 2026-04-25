@@ -9,11 +9,15 @@ const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 
-// Set persistence globally
+// Set persistence globally with a fail-safe check
 if (typeof window !== 'undefined') {
-  setPersistence(auth, browserLocalPersistence).catch(err => {
-    console.error("Persistence failed:", err);
-  });
+  setPersistence(auth, browserLocalPersistence)
+    .then(() => {
+      console.log("✅ Auth persistence set to local storage.");
+    })
+    .catch(err => {
+      console.error("❌ Persistence failed:", err);
+    });
 }
 
 // Use initializeFirestore with experimentalForceLongPolling to bypass potential WebSocket blockages

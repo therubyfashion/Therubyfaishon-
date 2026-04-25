@@ -43,13 +43,16 @@ export default function Signup() {
     };
     fetchSettings();
 
-    // Handle Redirect Result
+    // Global redirect handler for signup
     const handleRedirect = async () => {
       try {
+        console.log("Checking for Firebase signup redirect result...");
         const result = await getRedirectResult(auth);
-        console.log("Checking signup redirect result:", result);
+        
         if (result?.user) {
           const user = result.user;
+          console.log("Signup redirect success:", user.email);
+          
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (!userDoc.exists()) {
             await setDoc(doc(db, 'users', user.uid), {
@@ -61,14 +64,20 @@ export default function Signup() {
               createdAt: new Date().toISOString()
             });
           }
-          toast.success("Account created successfully!");
+          toast.success("Account created successfully! 🎉");
           navigate('/');
         }
       } catch (error: any) {
-        console.error("Redirect signup error:", error);
+        console.error("Signup Redirect Error:", error.code, error.message);
       }
     };
-    handleRedirect();
+
+    // Delay for storage stability
+    const timer = setTimeout(() => {
+      handleRedirect();
+    }, 1500);
+
+    return () => clearTimeout(timer);
   }, [navigate]);
 
   const handleGoogleLogin = async () => {
@@ -77,7 +86,8 @@ export default function Signup() {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ 
         prompt: 'select_account',
-        display: 'touch'
+        display: 'touch',
+        ux_mode: 'redirect'
       });
       
       await setPersistence(auth, browserLocalPersistence);
@@ -87,7 +97,7 @@ export default function Signup() {
                        window.matchMedia('(display-mode: standalone)').matches;
 
       if (isWebView) {
-        console.log("WebView/App detected, using redirect...");
+        console.log("🚀 App Detected: Forcing Redirect Mode for Signup...");
         await signInWithRedirect(auth, provider);
       } else {
         try {

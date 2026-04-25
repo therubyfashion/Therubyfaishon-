@@ -37,13 +37,16 @@ export default function Login() {
     };
     fetchSettings();
 
-    // Handle Redirect Result (Fallback)
+    // Global redirect handler to pick up results after redirect login
     const handleRedirect = async () => {
       try {
+        console.log("Checking for Firebase redirect result...");
         const result = await getRedirectResult(auth);
-        console.log("Checking redirect result:", result);
+        
         if (result?.user) {
           const user = result.user;
+          console.log("Redirect success for user:", user.email);
+          
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (!userDoc.exists()) {
             await setDoc(doc(db, 'users', user.uid), {
@@ -55,17 +58,27 @@ export default function Login() {
               createdAt: new Date().toISOString()
             });
           }
-          toast.success("Welcome back to The Ruby!");
+          toast.success("Welcome to The Ruby!");
           navigate('/');
         }
       } catch (error: any) {
-        console.error("Redirect result error:", error);
-        if (error.code === 'auth/account-exists-with-different-credential') {
-          toast.error("Account linked to another method. Use that to login.");
+        console.error("Redirect Error (Standard):", error.code, error.message);
+        
+        if (error.code === 'auth/missing-initial-state') {
+          console.warn("⚠️ Initial state was missing. This usually happens in WebViews if the storage is partitioned. Retrying with a direct approach.");
+          // No need to toast error, user might need to click login again
+        } else if (error.code === 'auth/account-exists-with-different-credential') {
+          toast.error("Account linked to another login method.");
         }
       }
     };
-    handleRedirect();
+
+    // Small delay to ensure Persistence is ready from firebase.ts
+    const timer = setTimeout(() => {
+      handleRedirect();
+    }, 1500);
+
+    return () => clearTimeout(timer);
   }, [navigate]);
 
   const handleGoogleLogin = async () => {
@@ -80,14 +93,27 @@ export default function Login() {
       // Strict persistence check
       await setPersistence(auth, browserLocalPersistence);
 
+      // For Median/GoNative specifically, we want to stay in the internal WebView
+      // These custom parameters help some WebViews identify the context
+      provider.setCustomParameters({ 
+        prompt: 'select_account',
+        display: 'touch',
+        // Median often likes a cleaner auth interface
+        ux_mode: 'redirect' 
+      });
+      
+      await setPersistence(auth, browserLocalPersistence);
+
+      // Detection for WebView
       const isWebView = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || 
                        (window as any).navigator.standalone || 
                        window.matchMedia('(display-mode: standalone)').matches;
 
       if (isWebView) {
-        console.log("WebView/App detected, using redirect...");
+        console.log("🚀 App/WebView detected: Using redirect mode for maximum reliability.");
         await signInWithRedirect(auth, provider);
       } else {
+        // Desktop/Regular Browser
         try {
           const { user } = await signInWithPopup(auth, provider);
           const userDoc = await getDoc(doc(db, 'users', user.uid));
