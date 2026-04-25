@@ -1696,33 +1696,33 @@ export default function AdminDashboard() {
           from: settings.fromEmail || undefined,
           subject: 'Test Email from The Ruby ✨',
           html: `
-            <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #FAFAFA; padding: 40px 20px; color: #1A2C54;">
-              <div style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 40px; padding: 60px; box-shadow: 0 20px 50px -20px rgba(0,0,0,0.08); border: 1px solid #F0F0F0;">
-                <div style="text-align: center; margin-bottom: 50px;">
-                  ${settings.storeLogo ? `<img src="${settings.storeLogo}" alt="${settings.storeName}" style="max-height: 60px; margin-bottom: 10px;">` : `<h1 style="font-size: 32px; font-weight: bold; letter-spacing: -1px; margin: 0; color: #E11D48;">${settings.storeName?.toUpperCase() || 'THE RUBY'}</h1>`}
-                </div>
-                
-                <div style="text-align: center; margin-bottom: 40px;">
-                  <div style="display: inline-block; background-color: #FDF2F8; color: #E11D48; padding: 12px 24px; border-radius: 100px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 24px;">Connection Test</div>
-                  <h2 style="font-size: 28px; font-weight: bold; margin: 0 0 16px 0; color: #1A2C54;">Email Integration Successful! 🚀</h2>
-                  <p style="font-size: 16px; color: #666666; line-height: 1.6; margin: 0;">This is a test email to verify your email configuration. If you're reading this, your store is ready to send professional notifications to your customers.</p>
-                </div>
+                  <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #000000; padding: 40px 20px; color: #FFFFFF; line-height: 1.5;">
+                    <div style="max-width: 500px; margin: 0 auto;">
+                      <div style="text-align: center; margin-bottom: 40px;">
+                        ${settings.storeLogo ? `<img src="${settings.storeLogo}" alt="Logo" style="width: 60px; height: 60px; object-fit: contain;">` : `
+                          <div style="width: 60px; height: 60px; background-color: #1A1A1A; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin: 0 auto;">
+                            <span style="color: #FFFFFF; font-weight: bold; font-size: 20px;">${(settings.storeName || 'R')[0]}</span>
+                          </div>
+                        `}
+                      </div>
+                      
+                      <div style="text-align: center; margin-bottom: 40px;">
+                        <h2 style="font-size: 24px; font-weight: 500; margin: 0 0 16px 0;">Email Integration Successful! 🚀</h2>
+                        <p style="font-size: 16px; color: #888888; line-height: 1.6; margin: 0;">This is a test email to verify your email configuration. If you're reading this, your store is ready to send professional notifications to your customers.</p>
+                      </div>
 
-                <div style="background-color: #F9FAFB; border-radius: 24px; padding: 32px; margin-bottom: 40px; border: 1px solid #F3F4F6;">
-                  <p style="font-size: 14px; color: #666666; margin: 0; text-align: center;">Your email service is correctly configured and the server is ready to handle requests.</p>
-                </div>
+                      <div style="background-color: #111111; border-radius: 8px; padding: 24px; text-align: center; border: 1px solid #1A1A1A;">
+                        <p style="font-size: 14px; color: #888888; margin: 0;">Your email service is correctly configured and the server is ready to handle requests.</p>
+                      </div>
 
-                <div style="text-align: center; border-top: 1px solid #F0F0F0; pt-40px;">
-                  <p style="font-size: 16px; font-weight: bold; color: #1A2C54; margin: 0;">The Ruby Admin Panel</p>
-                  <p style="font-size: 14px; color: #E11D48; font-weight: bold; margin: 4px 0 0 0;">System Notification</p>
-                </div>
-              </div>
-              
-              <div style="text-align: center; margin-top: 40px;">
-                <p style="font-size: 12px; color: #9CA3AF;">&copy; ${new Date().getFullYear()} ${settings.storeName || 'The Ruby'}. All rights reserved.</p>
-              </div>
-            </div>
-          `
+                      <div style="margin-top: 60px; text-align: center; border-top: 1px solid #1A1A1A; padding-top: 40px;">
+                        <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">The Ruby Admin Panel</p>
+                        <p style="font-size: 12px; color: #E11D48; font-weight: bold; margin: 4px 0 0 0;">System Notification</p>
+                        <p style="font-size: 11px; color: #444444; margin-top: 20px;">&copy; ${new Date().getFullYear()} ${settings.storeName || 'The Ruby'}. All rights reserved.</p>
+                      </div>
+                    </div>
+                  </div>
+                `
         })
       });
       
@@ -1852,20 +1852,37 @@ export default function AdminDashboard() {
               replyTo: settings.supportEmail || undefined,
               subject: `Order Delivered: ${order.orderId} ✨`,
               html: `
-                <div style="font-family: sans-serif; padding: 20px; color: #1A2C54; max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 20px;">
-                  <div style="text-align: center; margin-bottom: 20px;">
-                    <h2 style="color: #e11d48; margin: 0;">THE RUBY</h2>
+                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #000000; padding: 40px 20px; color: #FFFFFF; line-height: 1.5;">
+                  <div style="max-width: 500px; margin: 0 auto;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 40px;">
+                      <span style="font-size: 14px; font-weight: 500; color: #FFFFFF;">Order ${order.orderId}</span>
+                      <span style="font-size: 14px; font-weight: 500; color: #008060; text-transform: lowercase;">delivered</span>
+                    </div>
+
+                    <div style="text-align: center; margin-bottom: 40px;">
+                      <div style="width: 60px; height: 60px; background-color: #1A1A1A; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin: 0 auto;">
+                        <span style="font-size: 30px;">🎉</span>
+                      </div>
+                    </div>
+
+                    <div style="margin-bottom: 40px;">
+                      <h1 style="font-size: 24px; font-weight: 500; margin: 0 0 16px 0;">Package Delivered!</h1>
+                      <p style="font-size: 16px; color: #888888; margin: 0;">Hi ${order.address?.name || order.customerName || 'Customer'},</p>
+                      <p style="font-size: 16px; color: #888888; margin: 16px 0 0 0;">We're happy to inform you that your order <strong>${order.orderId}</strong> has been successfully delivered. We hope you love your new pieces!</p>
+                    </div>
+
+                    <div style="margin-bottom: 40px; text-align: center;">
+                      <a href="${window.location.origin}/contact" 
+                         style="display: block; background-color: #FFFFFF; color: #000000; padding: 18px; border-radius: 4px; text-decoration: none; font-size: 16px; font-weight: 500; text-align: center; margin-bottom: 16px;">
+                        Give Feedback
+                      </a>
+                    </div>
+
+                    <div style="margin-top: 60px; text-align: center; border-top: 1px solid #1A1A1A; padding-top: 40px;">
+                      <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">Thanks for shopping with ${settings.storeName || 'The Ruby'}</p>
+                      <p style="font-size: 11px; color: #444444; margin-top: 20px;">&copy; ${new Date().getFullYear()} ${settings.storeName || 'The Ruby'}. All rights reserved.</p>
+                    </div>
                   </div>
-                  <h1 style="color: #008060; text-align: center;">Package Delivered!</h1>
-                  <p>Hi ${order.address?.name || order.customerName || 'Customer'},</p>
-                  <p>We are happy to inform you that your order <strong>${order.orderId}</strong> has been successfully delivered! 🎉</p>
-                  <p>We hope you love your new Ruby pieces. If you need any assistance or have questions, our support team is always here to help.</p>
-                  
-                  <div style="background: #f6f6f7; padding: 20px; border-radius: 12px; margin: 20px 0; border: 1px solid #e1e3e5; text-align: center;">
-                    <p style="margin: 0 0 10px 0; font-size: 14px; font-weight: bold;">How was your experience?</p>
-                    <a href="${window.location.origin}/contact" style="display: inline-block; background: #008060; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">Give Feedback</a>
-                  </div>
-                  <p style="text-align: center; font-size: 13px; margin-top: 20px;">Thanks for shopping with <strong>The Ruby</strong>!</p>
                 </div>
               `
             })
@@ -1951,32 +1968,60 @@ export default function AdminDashboard() {
                 replyTo: settings.supportEmail || undefined,
                 subject: `Order Shipped: ${order.orderId} is on its way! 📦`,
                 html: `
-                  <div style="font-family: sans-serif; padding: 20px; color: #1A2C54; max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 20px;">
-                    <div style="text-align: center; margin-bottom: 20px;">
-                      <h2 style="color: #e11d48; margin: 0;">THE RUBY</h2>
-                    </div>
-                    <h1 style="color: #008060; text-align: center;">Your Order is Shipped!</h1>
-                    <p>Hi ${order.address?.name || order.customerName || 'Customer'},</p>
-                    <p>Good news! Your order <strong>${order.orderId}</strong> has been shipped and is on its way to you.</p>
-                    
-                    <div style="margin: 20px 0; border-top: 1px solid #eee;">
-                      ${itemsHtml}
-                    </div>
+                  <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #000000; padding: 40px 20px; color: #FFFFFF; line-height: 1.5;">
+                    <div style="max-width: 500px; margin: 0 auto;">
+                      <!-- Header -->
+                      <div style="display: flex; justify-content: space-between; margin-bottom: 40px;">
+                        <span style="font-size: 14px; font-weight: 500; color: #FFFFFF;">Order ${order.orderId}</span>
+                        <span style="font-size: 14px; font-weight: 500; color: #D1A054; text-transform: lowercase;">shipped</span>
+                      </div>
 
-                    <div style="display: flex; justify-content: space-between; padding: 10px 0; font-weight: bold;">
-                      <span>Total Amount Paid</span>
-                      <span style="color: #e11d48;">₹${(order.total || 0).toLocaleString()}</span>
-                    </div>
+                      <div style="text-align: center; margin-bottom: 40px;">
+                        <div style="width: 60px; height: 60px; background-color: #1A1A1A; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin: 0 auto;">
+                          <span style="font-size: 30px;">📦</span>
+                        </div>
+                      </div>
 
-                    <div style="background: #f6f6f7; padding: 20px; border-radius: 12px; margin: 20px 0; border: 1px solid #e1e3e5; text-align: center;">
-                      <p style="margin: 0 0 10px 0; font-size: 12px; color: #6d7175; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">Live Tracking</p>
-                      <p style="margin: 0 0 15px 0; font-size: 14px; color: #1A2C54;">You can track your order status in real-time using the button below:</p>
-                      <a href="${window.location.origin}/track/${order.orderId}?email=${encodeURIComponent(targetEmail)}" style="display: inline-block; background: #e11d48; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px;">Track My Order</a>
+                      <!-- Main Message -->
+                      <div style="margin-bottom: 40px;">
+                        <h1 style="font-size: 24px; font-weight: 500; margin: 0 0 16px 0;">Your Order is Shipped!</h1>
+                        <p style="font-size: 16px; color: #888888; margin: 0;">Hi ${order.address?.name || order.customerName || 'Customer'},</p>
+                        <p style="font-size: 16px; color: #888888; margin: 16px 0 0 0;">Good news! Your order <strong>${order.orderId}</strong> has been shipped and is on its way to you.</p>
+                      </div>
+
+                      <!-- Shipment Info -->
+                      <div style="background-color: #111111; border-radius: 8px; padding: 24px; border: 1px solid #1A1A1A; margin-bottom: 40px;">
+                        <div style="border-bottom: 1px solid #1A1A1A; padding-bottom: 16px; margin-bottom: 16px;">
+                          ${(order.items || []).map((item: any) => `
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                              <span style="font-size: 14px; color: #888888;">${item.name} × ${item.quantity}</span>
+                              <span style="font-size: 14px; color: #FFFFFF;">₹${item.price.toLocaleString()}</span>
+                            </div>
+                          `).join('')}
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-weight: 500;">
+                          <span style="font-size: 14px; color: #888888;">Total Amount</span>
+                          <span style="font-size: 14px; color: #FFFFFF;">₹${(order.total || 0).toLocaleString()}</span>
+                        </div>
+                      </div>
+
+                      <!-- Action Button -->
+                      <div style="margin-bottom: 40px; text-align: center;">
+                        <a href="${window.location.origin}/track/${order.orderId}?email=${encodeURIComponent(targetEmail)}" 
+                           style="display: block; background-color: #FFFFFF; color: #000000; padding: 18px; border-radius: 4px; text-decoration: none; font-size: 16px; font-weight: 500; text-align: center; margin-bottom: 16px;">
+                          Track My Order
+                        </a>
+                        ${updateData.trackingNumber ? `
+                          <p style="font-size: 12px; color: #444444; margin-top: 16px;">Carrier: ${updateData.carrier} | AWB: ${updateData.trackingNumber}</p>
+                        ` : ''}
+                      </div>
+
+                      <!-- Footer -->
+                      <div style="margin-top: 60px; text-align: center; border-top: 1px solid #1A1A1A; padding-top: 40px;">
+                        <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">Thanks for shopping with ${settings.storeName || 'The Ruby'}</p>
+                        <p style="font-size: 11px; color: #444444; margin-top: 20px;">&copy; ${new Date().getFullYear()} ${settings.storeName || 'The Ruby'}. All rights reserved.</p>
+                      </div>
                     </div>
-                    ${updateData.trackingNumber ? `
-                      <p style="font-size: 13px; color: #6d7175; text-align: center;">Carrier: <strong>${updateData.carrier}</strong> | AWB: <strong>${updateData.trackingNumber}</strong></p>
-                    ` : ''}
-                    <p style="font-size: 13px; margin-top: 20px; text-align: center;">Thank you for shopping with <strong>The Ruby</strong>!</p>
                   </div>
                 `
               })
@@ -2250,12 +2295,31 @@ export default function AdminDashboard() {
                 to: order.address.email,
                 subject: `Order Update: ${order.orderId} is ${newStatus} 📦`,
                 html: `
-                  <div style="font-family: sans-serif; padding: 20px; color: #1A2C54;">
-                    <h1 style="color: #E11D48;">Order Status Update</h1>
-                    <p>Hi ${order.address.name},</p>
-                    <p>Good news! The status of your order <strong>${order.orderId}</strong> has been updated to <strong>${newStatus}</strong>.</p>
-                    <p>You can track your order details in your account.</p>
-                    <a href="${window.location.origin}/my-orders" style="display: inline-block; background: #1A2C54; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 20px;">View Order</a>
+                  <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #000000; padding: 40px 20px; color: #FFFFFF; line-height: 1.5;">
+                    <div style="max-width: 500px; margin: 0 auto;">
+                      <div style="display: flex; justify-content: space-between; margin-bottom: 40px;">
+                        <span style="font-size: 14px; font-weight: 500; color: #FFFFFF;">Order ${order.orderId}</span>
+                        <span style="font-size: 14px; font-weight: 500; color: #E11D48; text-transform: lowercase;">update</span>
+                      </div>
+
+                      <div style="margin-bottom: 40px;">
+                        <h1 style="font-size: 24px; font-weight: 500; margin: 0 0 16px 0;">Order Status Update</h1>
+                        <p style="font-size: 16px; color: #888888; margin: 0;">Hi ${order.address.name},</p>
+                        <p style="font-size: 16px; color: #888888; margin: 16px 0 0 0;">The status of your order <strong>${order.orderId}</strong> has been updated to <strong>${newStatus}</strong>.</p>
+                      </div>
+
+                      <div style="margin-bottom: 40px; text-align: center;">
+                        <a href="${window.location.origin}/my-orders" 
+                           style="display: block; background-color: #FFFFFF; color: #000000; padding: 18px; border-radius: 4px; text-decoration: none; font-size: 16px; font-weight: 500; text-align: center;">
+                          View My Order
+                        </a>
+                      </div>
+
+                      <div style="margin-top: 60px; text-align: center; border-top: 1px solid #1A1A1A; padding-top: 40px;">
+                        <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">Thanks for shopping with ${settings.storeName || 'The Ruby'}</p>
+                        <p style="font-size: 11px; color: #444444; margin-top: 20px;">&copy; ${new Date().getFullYear()} ${settings.storeName || 'The Ruby'}. All rights reserved.</p>
+                      </div>
+                    </div>
                   </div>
                 `
               })

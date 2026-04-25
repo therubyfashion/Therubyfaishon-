@@ -130,6 +130,12 @@ export default function OrderSuccess() {
               <span>Discount Applied</span>
               <span>-₹{orderData.discount.toLocaleString()}</span>
             </div>
+            {orderData.codFee > 0 && (
+              <div className="flex justify-between text-sm font-bold text-ruby">
+                <span>COD Handling Fee</span>
+                <span>+₹{orderData.codFee.toLocaleString()}</span>
+              </div>
+            )}
             <div className="flex justify-between text-sm font-bold text-green-500">
               <span>Delivery</span>
               <span>{orderData.shippingCost === 0 ? 'FREE' : `₹${orderData.shippingCost}`}</span>

@@ -6,10 +6,11 @@ import { collection, addDoc, getDocs, doc, runTransaction, getDoc } from 'fireba
 import { db } from '../firebase';
 import { toast } from 'sonner';
 import { cn, syncToGoogleSheets } from '../lib/utils';
-import { ChevronLeft, ShoppingBag, MapPin, Home, Briefcase, Plus, CheckCircle2, Lock, Smartphone, Building2, Handshake } from 'lucide-react';
+import { ChevronLeft, ShoppingBag, MapPin, Home, Briefcase, Plus, CheckCircle2, Lock, Smartphone, Building2, Handshake, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import PhoneVerification from '../components/PhoneVerification';
 import { LoadingSpinner } from '../components/Skeleton';
+import SwipeButton from '../components/SwipeButton';
 
 const STEPS = [
   { id: 1, label: 'Address' },
@@ -142,7 +143,8 @@ export default function Checkout() {
   const subtotal = total;
   const discount = appliedPromo ? appliedPromo.discount : 0;
   const shippingCost = selectedShippingObj?.cost || 0;
-  const finalTotal = subtotal - discount + shippingCost;
+  const codFee = selectedPayment === 'cod' ? 80 : 0;
+  const finalTotal = subtotal - discount + shippingCost + codFee;
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -293,6 +295,7 @@ export default function Checkout() {
         subtotal: subtotal ?? 0,
         discount: discount ?? 0,
         shippingCost: shippingCost ?? 0,
+        codFee: codFee ?? 0,
         total: finalTotal ?? 0,
         status: 'Confirmed',
         paymentMethod: selectedPayment.toUpperCase(),
@@ -342,99 +345,93 @@ export default function Checkout() {
               const settingsData = settingsSnap.docs[0].data();
               if ((settingsData.resendApiKey || (settingsData.smtpUser && settingsData.smtpPass)) && finalOrderData.address?.email) {
                 const emailHtml = `
-                  <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #FAFAFA; padding: 40px 20px; color: #1A2C54;">
-                    <div style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 40px; padding: 60px; box-shadow: 0 20px 50px -20px rgba(0,0,0,0.08); border: 1px solid #F0F0F0;">
-                      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 50px;">
-                        <div>
-                          ${settingsData.storeLogo ? `<img src="${settingsData.storeLogo}" alt="${settingsData.storeName}" style="max-height: 50px; margin-bottom: 10px;">` : `<h1 style="font-size: 24px; font-weight: bold; letter-spacing: -1px; margin: 0; color: #E11D48;">${settingsData.storeName?.toUpperCase() || 'THE RUBY'}</h1>`}
-                        </div>
-                        <div style="text-align: right;">
-                          <h1 style="font-size: 14px; font-weight: bold; color: #9CA3AF; text-transform: uppercase; letter-spacing: 2px; margin: 0;">Tax Invoice</h1>
-                          <p style="font-size: 12px; color: #1A2C54; font-weight: bold; margin: 4px 0 0 0;">${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`}</p>
-                        </div>
-                      </div>
-                      
-                      <div style="text-align: center; margin-bottom: 40px;">
-                        <div style="display: inline-block; background-color: #FDF2F8; color: #E11D48; padding: 12px 24px; border-radius: 100px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 24px;">Order Confirmed</div>
-                        <h2 style="font-size: 28px; font-weight: bold; margin: 0 0 16px 0; color: #1A2C54;">Thank you for your order, ${finalOrderData.address.name}!</h2>
-                        <p style="font-size: 16px; color: #666666; line-height: 1.6; margin: 0;">We've received your order and our team is already working on getting it to you. Here's your official tax invoice.</p>
+                  <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #000000; padding: 40px 20px; color: #FFFFFF; line-height: 1.5;">
+                    <div style="max-width: 500px; margin: 0 auto;">
+                      <!-- Header -->
+                      <div style="display: flex; justify-content: space-between; margin-bottom: 60px;">
+                        <span style="font-size: 18px; font-weight: 500; color: #FFFFFF;">Order ${finalOrderData.orderId}</span>
+                        <span style="font-size: 18px; font-weight: 500; color: #888888; text-transform: lowercase;">confirmed</span>
                       </div>
 
-                      <div style="background-color: #F9FAFB; border-radius: 24px; padding: 32px; margin-bottom: 40px; border: 1px solid #F3F4F6;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 24px; border-bottom: 1px solid #E5E7EB; padding-bottom: 16px;">
-                          <div style="flex: 1;">
-                            <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 8px 0;">Date</p>
-                            <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+                      <!-- Logo -->
+                      <div style="text-align: center; margin-bottom: 60px;">
+                        ${settingsData.storeLogo ? `<img src="${settingsData.storeLogo}" alt="Logo" style="width: 80px; height: 80px; object-fit: contain;">` : `
+                          <div style="width: 80px; height: 80px; background-color: #1A1A1A; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; overflow: hidden;">
+                            <img src="https://images.unsplash.com/photo-1614732414444-096e5f1122d5?q=80&w=2574&auto=format&fit=crop" style="width: 100%; height: 100%; object-fit: cover; opacity: 0.8;">
                           </div>
-                          <div style="flex: 1; text-align: right;">
-                            <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 8px 0;">Payment Method</p>
-                            <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${finalOrderData.paymentId === 'COD' ? 'Cash on Delivery' : 'Prepaid (Razorpay)'}</p>
-                          </div>
-                        </div>
+                        `}
+                      </div>
 
-                        <div style="margin-bottom: 24px;">
-                          <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 12px 0;">Items Summary</p>
-                          ${finalOrderData.items.map((item: any) => `
-                            <div style="display: flex; align-items: center; margin-bottom: 16px;">
-                              <div style="width: 50px; height: 60px; background-color: #FFFFFF; border-radius: 8px; overflow: hidden; margin-right: 16px; border: 1px solid #E5E7EB;">
-                                ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 100%; height: 100%; object-fit: cover;">` : ''}
-                              </div>
-                              <div style="flex: 1;">
-                                <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${item.name}</p>
-                                <p style="font-size: 11px; color: #9CA3AF; margin: 2px 0 0 0;">SKU: ${item.sku || '-'} • Barcode: ${item.barcode || '-'}</p>
-                                <p style="font-size: 12px; color: #666666; margin: 4px 0 0 0;">Size: ${item.selectedSize} • Qty: ${item.quantity}</p>
-                              </div>
-                              <div style="text-align: right;">
-                                <p style="font-size: 14px; font-weight: bold; color: #E11D48; margin: 0;">₹${(item.price * item.quantity).toLocaleString()}</p>
-                              </div>
+                      <!-- Main Message -->
+                      <div style="margin-bottom: 40px;">
+                        <h1 style="font-size: 24px; font-weight: 500; margin: 0 0 16px 0;">Thank you for your purchase!</h1>
+                        <p style="font-size: 16px; color: #888888; margin: 0;">We're getting your order ready to be shipped. We will notify you when it has been sent.</p>
+                      </div>
+
+                      <!-- Action Buttons -->
+                      <div style="margin-bottom: 60px; text-align: center;">
+                        <a href="${window.location.origin}/track/${finalOrderData.orderId.replace('#', '')}?email=${finalOrderData.address.email}" 
+                           style="display: block; background-color: #FFFFFF; color: #000000; padding: 18px; border-radius: 4px; text-decoration: none; font-size: 16px; font-weight: 500; text-align: center; margin-bottom: 16px;">
+                          View your order
+                        </a>
+                        <p style="font-size: 14px; color: #888888;">or <a href="${window.location.origin}" style="color: #FFFFFF; text-decoration: underline;">Visit our store</a></p>
+                      </div>
+
+                      <!-- Order Summary -->
+                      <div style="border-top: 1px solid #1A1A1A; padding-top: 40px;">
+                        <h2 style="font-size: 18px; font-weight: 500; margin: 0 0 24px 0;">Order summary</h2>
+                        
+                        ${finalOrderData.items.map((item: any) => `
+                          <div style="display: flex; margin-bottom: 24px;">
+                            <div style="width: 80px; height: 80px; background-color: #1A1A1A; overflow: hidden; margin-right: 16px;">
+                              ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 100%; height: 100%; object-fit: cover;">` : ''}
                             </div>
-                          `).join('')}
-                        </div>
+                            <div style="flex: 1;">
+                              <p style="font-size: 16px; font-weight: 500; margin: 0;">${item.name} × ${item.quantity}</p>
+                              <p style="font-size: 14px; color: #888888; margin: 4px 0 0 0;">${item.selectedSize || 'Standard'}</p>
+                            </div>
+                            <div style="text-align: right;">
+                              <p style="font-size: 16px; font-weight: 500; margin: 0;">₹${(item.price * item.quantity).toLocaleString()}</p>
+                            </div>
+                          </div>
+                        `).join('')}
 
-                        <div style="border-top: 1px solid #E5E7EB; padding-top: 24px;">
-                          <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                            <p style="font-size: 14px; color: #666666; margin: 0;">Subtotal</p>
-                            <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">₹${finalOrderData.subtotal.toLocaleString()}</p>
+                        <!-- Totals -->
+                        <div style="border-top: 1px solid #1A1A1A; padding-top: 24px;">
+                          <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                            <p style="font-size: 14px; color: #888888; margin: 0;">Subtotal</p>
+                            <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">₹${finalOrderData.subtotal.toLocaleString()}</p>
                           </div>
                           ${finalOrderData.discount > 0 ? `
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                              <p style="font-size: 14px; color: #E11D48; margin: 0;">Discount</p>
-                              <p style="font-size: 14px; font-weight: bold; color: #E11D48; margin: 0;">-₹${finalOrderData.discount.toLocaleString()}</p>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                              <p style="font-size: 14px; color: #888888; margin: 0;">Discount</p>
+                              <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">-₹${finalOrderData.discount.toLocaleString()}</p>
                             </div>
                           ` : ''}
-                          <div style="display: flex; justify-content: space-between; margin-bottom: 16px;">
-                            <p style="font-size: 14px; color: #666666; margin: 0;">Shipping</p>
-                            <p style="font-size: 14px; font-weight: bold; color: #1A2C54; margin: 0;">${finalOrderData.shippingCost === 0 ? 'FREE' : `₹${finalOrderData.shippingCost.toLocaleString()}`}</p>
+                          <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                            <p style="font-size: 14px; color: #888888; margin: 0;">Shipping</p>
+                            <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">${finalOrderData.shippingCost === 0 ? 'FREE' : `₹${finalOrderData.shippingCost.toLocaleString()}`}</p>
                           </div>
-                          <div style="display: flex; justify-content: space-between; border-top: 2px solid #1A2C54; padding-top: 16px;">
-                            <p style="font-size: 18px; font-weight: bold; color: #1A2C54; margin: 0;">Total Amount</p>
-                            <p style="font-size: 24px; font-weight: bold; color: #E11D48; margin: 0;">₹${finalOrderData.total.toLocaleString()}</p>
+                          ${finalOrderData.codFee > 0 ? `
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                              <p style="font-size: 14px; color: #888888; margin: 0;">COD Handling Fee</p>
+                              <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">₹${finalOrderData.codFee.toLocaleString()}</p>
+                            </div>
+                          ` : ''}
+                          <div style="display: flex; justify-content: space-between; border-top: 1px solid #1A1A1A; padding-top: 24px; margin-top: 24px;">
+                            <p style="font-size: 18px; font-weight: 600; color: #FFFFFF; margin: 0;">Total</p>
+                            <p style="font-size: 24px; font-weight: 600; color: #FFFFFF; margin: 0;">₹${finalOrderData.total.toLocaleString()}</p>
                           </div>
                         </div>
                       </div>
 
-                      <div style="margin-bottom: 40px;">
-                        <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; color: #9CA3AF; margin: 0 0 12px 0;">Billing & Shipping Address</p>
-                        <p style="font-size: 14px; color: #666666; line-height: 1.6; margin: 0;">
-                          <strong>${finalOrderData.address.name}</strong><br/>
-                          ${finalOrderData.address.address}, ${finalOrderData.address.landmark ? finalOrderData.address.landmark + ', ' : ''}<br/>
-                          ${finalOrderData.address.city}, ${finalOrderData.address.state} - ${finalOrderData.address.pincode}<br/>
-                          Phone: ${finalOrderData.address.number}
+                      <!-- Footer -->
+                      <div style="margin-top: 80px; text-align: center; border-top: 1px solid #1A1A1A; padding-top: 40px; padding-bottom: 40px;">
+                        <p style="font-size: 12px; color: #444444; margin: 0;">
+                          &copy; ${new Date().getFullYear()} ${settingsData.storeName || 'The Ruby'}. All rights reserved.<br/>
+                          Secure payment processing. You're receiving this because you placed an order on our store.
                         </p>
                       </div>
-
-                      <div style="text-align: center; border-top: 1px solid #F0F0F0; padding-top: 40px;">
-                        <p style="font-size: 14px; color: #9CA3AF; margin-bottom: 24px;">Need help with your order? Reply to this email or visit our support center.</p>
-                        <div style="margin-bottom: 32px;">
-                          <a href="${window.location.origin}/track/${finalOrderData.orderId.replace('#', '')}?email=${finalOrderData.address.email}" style="display: inline-block; background-color: #1A2C54; color: #FFFFFF; padding: 18px 36px; border-radius: 16px; text-decoration: none; font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; box-shadow: 0 10px 20px -5px rgba(26,44,84,0.3);">Track Your Order</a>
-                        </div>
-                        <p style="font-size: 16px; font-weight: bold; color: #1A2C54; margin: 0;">Happy Shopping!</p>
-                        <p style="font-size: 14px; color: #E11D48; font-weight: bold; margin: 4px 0 0 0;">Team ${settingsData.storeName || 'The Ruby'}</p>
-                      </div>
-                    </div>
-                    
-                    <div style="text-align: center; margin-top: 40px;">
-                      <p style="font-size: 12px; color: #9CA3AF;">&copy; ${new Date().getFullYear()} ${settingsData.storeName || 'The Ruby'}. All rights reserved.</p>
                     </div>
                   </div>
                 `;
@@ -1081,7 +1078,7 @@ export default function Checkout() {
                           </span>
                         </div>
                         <div className="pt-6 border-t border-gray-200 flex justify-between items-end">
-                          <p className="text-lg font-bold text-[#1A2C54]">Total Amount</p>
+                          <p className="text-lg font-bold text-[#1A2C54]">Order Total</p>
                           <p className="text-2xl font-bold text-ruby">₹{finalTotal.toLocaleString()}</p>
                         </div>
                       </div>
@@ -1111,9 +1108,17 @@ export default function Checkout() {
                   exit={{ opacity: 0, x: -20 }}
                   className="space-y-8"
                 >
-                  <div className="space-y-2">
-                    <h2 className="text-xl font-bold text-[#1A2C54]">Payment Method</h2>
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Select how you'd like to pay</p>
+                  <div className="space-y-4">
+                    <button 
+                      onClick={() => setCurrentStep(3)}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-gray-400 hover:text-ruby transition-colors mb-4 px-3 py-1.5 rounded-full bg-gray-50 border border-gray-100"
+                    >
+                      <ChevronLeft size={12} strokeWidth={3} /> Change Review
+                    </button>
+                    <div className="space-y-2">
+                      <h2 className="text-xl font-bold text-[#1A2C54]">Payment Method</h2>
+                      <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Select how you'd like to pay</p>
+                    </div>
                   </div>
                   
                   <div className="payment-options flex flex-col gap-4">
@@ -1125,7 +1130,9 @@ export default function Checkout() {
                       )}
                     >
                       <div className="payment-icon p-3 bg-white rounded-2xl text-ruby shadow-sm"><Smartphone size={24} /></div>
-                      <span className="payment-name text-[16px] font-bold text-[#1A2C54] flex-grow">UPI / Wallets</span>
+                      <div className="flex-grow">
+                        <span className="payment-name block text-[16px] font-bold text-[#1A2C54]">UPI / Wallets</span>
+                      </div>
                       <div className={cn(
                         "pay-radio w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
                         selectedPayment === 'upi' ? "border-ruby bg-ruby" : "border-gray-200"
@@ -1142,7 +1149,9 @@ export default function Checkout() {
                       )}
                     >
                       <div className="payment-icon p-3 bg-white rounded-2xl text-ruby shadow-sm"><Handshake size={24} /></div>
-                      <span className="payment-name text-[16px] font-bold text-[#1A2C54] flex-grow">Cash on Delivery</span>
+                      <div className="flex-grow">
+                        <span className="payment-name block text-[16px] font-bold text-[#1A2C54]">Cash on Delivery</span>
+                      </div>
                       <div className={cn(
                         "pay-radio w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
                         selectedPayment === 'cod' ? "border-ruby bg-ruby" : "border-gray-200"
@@ -1152,26 +1161,41 @@ export default function Checkout() {
                     </div>
                   </div>
 
+                  {/* COD Notice */}
+                  <AnimatePresence mode="wait">
+                    {selectedPayment === 'cod' && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="bg-ruby/5 border border-ruby/10 rounded-2xl p-4 flex items-start gap-3"
+                      >
+                        <div className="p-2 bg-white rounded-xl text-ruby shadow-sm">
+                          <Check size={16} />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs font-bold text-ruby">COD Handling Fee Notice</p>
+                          <p className="text-[11px] text-[#1A2C54] leading-relaxed">
+                            ₹80 will be added for Cash on Delivery. To avoid this charge, please pay online using UPI or Cards.
+                          </p>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
                   {/* Secure Badge */}
-                  <div className="bg-gray-50 rounded-2xl p-6 flex items-center justify-center gap-3 text-gray-400">
-                    <Lock size={16} />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">100% Secure Checkout • Powered by Razorpay</span>
+                  <div className="bg-white rounded-2xl p-4 flex items-center justify-center gap-2 text-gray-300 border border-gray-50">
+                    <Lock size={14} />
+                    <span className="text-[9px] font-bold uppercase tracking-widest">100% Secure Checkout • Powered by Razorpay</span>
                   </div>
 
-                  <div className="step-nav flex gap-4 mt-8 pt-8 border-t border-gray-100">
-                    <button 
-                      onClick={() => setCurrentStep(3)}
-                      className="flex-1 bg-white border border-gray-100 text-[#1A2C54] py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-gray-50 transition-all"
-                    >
-                      Back
-                    </button>
-                    <button 
-                      onClick={() => handlePlaceOrder()}
+                  <div className="step-nav mt-8">
+                    <SwipeButton 
+                      price={finalTotal}
+                      onConfirm={handlePlaceOrder}
+                      isLoading={isProcessingPayment}
                       disabled={isProcessingPayment}
-                      className="flex-1 bg-ruby text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95 flex items-center justify-center"
-                    >
-                      {isProcessingPayment ? <LoadingSpinner size={20} className="border-white" /> : `Pay ₹${finalTotal.toLocaleString()} Now`}
-                    </button>
+                    />
                   </div>
                 </motion.div>
               )}

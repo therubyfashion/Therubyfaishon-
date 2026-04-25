@@ -188,8 +188,12 @@ export const generateInvoice = (order: any, settings?: any) => {
   let currentY = finalY;
   drawRow('Subtotal', `Rs. ${order.subtotal?.toLocaleString() || order.total?.toLocaleString()}`, currentY);
   currentY += 8;
-  drawRow('Shipping Charges', `Rs. ${order.shippingCost || 40}`, currentY);
+  drawRow('Shipping Charges', `Rs. ${order.shippingCost || 0}`, currentY);
   currentY += 8;
+  if (order.codFee > 0) {
+    drawRow('COD Handling Fee', `Rs. ${order.codFee.toLocaleString()}`, currentY);
+    currentY += 8;
+  }
   if (order.discount > 0) {
     drawRow('Shipping Charges Discount', `-Rs. ${order.discount.toLocaleString()}`, currentY);
     currentY += 8;
