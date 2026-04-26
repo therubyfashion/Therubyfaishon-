@@ -33,8 +33,12 @@ export default function VerifyPrompt() {
         if (!querySnapshot.empty) {
           setStoreSettings(querySnapshot.docs[0].data());
         }
-      } catch (error) {
-        console.error("Error fetching settings:", error);
+      } catch (error: any) {
+        if (error.code === 'resource-exhausted') {
+          console.warn("VerifyPrompt: Firestore quota exceeded.");
+        } else {
+          console.error("Error fetching settings:", error);
+        }
       }
     };
     fetchSettings();

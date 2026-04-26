@@ -4,7 +4,8 @@ import {
   onSnapshot, serverTimestamp, setDoc, arrayUnion, arrayRemove, runTransaction 
 } from 'firebase/firestore';
 import { updateProfile, updatePassword, updateEmail, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
-import { db, auth, messaging } from '../firebase';
+import { db, auth, messaging, storage } from '../firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getToken } from 'firebase/messaging';
 import { Product, Category } from '../types';
 import { toast } from 'sonner';
@@ -199,8 +200,11 @@ interface FirestoreErrorInfo {
 }
 
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const errCode = (error as any)?.code || '';
+  
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -220,7 +224,14 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   console.error('Firestore Error Detail: ', JSON.stringify(errInfo));
   
   // Throw a user-friendly message
-  const friendlyMsg = `Bhai, database ke sath connect karne mein dikkat aa rahi hai. (Operation: ${operationType.toUpperCase()})`;
+  let friendlyMsg = `Bhai, database ke sath connect karne mein dikkat aa rahi hai. (Operation: ${operationType.toUpperCase()})`;
+  
+  if (errCode === 'resource-exhausted' || errorMessage.includes('quota')) {
+    friendlyMsg = "Bhai, aaj ka free data limit (quota) khatam ho gaya hai. Kal subah restart hoga.";
+  } else if (errCode === 'permission-denied') {
+    friendlyMsg = "Aapke paas is kaam ke liye permission nahi hai.";
+  }
+  
   throw new Error(friendlyMsg);
 }
 
@@ -2537,61 +2548,98 @@ export default function AdminDashboard() {
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
     try {
+      // Image Upload Logic: Convert Base64 to Storage URLs if needed
+      const uploadedImages = [];
+      for (const img of formData.images) {
+        if (img && img.startsWith('data:image')) {
+          try {
+            // Upload to Firebase Storage
+            const fileRef = ref(storage, `products/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`);
+            
+            // Convert base64 to blob
+            const response = await fetch(img);
+            const blob = await response.blob();
+            
+            await uploadBytes(fileRef, blob);
+            const url = await getDownloadURL(fileRef);
+            uploadedImages.push(url);
+          } catch (uploadError) {
+            console.error("Image upload failed:", uploadError);
+            // Fallback to original image if upload fails (though it might hit Firestore limit)
+            uploadedImages.push(img);
+          }
+        } else if (img) {
+          uploadedImages.push(img);
+        }
+      }
+
+      const productData = {
+        ...formData,
+        images: uploadedImages,
+        updatedAt: new Date().toISOString()
+      };
+
       if (editingProduct) {
-        await updateDoc(doc(db, 'products', editingProduct.id), {
-          ...formData,
-          updatedAt: new Date().toISOString()
-        });
-        toast.success("Product updated successfully");
-      } else {
-        await addDoc(collection(db, 'products'), {
-          ...formData,
-          createdAt: new Date().toISOString()
-        });
-
-        // Send broadcast notification for new product
         try {
-          fetch('/api/send-push', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              title: 'New Arrival! 👗',
-              body: `Check out our new ${formData.name}. Shop now!`,
-              url: '/',
-              type: 'all'
-            })
+          await updateDoc(doc(db, 'products', editingProduct.id), productData);
+          toast.success("Product updated successfully");
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, `products/${editingProduct.id}`);
+        }
+      } else {
+        try {
+          await addDoc(collection(db, 'products'), {
+            ...productData,
+            createdAt: new Date().toISOString()
           });
-
-          // Send Newsletter Emails
-          const newsletterSnap = await getDocs(collection(db, 'newsletter'));
-          const emails = newsletterSnap.docs.map(doc => doc.data().email).filter(Boolean);
           
-          if (emails.length > 0) {
-            fetch('/api/send-email', {
+          // Send broadcast notification for new product
+          try {
+            fetch('/api/send-push', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                to: emails,
-                subject: `New Arrival: ${formData.name} is here! 👗`,
-                html: `
-                  <div style="font-family: sans-serif; padding: 20px; color: #1A2C54;">
-                    <h1 style="color: #E11D48;">New Arrival at The Ruby!</h1>
-                    <p>Hi there,</p>
-                    <p>We've just added a stunning new piece to our collection: <strong>${formData.name}</strong>.</p>
-                    <p>${formData.description}</p>
-                    <p>Price: ₹${formData.price}</p>
-                    <a href="${window.location.origin}" style="display: inline-block; background: #E11D48; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 20px;">Shop Now</a>
-                  </div>
-                `
+                title: 'New Arrival! 👗',
+                body: `Check out our new ${formData.name}. Shop now!`,
+                url: '/',
+                type: 'all'
               })
             });
-          }
-        } catch (e) {
-          console.error("Newsletter notification error:", e);
-        }
 
-        toast.success("Product added successfully");
+            // Send Newsletter Emails
+            const newsletterSnap = await getDocs(collection(db, 'newsletter'));
+            const emails = newsletterSnap.docs.map(doc => doc.data().email).filter(Boolean);
+            
+            if (emails.length > 0) {
+              fetch('/api/send-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  to: emails,
+                  subject: `New Arrival: ${formData.name} is here! 👗`,
+                  html: `
+                    <div style="font-family: sans-serif; padding: 20px; color: #1A2C54;">
+                      <h1 style="color: #E11D48;">New Arrival at The Ruby!</h1>
+                      <p>Hi there,</p>
+                      <p>We've just added a stunning new piece to our collection: <strong>${formData.name}</strong>.</p>
+                      <p>${formData.description}</p>
+                      <p>Price: ₹${formData.price}</p>
+                      <a href="${window.location.origin}" style="display: inline-block; background: #E11D48; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 20px;">Shop Now</a>
+                    </div>
+                  `
+                })
+              });
+            }
+          } catch (e) {
+            console.error("Newsletter notification error:", e);
+          }
+
+          toast.success("Product added successfully");
+        } catch (error) {
+          handleFirestoreError(error, OperationType.CREATE, 'products');
+        }
       }
       setShowAddProductPage(false);
       setEditingProduct(null);
@@ -2600,7 +2648,7 @@ export default function AdminDashboard() {
         description: '', 
         price: 0, 
         category: 'Women', 
-        sizes: sizes.length > 0 ? sizes.map(s => s.name) : ['S', 'M', 'L', 'XL'], 
+        sizes: sizes.length > 0 ? sizes.map((s: any) => s.name) : ['S', 'M', 'L', 'XL'], 
         images: [''], 
         stock: 10,
         comparePrice: 0,
@@ -2615,8 +2663,15 @@ export default function AdminDashboard() {
         variants: []
       });
       fetchProducts();
-    } catch (error) {
-      toast.error("Failed to save product");
+    } catch (error: any) {
+      console.error("Save product error:", error);
+      if (error.message && error.message.includes('quota')) {
+        toast.error("Bhai, aaj ki product upload quota khatam ho gayi hai. Kal try karein.");
+      } else {
+        toast.error(error.message || "Failed to save product");
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -2656,17 +2711,21 @@ export default function AdminDashboard() {
         let successCount = 0;
         for (const item of data) {
           if (item.name && item.price) {
-            await addDoc(collection(db, 'products'), {
-              name: item.name,
-              price: Number(item.price),
-              description: item.description || '',
-              category: item.category || '',
-              stock: Number(item.stock) || 0,
-              images: item.images ? item.images.split(',') : [],
-              createdAt: new Date().toISOString(),
-              status: 'active'
-            });
-            successCount++;
+            try {
+              await addDoc(collection(db, 'products'), {
+                name: item.name,
+                price: Number(item.price),
+                description: item.description || '',
+                category: item.category || '',
+                stock: Number(item.stock) || 0,
+                images: item.images ? item.images.split(',') : [],
+                createdAt: new Date().toISOString(),
+                status: 'active'
+              });
+              successCount++;
+            } catch (err) {
+              handleFirestoreError(err, OperationType.CREATE, 'products/bulk');
+            }
           }
         }
         toast.success(`Successfully uploaded ${successCount} products!`);

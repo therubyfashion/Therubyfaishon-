@@ -280,12 +280,22 @@ async function startServer() {
   console.log(`✅ Socket.IO initialized.`);
   const PORT = 3000;
   
-  // Real-time Analytics Store (Memory + Firestore)
+  // Real-time Analytics Store (Memory only for active count)
   const activeVisitors = new Map<string, any>();
+  const seenSessionsToday = new Set<string>();
+  let lastSeenDate = new Date().toISOString().split('T')[0];
 
   io.on("connection", (socket) => {
     // Listen for visitor data
     socket.on("visitor_tracking", async (data) => {
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Reset seen sessions if day changed
+      if (today !== lastSeenDate) {
+        seenSessionsToday.clear();
+        lastSeenDate = today;
+      }
+
       const clientIp = requestIp.getClientIp(socket.request) || '';
       const geo = geoip.lookup(clientIp);
 
@@ -306,18 +316,18 @@ async function startServer() {
 
       activeVisitors.set(socket.id, session);
       
-      // Update DB for persistence/metrics
-      if (db) {
+      // Update Daily Analytics ONLY if this session is new today
+      if (db && data.sessionId && !seenSessionsToday.has(data.sessionId)) {
         try {
-          await db.collection('active_sessions').doc(socket.id).set(session);
-          
-          const today = new Date().toISOString().split('T')[0];
+          seenSessionsToday.add(data.sessionId);
           await db.collection('analytics_daily').doc(today).set({
             total_users: admin.firestore.FieldValue.increment(1),
             date: today
           }, { merge: true });
         } catch (e) {
-          console.error("Tracking DB error:", e);
+          console.error("Tracking Analytics error:", e);
+          // If write fails, optionally remove from seenSessions to try again later
+          // but we stay conservative to avoid retry loops hitting quota
         }
       }
 
@@ -331,10 +341,6 @@ async function startServer() {
     socket.on("disconnect", async () => {
       activeVisitors.delete(socket.id);
       
-      if (db) {
-        db.collection('active_sessions').doc(socket.id).delete().catch(() => {});
-      }
-
       io.emit("live_analytics_update", {
         activeCount: activeVisitors.size,
         visitors: Array.from(activeVisitors.values())

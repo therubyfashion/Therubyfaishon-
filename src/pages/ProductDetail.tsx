@@ -215,11 +215,6 @@ export default function ProductDetail() {
           if (data.sizes && data.sizes.length > 0) setSelectedSize(data.sizes[0]);
           if (data.variants && data.variants.length > 0) setSelectedColor(data.variants[0].color);
           
-          // Increment viewCount
-          await updateDoc(docRef, {
-            viewCount: increment(1)
-          });
-
           // Fetch Related Products
           const relatedQuery = query(
             collection(db, 'products'),

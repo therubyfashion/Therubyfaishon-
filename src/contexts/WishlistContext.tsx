@@ -28,15 +28,6 @@ export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setItems(prev => prev.filter(i => i.id !== product.id));
     } else {
       setItems(prev => [...prev, product]);
-      // Increment wishlistCount in Firestore
-      try {
-        const productRef = doc(db, 'products', product.id);
-        await updateDoc(productRef, {
-          wishlistCount: increment(1)
-        });
-      } catch (error) {
-        console.error("Error updating wishlist count:", error);
-      }
     }
   };
 
