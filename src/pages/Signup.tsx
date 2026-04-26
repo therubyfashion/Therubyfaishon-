@@ -89,8 +89,10 @@ export default function Signup() {
     };
 
     const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user && !loading) {
+      if (user) {
         finishSignup(user);
+      } else {
+        setLoading(false);
       }
     });
 

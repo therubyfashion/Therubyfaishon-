@@ -39,19 +39,14 @@ export default function Login() {
 
     const handleRedirect = async () => {
       try {
-        console.log("Checking for Firebase redirect result...");
         const result = await getRedirectResult(auth);
         
         if (result?.user) {
-          const user = result.user;
-          console.log("Redirect Success:", user.email);
-          await finishLogin(user);
+          await finishLogin(result.user);
           return;
         } 
         
-        // If no user from redirect, check if session is already active
         if (auth.currentUser) {
-          console.log("User already signed in from session.");
           await finishLogin(auth.currentUser);
           return;
         }
@@ -61,7 +56,6 @@ export default function Login() {
           await finishLogin(auth.currentUser);
         }
       } finally {
-        // Essential: Unset loading if no result found so user isn't stuck
         setLoading(false);
       }
     };
@@ -88,10 +82,11 @@ export default function Login() {
       }
     };
 
-    // Backup listener: If auth state changes to signed-in, just go home
     const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user && !loading) {
+      if (user) {
         finishLogin(user);
+      } else {
+        setLoading(false);
       }
     });
 
@@ -100,7 +95,7 @@ export default function Login() {
       clearTimeout(timer);
       unsubscribe();
     };
-  }, [navigate, loading]);
+  }, [navigate]);
 
   const handleGoogleLogin = async () => {
     setLoading(true);
