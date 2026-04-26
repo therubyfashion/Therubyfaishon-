@@ -26,10 +26,10 @@ import {
 } from 'recharts';
 import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { cn } from '../lib/utils';
 import LiveViewContent from '../components/LiveViewContent';
 
@@ -342,7 +342,7 @@ function DeleteConfirmationModal({ isOpen, onCancel, onConfirm, title, message }
   );
 }
 
-function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, categories, colors, sizes }: any) {
+function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, categories, colors, sizes, loading }: any) {
   const [activeDescriptionTab, setActiveDescriptionTab] = useState<'edit' | 'preview'>('edit');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [galleryTargetIndex, setGalleryTargetIndex] = useState(0);
@@ -370,15 +370,18 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Check file size (limit to 5MB)
+      // Check file size (limit to 5MB for selection, will be compressed later)
       if (file.size > 5 * 1024 * 1024) {
         toast.error("Image size too large. Please select an image under 5MB.");
         return;
       }
       const reader = new FileReader();
-      reader.onloadend = () => {
+      reader.onloadend = async () => {
         const base64String = reader.result as string;
-        updateImage(galleryTargetIndex, base64String);
+        
+        // Show loading state or similar if needed but for small-ish base64 it's fast
+        const compressed = await compressImage(base64String);
+        updateImage(galleryTargetIndex, compressed);
       };
       reader.readAsDataURL(file);
     }
@@ -476,7 +479,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
   };
 
   return (
-    <div className="space-y-6 md:space-y-8 pb-20">
+    <div className="space-y-6 md:space-y-8 pb-0">
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -1004,7 +1007,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
         </div>
 
         {/* Actions */}
-        <div className="flex flex-col sm:flex-row items-center justify-end gap-4 pt-8 border-t border-gray-100">
+        <div className="flex flex-col sm:flex-row items-center justify-end gap-4 pt-4 border-t border-gray-100">
           <button 
             type="button"
             onClick={onCancel}
@@ -1014,14 +1017,62 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
           </button>
           <button 
             type="submit"
-            className="w-full sm:w-auto px-12 py-4 bg-ruby text-white rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-xl shadow-ruby/20 active:scale-95"
+            disabled={loading}
+            className="w-full sm:w-auto px-12 py-4 bg-ruby text-white rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-xl shadow-ruby/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
           >
-            {isEditing ? 'Save Changes' : 'Add Product'}
+            {loading && <RefreshCw size={14} className="animate-spin" />}
+            <span>{isEditing ? (loading ? 'Saving...' : 'Save Changes') : (loading ? 'Adding...' : 'Add Product')}</span>
           </button>
         </div>
       </form>
     </div>
   );
+}
+
+function base64ToBlob(base64Data: string) {
+  const parts = base64Data.split(';base64,');
+  const contentType = parts[0].split(':')[1];
+  const raw = window.atob(parts[1]);
+  const rawLength = raw.length;
+  const uInt8Array = new Uint8Array(rawLength);
+  for (let i = 0; i < rawLength; ++i) {
+    uInt8Array[i] = raw.charCodeAt(i);
+  }
+  return new Blob([uInt8Array], { type: contentType });
+}
+
+async function compressImage(base64Str: string, maxWidth = 1000, maxHeight = 1000, quality = 0.6): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64Str;
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+
+      if (width > height) {
+        if (width > maxWidth) {
+          height *= maxWidth / width;
+          width = maxWidth;
+        }
+      } else {
+        if (height > maxHeight) {
+          width *= maxHeight / height;
+          height = maxHeight;
+        }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(img, 0, 0, width, height);
+      // Using jpeg for better compression
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => {
+      resolve(base64Str); // Fallback to original if error
+    };
+  });
 }
 
 export default function AdminDashboard() {
@@ -2103,7 +2154,26 @@ export default function AdminDashboard() {
     }
   };
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    name: string;
+    description: string;
+    price: number;
+    category: Category;
+    sizes: string[];
+    images: string[];
+    stock: number;
+    comparePrice: number;
+    stockStatus: string;
+    seoTitle: string;
+    seoDescription: string;
+    weight: string;
+    dimensions: string;
+    sku: string;
+    barcode: string;
+    isTrending: boolean;
+    updatedAt?: string;
+    variants: { size: string; color: string; stock: number }[];
+  }>({
     name: '',
     description: '',
     price: 0,
@@ -2120,7 +2190,7 @@ export default function AdminDashboard() {
     sku: '',
     barcode: '',
     isTrending: false,
-    variants: [] as { size: string; color: string; stock: number }[]
+    variants: []
   });
 
   useEffect(() => {
@@ -2548,101 +2618,84 @@ export default function AdminDashboard() {
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!formData.name || formData.price < 0 || !formData.category) {
+      toast.error("Bhai, Name, Price aur Category zaruri hai!");
+      return;
+    }
+
     setLoading(true);
+    const uploadToast = toast.loading("Bhai, product details save ho rahi hain...");
+    
     try {
-      // Image Upload Logic: Convert Base64 to Storage URLs if needed
-      const uploadedImages = [];
-      for (const img of formData.images) {
-        if (img && img.startsWith('data:image')) {
+      // Parallel Image Upload Logic with longer timeout to avoid hanging
+      const uploadPromises = formData.images.map(async (img: string, index: number) => {
+        if (!img || img.trim() === '') return null;
+        
+        if (img.startsWith('data:image')) {
           try {
-            // Upload to Firebase Storage
-            const fileRef = ref(storage, `products/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`);
+            // Give each image a unique name
+            const fileName = `products/${Date.now()}_img${index}_${Math.random().toString(36).substring(7)}.jpg`;
+            const fileRef = ref(storage, fileName);
+            const blob = base64ToBlob(img);
             
-            // Convert base64 to blob
-            const response = await fetch(img);
-            const blob = await response.blob();
+            // Timeout promise: 30 seconds for each upload (increased from 10s)
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('timeout')), 30000)
+            );
             
-            await uploadBytes(fileRef, blob);
-            const url = await getDownloadURL(fileRef);
-            uploadedImages.push(url);
-          } catch (uploadError) {
-            console.error("Image upload failed:", uploadError);
-            // Fallback to original image if upload fails (though it might hit Firestore limit)
-            uploadedImages.push(img);
+            const uploadTask = uploadBytes(fileRef, blob);
+            await Promise.race([uploadTask, timeoutPromise]);
+            
+            return await getDownloadURL(fileRef);
+          } catch (uploadError: any) {
+            console.warn("Storage upload skip/fail, fallback check:", uploadError);
+            
+            // CRITICAL: If base64 is too large (> 800KB), it WILL fail in Firestore
+            // We must block large base64 strings from being saved to the document
+            if (img.length > 800000) {
+               throw new Error(`Image ${index + 1} is too large and failed to upload. Please reduce size or try again.`);
+            }
+            return img; 
           }
-        } else if (img) {
-          uploadedImages.push(img);
         }
+        return img;
+      });
+
+      const uploadedImages = (await Promise.all(uploadPromises)).filter(img => img !== null);
+      
+      // Secondary check: Total payload size check (rough estimate)
+      const totalSize = JSON.stringify(uploadedImages).length;
+      if (totalSize > 900000) {
+         throw new Error("Bhai, total document size (images) 1MB limit cross kar raha hai. Kuch images kam karein ya size chota karein.");
       }
 
       const productData = {
         ...formData,
         images: uploadedImages,
+        price: Number(formData.price) || 0,
+        stock: Number(formData.stock) || 0,
+        comparePrice: Number(formData.comparePrice) || 0,
         updatedAt: new Date().toISOString()
       };
 
       if (editingProduct) {
-        try {
-          await updateDoc(doc(db, 'products', editingProduct.id), productData);
-          toast.success("Product updated successfully");
-        } catch (error) {
-          handleFirestoreError(error, OperationType.UPDATE, `products/${editingProduct.id}`);
-        }
+        await updateDoc(doc(db, 'products', editingProduct.id), productData);
+        toast.success("Product updated!", { id: uploadToast });
       } else {
-        try {
-          await addDoc(collection(db, 'products'), {
-            ...productData,
-            createdAt: new Date().toISOString()
-          });
-          
-          // Send broadcast notification for new product
-          try {
-            fetch('/api/send-push', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                title: 'New Arrival! 👗',
-                body: `Check out our new ${formData.name}. Shop now!`,
-                url: '/',
-                type: 'all'
-              })
-            });
-
-            // Send Newsletter Emails
-            const newsletterSnap = await getDocs(collection(db, 'newsletter'));
-            const emails = newsletterSnap.docs.map(doc => doc.data().email).filter(Boolean);
-            
-            if (emails.length > 0) {
-              fetch('/api/send-email', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  to: emails,
-                  subject: `New Arrival: ${formData.name} is here! 👗`,
-                  html: `
-                    <div style="font-family: sans-serif; padding: 20px; color: #1A2C54;">
-                      <h1 style="color: #E11D48;">New Arrival at The Ruby!</h1>
-                      <p>Hi there,</p>
-                      <p>We've just added a stunning new piece to our collection: <strong>${formData.name}</strong>.</p>
-                      <p>${formData.description}</p>
-                      <p>Price: ₹${formData.price}</p>
-                      <a href="${window.location.origin}" style="display: inline-block; background: #E11D48; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 20px;">Shop Now</a>
-                    </div>
-                  `
-                })
-              });
-            }
-          } catch (e) {
-            console.error("Newsletter notification error:", e);
-          }
-
-          toast.success("Product added successfully");
-        } catch (error) {
-          handleFirestoreError(error, OperationType.CREATE, 'products');
-        }
+        await addDoc(collection(db, 'products'), {
+          ...productData,
+          createdAt: new Date().toISOString()
+        });
+        toast.success("Product added successfully!", { id: uploadToast });
       }
+
+      // CLOSE UI FIRST for speed
       setShowAddProductPage(false);
       setEditingProduct(null);
+      setLoading(false);
+      
+      // Reset form
       setFormData({ 
         name: '', 
         description: '', 
@@ -2652,6 +2705,7 @@ export default function AdminDashboard() {
         images: [''], 
         stock: 10,
         comparePrice: 0,
+        updatedAt: '',
         stockStatus: 'In Stock',
         seoTitle: '',
         seoDescription: '',
@@ -2662,15 +2716,34 @@ export default function AdminDashboard() {
         isTrending: false,
         variants: []
       });
+
+      // Fetch products without blocking
       fetchProducts();
+
+      // Trigger background notification
+      fetch('/api/send-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'New Arrival! 👗',
+          body: `${formData.name} is now available.`,
+          url: '/',
+          type: 'all'
+        })
+      }).catch(() => {});
+
     } catch (error: any) {
-      console.error("Save product error:", error);
-      if (error.message && error.message.includes('quota')) {
-        toast.error("Bhai, aaj ki product upload quota khatam ho gayi hai. Kal try karein.");
-      } else {
-        toast.error(error.message || "Failed to save product");
+      toast.dismiss(uploadToast);
+      console.error("Critical save error:", error);
+      
+      let errorMsg = "Bhai, kuch error aaya hai. Refresh karke dekhein.";
+      if (error.message && error.message.includes('too large')) {
+         errorMsg = "Bhai, image bahut badi hai! Kam size wali use karein.";
+      } else if (error.message && (error.message.includes('permission-denied') || error.message.includes('permissions'))) {
+         errorMsg = "Aapke paas data save karne ki permission nahi hai.";
       }
-    } finally {
+      
+      toast.error(errorMsg);
       setLoading(false);
     }
   };
@@ -2702,39 +2775,56 @@ export default function AdminDashboard() {
     try {
       const reader = new FileReader();
       reader.onload = async (evt) => {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws) as any[];
+        try {
+          const bstr = evt.target?.result;
+          const wb = XLSX.read(bstr, { type: 'binary' });
+          const wsname = wb.SheetNames[0];
+          const ws = wb.Sheets[wsname];
+          const data = XLSX.utils.sheet_to_json(ws) as any[];
 
-        let successCount = 0;
-        for (const item of data) {
-          if (item.name && item.price) {
-            try {
-              await addDoc(collection(db, 'products'), {
-                name: item.name,
-                price: Number(item.price),
-                description: item.description || '',
-                category: item.category || '',
-                stock: Number(item.stock) || 0,
-                images: item.images ? item.images.split(',') : [],
-                createdAt: new Date().toISOString(),
-                status: 'active'
-              });
-              successCount++;
-            } catch (err) {
-              handleFirestoreError(err, OperationType.CREATE, 'products/bulk');
+          let successCount = 0;
+          let failCount = 0;
+          let lastError = "";
+
+          for (const item of data) {
+            if (item.name && item.price) {
+              try {
+                await addDoc(collection(db, 'products'), {
+                  name: String(item.name),
+                  price: Number(item.price) || 0,
+                  description: String(item.description || ''),
+                  category: String(item.category || 'Women'),
+                  stock: Number(item.stock) || 0,
+                  images: item.images ? String(item.images).split(',') : [],
+                  createdAt: new Date().toISOString(),
+                  status: 'active',
+                  sku: item.sku || `BULK-${Math.random().toString(36).substring(7).toUpperCase()}`,
+                  comparePrice: Number(item.comparePrice) || 0
+                });
+                successCount++;
+              } catch (err: any) {
+                console.error("Bulk Item Error:", err);
+                failCount++;
+                lastError = err.message || String(err);
+              }
             }
           }
+          
+          if (failCount > 0) {
+            toast.warning(`Uploaded ${successCount} products, but ${failCount} failed. Last error: ${lastError}`);
+          } else {
+            toast.success(`Successfully uploaded ${successCount} products!`);
+          }
+          fetchDashboardData();
+        } catch (innerError: any) {
+          console.error("Reader Process Error:", innerError);
+          toast.error("File processing failed: " + (innerError.message || String(innerError)));
         }
-        toast.success(`Successfully uploaded ${successCount} products!`);
-        fetchDashboardData();
       };
       reader.readAsBinaryString(file);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Bulk Upload Error:", error);
-      toast.error("Failed to upload products");
+      toast.error("Failed to upload: " + (error.message || "Unknown error"));
     } finally {
       setIsUploadingBulk(false);
     }
@@ -3464,6 +3554,7 @@ export default function AdminDashboard() {
               categories={categories}
               colors={colors}
               sizes={sizes}
+              loading={loading}
             />
           ) : (
             <>
@@ -3993,7 +4084,11 @@ export default function AdminDashboard() {
                               <Edit2 size={16} />
                             </button>
                             <button 
-                              onClick={() => handleDeleteProduct(p.id)}
+                              onClick={() => {
+                                if (confirm('Bhai, kya aap sach mein is product ko delete karna chahte hain?')) {
+                                  handleDeleteProduct(p.id);
+                                }
+                              }}
                               className="p-2 text-gray-400 hover:text-ruby transition-colors"
                             >
                               <Trash2 size={16} />
@@ -4007,66 +4102,73 @@ export default function AdminDashboard() {
               </div>
 
               {/* Mobile Card View */}
-              <div className="md:hidden grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="md:hidden space-y-3">
                 {products.map(p => (
-                  <div key={p.id} className="bg-white p-4 rounded-3xl shadow-sm border border-gray-50 flex flex-col">
-                    <div className="relative aspect-square mb-3 group/card">
+                  <div key={p.id} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-50 flex gap-4 items-center">
+                    <div className="w-20 h-20 flex-shrink-0 relative">
                        {p.images[0] ? (
-                        <img src={p.images[0]} alt={p.name} className="w-full h-full rounded-2xl object-cover bg-gray-100" referrerPolicy="no-referrer" />
+                        <img src={p.images[0]} alt={p.name} className="w-full h-full rounded-xl object-cover bg-gray-100" referrerPolicy="no-referrer" />
                       ) : (
-                        <div className="w-full h-full rounded-2xl bg-gray-50 flex items-center justify-center text-gray-200">
-                          <ImageIcon size={32} />
+                        <div className="w-full h-full rounded-xl bg-gray-50 flex items-center justify-center text-gray-200">
+                          <ImageIcon size={24} />
                         </div>
                       )}
-                      <div className="absolute top-2 right-2 flex gap-1.5 translate-y-1 opacity-0 group-hover/card:translate-y-0 group-hover/card:opacity-100 transition-all">
-                        <button 
-                          onClick={() => {
-                            setEditingProduct(p);
-                            setFormData({
-                              name: p.name,
-                              description: p.description,
-                              price: p.price,
-                              category: p.category,
-                              sizes: p.sizes,
-                              images: p.images,
-                              stock: p.stock,
-                              comparePrice: p.comparePrice || 0,
-                              stockStatus: p.stockStatus || 'In Stock',
-                              seoTitle: p.seoTitle || '',
-                              seoDescription: p.seoDescription || '',
-                              weight: p.weight || '',
-                              dimensions: p.dimensions || '',
-                              sku: p.sku || '',
-                              barcode: p.barcode || '',
-                              isTrending: p.isTrending || false,
-                              variants: p.variants || []
-                            });
-                            setShowAddProductPage(true);
-                          }}
-                          className="w-8 h-8 bg-white/90 backdrop-blur-sm shadow-sm rounded-lg flex items-center justify-center text-gray-500 hover:text-ruby"
-                        >
-                          <Edit2 size={14} />
-                        </button>
-                        <button 
-                          onClick={() => handleDeleteProduct(p.id)}
-                          className="w-8 h-8 bg-white/90 backdrop-blur-sm shadow-sm rounded-lg flex items-center justify-center text-gray-500 hover:text-ruby"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
                     </div>
-                    <div className="flex-grow">
-                      <h3 className="text-[14px] font-[800] text-gray-900 leading-tight tracking-tight">{p.name}</h3>
-                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">{p.category}</p>
-                    </div>
-                    <div className="mt-4 pt-3 border-t border-gray-50 flex items-center justify-between">
-                       <span className="text-[15px] font-black text-gray-900 tracking-tighter font-syne uppercase">₹{p.price.toFixed(0)}</span>
-                       <span className={cn(
-                          "px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tighter",
-                          p.stock < 10 ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"
-                       )}>
+                    <div className="flex-grow min-w-0">
+                      <h3 className="text-[13px] font-[800] text-gray-900 leading-tight truncate">{p.name}</h3>
+                      <div className="flex items-center gap-2 mt-1">
+                        <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">{p.category}</p>
+                        <span className="text-gray-300">•</span>
+                        <span className={cn(
+                          "text-[9px] font-bold uppercase",
+                          p.stock < 10 ? "text-red-500" : "text-emerald-500"
+                        )}>
                           {p.stock} In Stock
-                       </span>
+                        </span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between">
+                        <span className="text-[14px] font-black text-gray-900 tracking-tighter">₹{p.price.toFixed(0)}</span>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => {
+                              setEditingProduct(p);
+                              setFormData({
+                                name: p.name,
+                                description: p.description,
+                                price: p.price,
+                                category: p.category,
+                                sizes: p.sizes,
+                                images: p.images,
+                                stock: p.stock,
+                                comparePrice: p.comparePrice || 0,
+                                stockStatus: p.stockStatus || 'In Stock',
+                                seoTitle: p.seoTitle || '',
+                                seoDescription: p.seoDescription || '',
+                                weight: p.weight || '',
+                                dimensions: p.dimensions || '',
+                                sku: p.sku || '',
+                                barcode: p.barcode || '',
+                                isTrending: p.isTrending || false,
+                                variants: p.variants || []
+                              });
+                              setShowAddProductPage(true);
+                            }}
+                            className="w-8 h-8 bg-gray-50 rounded-lg flex items-center justify-center text-gray-500 hover:text-ruby transition-colors"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              if (confirm('Bhai, kya aap sach mein is product ko delete karna chahte hain?')) {
+                                handleDeleteProduct(p.id);
+                              }
+                            }}
+                            className="w-8 h-8 bg-gray-50 rounded-lg flex items-center justify-center text-gray-500 hover:text-ruby transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ))}

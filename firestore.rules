@@ -71,6 +71,10 @@ service cloud.firestore {
     //
     // ===============================================================
 
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
     // Helper Functions
     function isAuthenticated() {
       return request.auth != null;
@@ -118,11 +122,11 @@ service cloud.firestore {
 
     function isValidProduct(data) {
       return data.keys().hasAll(['name', 'price', 'category', 'images']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.price is number && data.price > 0 &&
-             data.category in ['Men', 'Women', 'New Arrivals'] &&
-             data.images is list && data.images.size() > 0 &&
-             data.stock is number;
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.price is number && data.price >= 0 &&
+             data.category is string && data.category.size() > 0 &&
+             data.images is list &&
+             (!('stock' in data) || data.stock is number);
     }
 
     function isValidOrder(data) {
