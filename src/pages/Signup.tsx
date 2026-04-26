@@ -43,94 +43,11 @@ export default function Signup() {
     };
     fetchSettings();
 
-    const handleRedirect = async () => {
+    const checkRedirect = async () => {
       try {
         const result = await getRedirectResult(auth);
         if (result?.user) {
           const user = result.user;
-          await finishSignup(user);
-          return;
-        } 
-        
-        if (auth.currentUser) {
-          await finishSignup(auth.currentUser);
-          return;
-        }
-      } catch (error: any) {
-        console.error("Signup Redirect Error:", error.code);
-        if (auth.currentUser) {
-          await finishSignup(auth.currentUser);
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const finishSignup = async (user: any) => {
-      try {
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (!userDoc.exists()) {
-          await setDoc(doc(db, 'users', user.uid), {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            role: 'user',
-            isVerified: true,
-            createdAt: new Date().toISOString()
-          });
-        }
-        toast.success("Account created successfully! 🎉");
-        navigate('/');
-      } catch (err) {
-        console.error("Finish signup error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user) {
-        finishSignup(user);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    const timer = setTimeout(handleRedirect, 1000);
-    return () => {
-      clearTimeout(timer);
-      unsubscribe();
-    };
-  }, [navigate, loading]);
-
-  const handleGoogleLogin = async () => {
-    setLoading(true);
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ 
-        prompt: 'select_account',
-        display: 'touch',
-        ux_mode: 'redirect'
-      });
-      
-      await setPersistence(auth, browserLocalPersistence);
-
-      const isWebView = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || 
-                       (window as any).navigator.standalone || 
-                       window.matchMedia('(display-mode: standalone)').matches;
-
-      provider.setCustomParameters({ 
-        prompt: 'select_account',
-        display: 'touch',
-        ux_mode: 'redirect'
-      });
-
-      if (isWebView) {
-        console.log("🚀 App Detected: Forcing Redirect Mode for Signup...");
-        await signInWithRedirect(auth, provider);
-      } else {
-        try {
-          const { user } = await signInWithPopup(auth, provider);
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (!userDoc.exists()) {
             await setDoc(doc(db, 'users', user.uid), {
@@ -142,27 +59,48 @@ export default function Signup() {
               createdAt: new Date().toISOString()
             });
           }
-          toast.success("successfully account created 🎉", { position: 'bottom-center', duration: 5000 });
+          toast.success("Account created successfully! 🎉");
           navigate('/');
-        } catch (popupError: any) {
-          if (popupError.code === 'auth/popup-blocked' || 
-              popupError.code === 'auth/operation-not-supported-in-this-environment') {
-            await signInWithRedirect(auth, provider);
-          } else {
-            throw popupError;
-          }
+        }
+      } catch (error: any) {
+        console.error("Redirect error:", error);
+      }
+    };
+    checkRedirect();
+  }, [navigate]);
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      
+      try {
+        const { user } = await signInWithPopup(auth, provider);
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (!userDoc.exists()) {
+          await setDoc(doc(db, 'users', user.uid), {
+            uid: user.uid,
+            email: user.email,
+            displayName: user.displayName,
+            role: 'user',
+            isVerified: true,
+            createdAt: new Date().toISOString()
+          });
+        }
+        toast.success("Signup Successful! 🎉");
+        navigate('/');
+      } catch (popupError: any) {
+        if (popupError.code === 'auth/popup-blocked' || popupError.code === 'auth/operation-not-supported-in-this-environment') {
+          await signInWithRedirect(auth, provider);
+        } else {
+          throw popupError;
         }
       }
     } catch (error: any) {
-      console.error("Login error:", error);
-      if (error.code === 'auth/popup-closed-by-user') {
-        // No toast needed for this one
-        return;
-      }
-      if (error.code === 'auth/account-exists-with-different-credential') {
-        toast.error("Aapka account pehle se bana hai kisi aur method se. Please wahi use karein.");
-      } else {
-        toast.error("Account nahi ban paaya. Dobara try karein.");
+      console.error("Signup error:", error);
+      if (error.code !== 'auth/popup-closed-by-user') {
+        toast.error("Signup failed. Please try again.");
       }
     } finally {
       setLoading(false);

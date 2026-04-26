@@ -37,97 +37,11 @@ export default function Login() {
     };
     fetchSettings();
 
-    const handleRedirect = async () => {
+    const checkRedirect = async () => {
       try {
         const result = await getRedirectResult(auth);
-        
         if (result?.user) {
-          await finishLogin(result.user);
-          return;
-        } 
-        
-        if (auth.currentUser) {
-          await finishLogin(auth.currentUser);
-          return;
-        }
-      } catch (error: any) {
-        console.error("Redirect Error:", error.code);
-        if (auth.currentUser) {
-          await finishLogin(auth.currentUser);
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const finishLogin = async (user: any) => {
-      try {
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (!userDoc.exists()) {
-          await setDoc(doc(db, 'users', user.uid), {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            role: 'user',
-            isVerified: true,
-            createdAt: new Date().toISOString()
-          });
-        }
-        toast.success("Welcome back!");
-        navigate('/');
-      } catch (err) {
-        console.error("Finish login error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user) {
-        finishLogin(user);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    const timer = setTimeout(handleRedirect, 1000);
-    return () => {
-      clearTimeout(timer);
-      unsubscribe();
-    };
-  }, [navigate]);
-
-  const handleGoogleLogin = async () => {
-    setLoading(true);
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ 
-        prompt: 'select_account',
-        display: 'touch'
-      });
-      
-      // Strict persistence check
-      await setPersistence(auth, browserLocalPersistence);
-
-      // Detection for WebView
-      const isWebView = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || 
-                       (window as any).navigator.standalone || 
-                       window.matchMedia('(display-mode: standalone)').matches;
-
-      // For Median/GoNative, we force use redirect with ux_mode
-      provider.setCustomParameters({ 
-        prompt: 'select_account',
-        display: 'touch',
-        ux_mode: 'redirect' 
-      });
-
-      if (isWebView) {
-        console.log("🚀 App/WebView detected: Using redirect mode.");
-        await signInWithRedirect(auth, provider);
-      } else {
-        // Desktop/Regular Browser
-        try {
-          const { user } = await signInWithPopup(auth, provider);
+          const user = result.user;
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (!userDoc.exists()) {
             await setDoc(doc(db, 'users', user.uid), {
@@ -141,25 +55,46 @@ export default function Login() {
           }
           toast.success("Welcome back!");
           navigate('/');
-        } catch (popupError: any) {
-          if (popupError.code === 'auth/popup-blocked' || 
-              popupError.code === 'auth/operation-not-supported-in-this-environment') {
-            await signInWithRedirect(auth, provider);
-          } else {
-            throw popupError;
-          }
+        }
+      } catch (error: any) {
+        console.error("Redirect error:", error);
+      }
+    };
+    checkRedirect();
+  }, [navigate]);
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      
+      try {
+        const { user } = await signInWithPopup(auth, provider);
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (!userDoc.exists()) {
+          await setDoc(doc(db, 'users', user.uid), {
+            uid: user.uid,
+            email: user.email,
+            displayName: user.displayName,
+            role: 'user',
+            isVerified: true,
+            createdAt: new Date().toISOString()
+          });
+        }
+        toast.success("Welcome back!");
+        navigate('/');
+      } catch (popupError: any) {
+        if (popupError.code === 'auth/popup-blocked' || popupError.code === 'auth/operation-not-supported-in-this-environment') {
+          await signInWithRedirect(auth, provider);
+        } else {
+          throw popupError;
         }
       }
     } catch (error: any) {
       console.error("Login error:", error);
-      if (error.code === 'auth/popup-closed-by-user') {
-        // Just return, no need to show error if user closed the window themselves
-        return;
-      }
-      if (error.code === 'auth/account-exists-with-different-credential') {
-        toast.error("Aapka account pehle se bana hai kisi aur method se (Google ya Email). Wahi use karke login karein.");
-      } else {
-        toast.error("Login nahi ho paaya. Dobara try karein.");
+      if (error.code !== 'auth/popup-closed-by-user') {
+        toast.error("Login failed. Please try again.");
       }
     } finally {
       setLoading(false);

@@ -69,11 +69,6 @@ export default function App() {
 
 import { useVisitorTracking } from './hooks/useVisitorTracking';
 
-import { auth, db } from './firebase';
-import { getRedirectResult } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { toast } from 'sonner';
-
 function AppContent() {
   const location = useLocation();
   const navigate = useNavigate();
