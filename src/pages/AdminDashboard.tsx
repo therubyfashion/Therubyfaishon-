@@ -3419,7 +3419,7 @@ export default function AdminDashboard() {
       </aside>
 
       {/* Main Content */}
-      <main className={`flex-grow transition-all duration-300 min-w-0 overflow-hidden ${sidebarOpen ? 'md:ml-64' : 'md:ml-20'}`}>
+      <main className={`flex-grow transition-all duration-300 min-w-0 overflow-hidden bg-[#F2F2F2] font-inter ${sidebarOpen ? 'md:ml-64' : 'md:ml-20'}`}>
         {/* Top Bar */}
         <header className="bg-white h-20 flex items-center justify-between px-4 md:px-8 sticky top-0 z-40 shadow-sm border-b border-gray-100">
           <div className="flex items-center space-x-3 md:space-x-4 min-w-0">
@@ -3563,8 +3563,8 @@ export default function AdminDashboard() {
                   {/* Dashboard Header */}
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                     <div>
-                      <h2 className="text-3xl font-black text-[#1A2C54] tracking-tight">Command Center</h2>
-                      <p className="text-sm text-gray-400 font-medium">Welcome back, Admin. Here's what's happening today.</p>
+                      <h2 className="text-3xl font-black text-[#1A1A1A] tracking-tight underline decoration-dotted decoration-gray-300 underline-offset-8">Command Center</h2>
+                      <p className="text-sm text-gray-400 font-medium mt-3">Welcome back, Admin. Here's what's happening today.</p>
                     </div>
                     <div className="flex items-center gap-3 w-full md:w-auto">
                       <div className="flex bg-gray-100 p-1 rounded-xl w-full md:w-auto">
@@ -5690,8 +5690,8 @@ export default function AdminDashboard() {
             <div className="space-y-10">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                 <div className="space-y-1">
-                  <h2 className="text-3xl font-black text-[#1A2C54] tracking-tight">Business Analytics</h2>
-                  <p className="text-sm text-gray-400 font-medium">Deep dive into your store's performance metrics</p>
+                  <h2 className="text-3xl font-black text-[#1A1A1A] tracking-tight underline decoration-dotted decoration-gray-300 underline-offset-8">Business Analytics</h2>
+                  <p className="text-sm text-gray-400 font-medium mt-3">Deep dive into your store's performance metrics</p>
                 </div>
                 <div className="flex bg-white p-1.5 rounded-2xl border border-gray-100 shadow-sm">
                   {['7D', '30D', '90D', 'ALL'].map((period) => (
