@@ -43,42 +43,63 @@ export default function Signup() {
     };
     fetchSettings();
 
-    // Global redirect handler for signup
     const handleRedirect = async () => {
       try {
-        console.log("Checking for Firebase signup redirect result...");
         const result = await getRedirectResult(auth);
-        
         if (result?.user) {
           const user = result.user;
-          console.log("Signup redirect success:", user.email);
-          
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (!userDoc.exists()) {
-            await setDoc(doc(db, 'users', user.uid), {
-              uid: user.uid,
-              email: user.email,
-              displayName: user.displayName,
-              role: 'user',
-              isVerified: true,
-              createdAt: new Date().toISOString()
-            });
-          }
-          toast.success("Account created successfully! 🎉");
-          navigate('/');
+          await finishSignup(user);
+          return;
+        } 
+        
+        if (auth.currentUser) {
+          await finishSignup(auth.currentUser);
+          return;
         }
       } catch (error: any) {
-        console.error("Signup Redirect Error:", error.code, error.message);
+        console.error("Signup Redirect Error:", error.code);
+        if (auth.currentUser) {
+          await finishSignup(auth.currentUser);
+        }
+      } finally {
+        setLoading(false);
       }
     };
 
-    // Delay for storage stability
-    const timer = setTimeout(() => {
-      handleRedirect();
-    }, 1500);
+    const finishSignup = async (user: any) => {
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (!userDoc.exists()) {
+          await setDoc(doc(db, 'users', user.uid), {
+            uid: user.uid,
+            email: user.email,
+            displayName: user.displayName,
+            role: 'user',
+            isVerified: true,
+            createdAt: new Date().toISOString()
+          });
+        }
+        toast.success("Account created successfully! 🎉");
+        navigate('/');
+      } catch (err) {
+        console.error("Finish signup error:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    return () => clearTimeout(timer);
-  }, [navigate]);
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user && !loading) {
+        finishSignup(user);
+      }
+    });
+
+    const timer = setTimeout(handleRedirect, 1000);
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [navigate, loading]);
 
   const handleGoogleLogin = async () => {
     setLoading(true);
@@ -95,6 +116,12 @@ export default function Signup() {
       const isWebView = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || 
                        (window as any).navigator.standalone || 
                        window.matchMedia('(display-mode: standalone)').matches;
+
+      provider.setCustomParameters({ 
+        prompt: 'select_account',
+        display: 'touch',
+        ux_mode: 'redirect'
+      });
 
       if (isWebView) {
         console.log("🚀 App Detected: Forcing Redirect Mode for Signup...");
