@@ -69,12 +69,48 @@ export default function App() {
 
 import { useVisitorTracking } from './hooks/useVisitorTracking';
 
+import { auth, db } from './firebase';
+import { getRedirectResult } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { toast } from 'sonner';
+
 function AppContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const isAdminPath = location.pathname.startsWith('/admin');
   const [showSplash, setShowSplash] = React.useState(true);
   
+  // Global handler for Firebase Auth Redirects (ChatGPT Step 3)
+  React.useEffect(() => {
+    const handleGlobalRedirect = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result?.user) {
+          const user = result.user;
+          console.log("✅ Global Redirect Detection:", user.email);
+          
+          // Sync user to DB
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (!userDoc.exists()) {
+            await setDoc(doc(db, 'users', user.uid), {
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              role: 'user',
+              isVerified: true,
+              createdAt: new Date().toISOString()
+            });
+          }
+          toast.success("Login Successful!");
+        }
+      } catch (error: any) {
+        console.error("Global Redirect Error:", error.code);
+      }
+    };
+
+    handleGlobalRedirect();
+  }, []);
+
   // Track live visitors
   useVisitorTracking();
 
