@@ -1,11 +1,12 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Sun, Zap, ShoppingBag, User, Activity, Eye, ShoppingCart, Globe as GlobeIcon, MapPin } from 'lucide-react';
 import { db, auth } from '../firebase';
-import { collection, query, orderBy, limit, onSnapshot, where, Timestamp } from 'firebase/firestore';
+import { collection, query, orderBy, limit, where, Timestamp, getDocs } from 'firebase/firestore';
 import { cn } from '../lib/utils';
-import ReactGlobe from 'react-globe.gl';
 import { io, Socket } from 'socket.io-client';
+
+const ReactGlobe = lazy(() => import('react-globe.gl'));
 
 // Helper to format currency
 const formatINR = (val: number) => `₹${val.toLocaleString('en-IN')}`;
@@ -58,25 +59,21 @@ export default function LiveViewContent() {
     };
   }, []);
 
-  // 🟢 REAL DATA FETCHING (Firestore)
+  // 🟢 DATA FETCHING (Optimized)
   useEffect(() => {
-    let unsubOrders = () => {};
-    let unsubCarts = () => {};
-
-    const setupListeners = () => {
-      unsubOrders = onSnapshot(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(15)), (snap) => {
-        const docs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const fetchData = async () => {
+      try {
+        const ordersSnap = await getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(15)));
+        const docs = ordersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setRealOrders(docs);
         
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
         const ensureDate = (val: any) => {
           if (!val) return new Date(0);
           if (typeof val.toDate === 'function') return val.toDate();
           return new Date(val);
         };
-
         const todayDocs = docs.filter((d: any) => ensureDate(d.createdAt) >= today);
         const total = todayDocs.reduce((acc, curr: any) => acc + (curr.total || 0), 0);
         
@@ -85,19 +82,20 @@ export default function LiveViewContent() {
           totalSales: total,
           ordersToday: todayDocs.length,
         }));
-      }, (error) => {
-        console.warn("LiveView Orders Unsub/Error:", error.message);
-      });
 
-      unsubCarts = onSnapshot(query(collection(db, 'carts'), limit(50)), (snap) => {
+        const cartsSnap = await getDocs(query(collection(db, 'carts'), limit(50)));
         setMetrics(prev => ({
           ...prev,
-          activeCarts: snap.docs.length,
-          checkingOut: Math.floor(snap.docs.length * 0.15)
+          activeCarts: cartsSnap.docs.length,
+          checkingOut: Math.floor(cartsSnap.docs.length * 0.15)
         }));
-      }, (error) => {
-        console.warn("LiveView Carts Unsub/Error:", error.message);
-      });
+      } catch (error: any) {
+        if (error.code === 'resource-exhausted') {
+          console.warn("LiveView: Quota reached.");
+        } else {
+          console.warn("LiveView Data Fetch Error:", error.message);
+        }
+      }
     };
 
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
@@ -105,18 +103,11 @@ export default function LiveViewContent() {
         user.email === 'mdsagaransari65670@gmail.com' || 
         user.email?.toLowerCase().includes('rubi')
       )) {
-        setupListeners();
-      } else {
-        unsubOrders();
-        unsubCarts();
+        fetchData();
       }
     });
 
-    return () => {
-      unsubscribeAuth();
-      unsubOrders();
-      unsubCarts();
-    };
+    return () => unsubscribeAuth();
   }, []);
 
   // Data for globe points
@@ -192,26 +183,32 @@ export default function LiveViewContent() {
 
         {/* React Globe Implementation */}
         <div className="absolute inset-0 z-10">
-          <ReactGlobe
-            ref={globeRef}
-            width={globeSize.width}
-            height={globeSize.height}
-            backgroundColor="rgba(0,0,0,0)"
-            globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
-            bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
-            pointsData={pointsData}
-            pointColor="color"
-            pointAltitude={0.01}
-            pointRadius={0.5}
-            pointLabel="name"
-            ringsData={orderRings}
-            ringColor={() => '#9b59b6'}
-            ringMaxRadius="maxR"
-            ringPropagationSpeed="propagationSpeed"
-            ringRepeatPeriod={800}
-            atmosphereColor="#3a9ad9"
-            atmosphereAltitude={0.15}
-          />
+          <Suspense fallback={
+            <div className="flex items-center justify-center h-full text-white/20 font-bold uppercase tracking-widest animate-pulse">
+              Initializing Earth...
+            </div>
+          }>
+            <ReactGlobe
+              ref={globeRef}
+              width={globeSize.width}
+              height={globeSize.height}
+              backgroundColor="rgba(0,0,0,0)"
+              globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
+              bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
+              pointsData={pointsData}
+              pointColor="color"
+              pointAltitude={0.01}
+              pointRadius={0.5}
+              pointLabel="name"
+              ringsData={orderRings}
+              ringColor={() => '#9b59b6'}
+              ringMaxRadius="maxR"
+              ringPropagationSpeed="propagationSpeed"
+              ringRepeatPeriod={800}
+              atmosphereColor="#3a9ad9"
+              atmosphereAltitude={0.15}
+            />
+          </Suspense>
         </div>
 
         {/* Cinematic Vignette */}

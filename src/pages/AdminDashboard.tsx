@@ -2257,18 +2257,18 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       const [productsSnap, ordersSnap, usersSnap, categoriesSnap, colorsSnap, sizesSnap, couponsSnap, bannersSnap, settingsSnap, reviewsSnap, cartsSnap, sessionsSnap] = await Promise.all([
-        getDocs(collection(db, 'products')).catch(e => handleFirestoreError(e, OperationType.GET, 'products')),
-        getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'))).catch(e => handleFirestoreError(e, OperationType.GET, 'orders')),
-        getDocs(collection(db, 'users')).catch(e => handleFirestoreError(e, OperationType.GET, 'users')),
+        getDocs(query(collection(db, 'products'), limit(500))).catch(e => handleFirestoreError(e, OperationType.GET, 'products')),
+        getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(500))).catch(e => handleFirestoreError(e, OperationType.GET, 'orders')),
+        getDocs(query(collection(db, 'users'), limit(500))).catch(e => handleFirestoreError(e, OperationType.GET, 'users')),
         getDocs(collection(db, 'categories')).catch(e => handleFirestoreError(e, OperationType.GET, 'categories')),
         getDocs(collection(db, 'colors')).catch(e => handleFirestoreError(e, OperationType.GET, 'colors')),
         getDocs(collection(db, 'sizes')).catch(e => handleFirestoreError(e, OperationType.GET, 'sizes')),
         getDocs(collection(db, 'coupons')).catch(e => handleFirestoreError(e, OperationType.GET, 'coupons')),
         getDocs(collection(db, 'banners')).catch(e => handleFirestoreError(e, OperationType.GET, 'banners')),
         getDocs(collection(db, 'settings')).catch(e => handleFirestoreError(e, OperationType.GET, 'settings')),
-        getDocs(query(collection(db, 'reviews'), orderBy('createdAt', 'desc'))).catch(e => handleFirestoreError(e, OperationType.GET, 'reviews')),
-        getDocs(query(collection(db, 'carts'), orderBy('updatedAt', 'desc'))).catch(e => handleFirestoreError(e, OperationType.GET, 'carts')),
-        getDocs(collection(db, 'active_sessions')).catch(e => handleFirestoreError(e, OperationType.GET, 'active_sessions'))
+        getDocs(query(collection(db, 'reviews'), orderBy('createdAt', 'desc'), limit(100))).catch(e => handleFirestoreError(e, OperationType.GET, 'reviews')),
+        getDocs(query(collection(db, 'carts'), orderBy('updatedAt', 'desc'), limit(100))).catch(e => handleFirestoreError(e, OperationType.GET, 'carts')),
+        getDocs(query(collection(db, 'active_sessions'), limit(100))).catch(e => handleFirestoreError(e, OperationType.GET, 'active_sessions'))
       ]);
 
       if (!settingsSnap.empty) {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Category } from '../types';
 import ProductCard from '../components/ProductCard';
@@ -41,17 +41,11 @@ export default function Shop() {
     const fetchProducts = async () => {
       setLoading(true);
       try {
-        let q = collection(db, 'products');
-        let firestoreQuery;
+        const productsQuery = activeCategory !== 'All' 
+          ? query(collection(db, 'products'), where('category', '==', activeCategory), limit(24))
+          : query(collection(db, 'products'), limit(24));
 
-        // Base query with category filter
-        if (activeCategory !== 'All') {
-          firestoreQuery = query(q, where('category', '==', activeCategory));
-        } else {
-          firestoreQuery = query(q);
-        }
-
-        const snapshot = await getDocs(firestoreQuery);
+        const snapshot = await getDocs(productsQuery);
         let fetchedProducts = snapshot.docs.map(doc => ({
           id: doc.id,
           ...(doc.data() as Omit<Product, 'id'>)

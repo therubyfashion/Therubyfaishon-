@@ -7,8 +7,11 @@ import { Product, Review } from '../types';
 import { useCart } from '../contexts/CartContext';
 import { useWishlist } from '../contexts/WishlistContext';
 import { toast } from 'sonner';
-import { ShoppingBag, Heart, Share2, ChevronRight, Truck, ShieldCheck, RefreshCw, X, Ruler, Star, MessageSquare, ThumbsUp, User, Minus, Plus, Send, ChevronDown } from 'lucide-react';
+import { ShoppingBag, Heart, Share2, ChevronRight, Truck, ShieldCheck, RefreshCw, X, Ruler, Star, MessageSquare, ThumbsUp, User, Minus, Plus, Send, ChevronDown, Maximize2 } from 'lucide-react';
 import { motion, AnimatePresence, useScroll, useTransform } from 'motion/react';
+import { Swiper, SwiperSlide } from 'swiper/react';
+import { Navigation, Pagination, Zoom, Thumbs } from 'swiper/modules';
+import type { Swiper as SwiperType } from 'swiper';
 import { ProductDetailSkeleton } from '../components/Skeleton';
 import ProductCard from '../components/ProductCard';
 
@@ -185,6 +188,75 @@ function SizeChartModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
   );
 }
 
+function FullScreenViewer({ 
+  isOpen, 
+  onClose, 
+  images, 
+  initialIndex 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  images: string[]; 
+  initialIndex: number 
+}) {
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[200] bg-black flex flex-col"
+      >
+        {/* Header */}
+        <div className="flex justify-between items-center px-6 py-4 relative z-10">
+          <span className="text-white/60 text-xs font-bold uppercase tracking-widest">
+             Full View
+          </span>
+          <button 
+            onClick={onClose}
+            className="w-10 h-10 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center transition-colors"
+          >
+            <X size={24} />
+          </button>
+        </div>
+
+        {/* Swiper */}
+        <div className="flex-grow flex items-center justify-center">
+          <Swiper
+            modules={[Navigation, Pagination, Zoom]}
+            navigation
+            pagination={{ clickable: true, dynamicBullets: true }}
+            zoom={true}
+            initialSlide={initialIndex}
+            className="w-full h-full"
+          >
+            {images.map((img, idx) => (
+              <SwiperSlide key={idx} className="flex items-center justify-center">
+                <div className="swiper-zoom-container h-full w-full flex items-center justify-center">
+                  <img src={img} alt="" className="max-w-full max-h-full object-contain" referrerPolicy="no-referrer" />
+                </div>
+              </SwiperSlide>
+            ))}
+          </Swiper>
+        </div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 export default function ProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -196,6 +268,8 @@ export default function ProductDetail() {
   const [selectedColor, setSelectedColor] = useState('');
   const [activeImage, setActiveImage] = useState(0);
   const [isSizeChartOpen, setIsSizeChartOpen] = useState(false);
+  const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
+  const [thumbsSwiper, setThumbsSwiper] = useState<SwiperType | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
@@ -346,47 +420,69 @@ export default function ProductDetail() {
 
       <div className="max-w-7xl mx-auto px-[5%] pb-15 grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-[60px]">
         {/* Detail Images */}
-        <div className="detail-images">
-          <div className="w-full aspect-[3/4] bg-gradient-to-br from-[#fef5f7] to-[#fde8ed] rounded-[20px] flex items-center justify-center relative overflow-hidden group">
-            {product.images[activeImage] && (
-              <motion.img 
-                key={activeImage}
-                initial={{ opacity: 0, scale: 1.05 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.4 }}
-                src={product.images[activeImage]} 
-                alt={product.name} 
-                className="w-full h-full object-cover"
-                referrerPolicy="no-referrer"
-              />
-            )}
-            <div className="absolute top-4 right-4 flex flex-col gap-3 z-10">
-              <button 
-                onClick={() => toggleWishlist(product)}
-                className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg backdrop-blur-md transition-all ${isFavorite ? 'bg-ruby text-white' : 'bg-white/80 text-gray-400 hover:text-ruby'}`}
+        <div className="detail-images space-y-4">
+          <div className="relative group">
+            <div className="w-full aspect-[3/4] bg-gradient-to-br from-[#fef5f7] to-[#fde8ed] rounded-[24px] overflow-hidden shadow-2xl shadow-ruby/5">
+              <Swiper
+                modules={[Navigation, Pagination, Thumbs]}
+                thumbs={{ swiper: thumbsSwiper && !thumbsSwiper.destroyed ? thumbsSwiper : null }}
+                pagination={{ clickable: true, dynamicBullets: true }}
+                onSlideChange={(swiper) => setActiveImage(swiper.activeIndex)}
+                className="w-full h-full"
               >
-                <Heart size={18} fill={isFavorite ? 'currentColor' : 'none'} />
+                {product.images.map((img, idx) => (
+                  <SwiperSlide key={idx} className="relative cursor-zoom-in" onClick={() => setIsFullscreenOpen(true)}>
+                    <img 
+                      src={img} 
+                      alt={product.name} 
+                      className="w-full h-full object-cover select-none"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="absolute bottom-6 right-6 opacity-0 group-hover:opacity-100 transition-opacity">
+                       <div className="bg-white/90 backdrop-blur-md p-3 rounded-2xl text-ruby shadow-xl border border-white/50">
+                          <Maximize2 size={20} />
+                       </div>
+                    </div>
+                  </SwiperSlide>
+                ))}
+              </Swiper>
+            </div>
+
+            {/* Quick Actions Overlay */}
+            <div className="absolute top-6 right-6 flex flex-col gap-3 z-10 pointer-events-none">
+              <button 
+                onClick={(e) => { e.stopPropagation(); toggleWishlist(product); }}
+                className={`pointer-events-auto w-12 h-12 rounded-2xl flex items-center justify-center shadow-xl backdrop-blur-md transition-all active:scale-90 ${isFavorite ? 'bg-ruby text-white' : 'bg-white/80 text-gray-400 hover:text-ruby'}`}
+              >
+                <Heart size={20} fill={isFavorite ? 'currentColor' : 'none'} />
               </button>
               <button 
-                onClick={handleShare}
-                className="w-10 h-10 bg-white/80 backdrop-blur-md text-gray-400 hover:text-ruby rounded-full flex items-center justify-center shadow-lg transition-all"
+                onClick={(e) => { e.stopPropagation(); handleShare(); }}
+                className="pointer-events-auto w-12 h-12 bg-white/80 backdrop-blur-md text-gray-400 hover:text-ruby rounded-2xl flex items-center justify-center shadow-xl transition-all active:scale-90"
               >
-                <Share2 size={18} />
+                <Share2 size={20} />
               </button>
             </div>
           </div>
           
           {product.images.length > 1 && (
-            <div className="flex gap-3 mt-4 overflow-x-auto pb-2 scrollbar-hide">
-              {product.images.map((img, idx) => (
-                <button 
-                  key={idx} 
-                  onClick={() => setActiveImage(idx)}
-                  className={`w-[72px] h-[72px] rounded-[10px] bg-white border-2 flex items-center justify-center overflow-hidden flex-shrink-0 transition-all ${activeImage === idx ? 'border-ruby' : 'border-gray-100 hover:border-ruby/30'}`}
-                >
-                  {img && <img src={img} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />}
-                </button>
-              ))}
+            <div className="px-2">
+              <Swiper
+                onSwiper={setThumbsSwiper}
+                spaceBetween={12}
+                slidesPerView={4}
+                watchSlidesProgress={true}
+                modules={[Navigation, Thumbs]}
+                className="thumbs-swiper"
+              >
+                {product.images.map((img, idx) => (
+                  <SwiperSlide key={idx}>
+                    <div className={`aspect-square rounded-2xl overflow-hidden border-2 transition-all cursor-pointer ${activeImage === idx ? 'border-ruby scale-[1.02] shadow-lg shadow-ruby/10' : 'border-transparent opacity-60 hover:opacity-100'}`}>
+                      <img src={img} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    </div>
+                  </SwiperSlide>
+                ))}
+              </Swiper>
             </div>
           )}
         </div>
@@ -676,6 +772,12 @@ export default function ProductDetail() {
       )}
 
       <SizeChartModal isOpen={isSizeChartOpen} onClose={() => setIsSizeChartOpen(false)} />
+      <FullScreenViewer 
+        isOpen={isFullscreenOpen} 
+        onClose={() => setIsFullscreenOpen(false)} 
+        images={product.images} 
+        initialIndex={activeImage} 
+      />
     </div>
   );
 }

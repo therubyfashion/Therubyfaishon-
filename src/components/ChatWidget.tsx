@@ -63,6 +63,8 @@ export default function ChatWidget() {
       updateDoc(doc(db, 'chats', chatId), {
         unreadCountUser: 0
       }).catch(() => {});
+    }, (error) => {
+      console.error("Chat Messages listener error:", error);
     });
 
     return () => unsubscribe();
@@ -79,6 +81,8 @@ export default function ChatWidget() {
           setUnreadCount(data.unreadCountUser || 0);
         }
       }
+    }, (error) => {
+      console.error("Chat Status listener error:", error);
     });
 
     return () => unsubscribe();
