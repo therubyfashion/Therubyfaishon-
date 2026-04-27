@@ -57,24 +57,34 @@ export const useVisitorTracking = () => {
       return null;
     };
 
-    socket.on('connect', async () => {
-      console.log('Connected to live tracking server');
-      
-      const loc = await getLocationData();
-      
-      socket.emit('visitor_tracking', {
-        sessionId,
-        userId: auth.currentUser?.uid,
-        path: window.location.pathname,
-        lat: loc?.lat,
-        lng: loc?.lng,
-        city: loc?.city,
-        country: loc?.country
-      });
-    });
+    const track = async () => {
+      if (socket.connected) {
+        const loc = await getLocationData();
+        socket.emit('visitor_tracking', {
+          sessionId,
+          userId: auth.currentUser?.uid,
+          path: window.location.pathname,
+          lat: loc?.lat,
+          lng: loc?.lng,
+          city: loc?.city,
+          country: loc?.country
+        });
+      }
+    };
+
+    socket.on('connect', track);
+
+    // Track path changes
+    const originalPushState = window.history.pushState;
+    window.history.pushState = function() {
+      // @ts-ignore
+      originalPushState.apply(this, arguments);
+      track();
+    };
 
     // Handle session end on unmount
     return () => {
+      window.history.pushState = originalPushState;
       socket.disconnect();
     };
   }, []);

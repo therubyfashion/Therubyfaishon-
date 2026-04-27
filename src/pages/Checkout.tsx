@@ -40,10 +40,27 @@ const MOCK_ADDRESSES = [
   }
 ];
 
+import { io } from 'socket.io-client';
+
 export default function Checkout() {
   const { items, total, itemCount, appliedPromo, clearCart } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
+  
+  // Track live checkout
+  useEffect(() => {
+    const socket = io();
+    socket.emit('checkpoint_reached', {
+      type: 'checkout',
+      sessionId: sessionStorage.getItem('visitor_session_id') || 'unknown',
+      userId: user?.uid || 'guest',
+      timestamp: new Date().toISOString()
+    });
+    return () => {
+      socket.disconnect();
+    };
+  }, [user]);
+
   const [currentStep, setCurrentStep] = useState(() => {
     const saved = localStorage.getItem('checkout_step');
     return saved ? parseInt(saved, 10) : 1;

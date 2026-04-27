@@ -286,6 +286,12 @@ async function startServer() {
   let lastSeenDate = new Date().toISOString().split('T')[0];
 
   io.on("connection", (socket) => {
+    // Send initial state immediately
+    socket.emit("live_analytics_update", {
+      activeCount: activeVisitors.size,
+      visitors: Array.from(activeVisitors.values())
+    });
+
     // Listen for visitor data
     socket.on("visitor_tracking", async (data) => {
       const today = new Date().toISOString().split('T')[0];
@@ -316,6 +322,18 @@ async function startServer() {
 
       activeVisitors.set(socket.id, session);
       
+      // Update Firestore active_sessions for a persistent view in Admin Dashboard
+      if (db && data.sessionId) {
+        try {
+          await db.collection('active_sessions').doc(socket.id).set({
+            ...session,
+            lastSeen: admin.firestore.FieldValue.serverTimestamp()
+          });
+        } catch (e) {
+          console.error("Firestore active_sessions write error:", e);
+        }
+      }
+
       // Update Daily Analytics ONLY if this session is new today
       if (db && data.sessionId && !seenSessionsToday.has(data.sessionId)) {
         try {
@@ -326,12 +344,34 @@ async function startServer() {
           }, { merge: true });
         } catch (e) {
           console.error("Tracking Analytics error:", e);
-          // If write fails, optionally remove from seenSessions to try again later
-          // but we stay conservative to avoid retry loops hitting quota
         }
       }
 
-      // Broadcast update to all clients (including admins)
+      // Broadcast update to all clients
+      io.emit("live_analytics_update", {
+        activeCount: activeVisitors.size,
+        visitors: Array.from(activeVisitors.values())
+      });
+    });
+
+    socket.on("checkpoint_reached", (data) => {
+      console.log(`📍 Checkpoint reached: ${data.type} by ${data.sessionId}`);
+      const visitor = activeVisitors.get(socket.id);
+      if (visitor) {
+        visitor.lastCheckpoint = data.type;
+        visitor.lastSeen = new Date().toISOString();
+        activeVisitors.set(socket.id, visitor);
+      }
+      
+      // Broadcast activity event for the live feed
+      io.emit("live_activity_event", {
+        type: data.type,
+        sessionId: data.sessionId,
+        city: visitor?.city || 'Unknown',
+        timestamp: new Date().toISOString()
+      });
+
+      // Also update visitors list
       io.emit("live_analytics_update", {
         activeCount: activeVisitors.size,
         visitors: Array.from(activeVisitors.values())
@@ -339,8 +379,19 @@ async function startServer() {
     });
 
     socket.on("disconnect", async () => {
+      console.log(`🔌 Client disconnected: ${socket.id}`);
       activeVisitors.delete(socket.id);
       
+      // Remove from Firestore active_sessions
+      if (db) {
+        try {
+          await db.collection('active_sessions').doc(socket.id).delete().catch(() => {});
+        } catch (e) {
+          console.error("Firestore active_sessions delete error:", e);
+        }
+      }
+
+      // Broadcast update
       io.emit("live_analytics_update", {
         activeCount: activeVisitors.size,
         visitors: Array.from(activeVisitors.values())
