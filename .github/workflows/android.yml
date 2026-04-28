@@ -1,10 +1,9 @@
-name: Build Android APK
+name: Build APK
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -12,42 +11,53 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Source
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      # ✅ Node 22 (Capacitor 6 requirement)
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: npm install
 
-      - name: Build Web App
+      - name: Build web app
         run: npm run build
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '17'
-          cache: 'gradle'
-
-      - name: Capacitor Sync
+      - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Build Android APK
+      # ✅ Java 17
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # ✅ Android SDK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # ✅ Fix Gradle wrapper (corruption fix)
+      - name: Setup Gradle Wrapper
         run: |
           cd android
-          # Clean and recreate wrapper with a stable version
           rm -rf gradle/wrapper
-          mkdir -p gradle/wrapper
-          gradle wrapper --gradle-version 8.2.1 --distribution-type bin
-          chmod +x gradlew
-          export GRADLE_OPTS="-Xmx2048m"
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          gradle wrapper --gradle-version 8.4 --distribution-type bin
 
+      # ✅ Build APK (CI safe flags)
+      - name: Build APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew clean assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            --warning-mode all
+
+      # ✅ Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
