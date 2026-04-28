@@ -27,11 +27,11 @@ jobs:
       - name: Build Web App
         run: npm run build
 
-      - name: Setup Java 17
+      - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '17'
+          java-version: '21'
           cache: 'gradle'
 
       - name: Capacitor Sync
@@ -40,14 +40,13 @@ jobs:
       - name: Build Android APK
         run: |
           cd android
-          # Fix for corrupt wrapper jar if any
+          # Clean and recreate wrapper
           rm -rf gradle/wrapper
           mkdir -p gradle/wrapper
-          # Using system gradle to ensure a clean start
-          gradle wrapper --gradle-version 8.7 --distribution-type bin
+          gradle wrapper --gradle-version 8.10.2 --distribution-type bin
           chmod +x gradlew
           export GRADLE_OPTS="-Xmx2048m"
-          ./gradlew clean assembleDebug
+          ./gradlew clean assembleDebug --stacktrace --info
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
