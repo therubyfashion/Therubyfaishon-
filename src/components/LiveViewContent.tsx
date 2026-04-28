@@ -14,7 +14,16 @@ const formatINR = (val: number) => `₹${val.toLocaleString('en-IN')}`;
 export default function LiveViewContent() {
   const globeRef = useRef<any>(null);
   const [realOrders, setRealOrders] = useState<any[]>([]);
-  const [liveAnalytics, setLiveAnalytics] = useState<{ activeCount: number, visitors: any[] }>({ activeCount: 0, visitors: [] });
+  const [liveAnalytics, setLiveAnalytics] = useState<{ 
+    activeCount: number, 
+    visitors: any[],
+    behavior: { activeCarts: number, checkingOut: number }
+  }>({ 
+    activeCount: 0, 
+    visitors: [],
+    behavior: { activeCarts: 0, checkingOut: 0 }
+  });
+  const [activityEvents, setActivityEvents] = useState<any[]>([]);
   const [metrics, setMetrics] = useState({
     visitors: 0,
     totalSales: 0,
@@ -50,8 +59,20 @@ export default function LiveViewContent() {
       setLiveAnalytics(data);
       setMetrics(prev => ({
         ...prev,
-        visitors: data.activeCount
+        visitors: data.activeCount,
+        activeCarts: data.behavior?.activeCarts || 0,
+        checkingOut: data.behavior?.checkingOut || 0
       }));
+    });
+
+    socket.on("live_activity_event", (event: any) => {
+      setActivityEvents(prev => [event, ...prev].slice(0, 5));
+      if (event.type === 'purchased') {
+        setMetrics(prev => ({
+          ...prev,
+          ordersToday: prev.ordersToday + 1
+        }));
+      }
     });
 
     return () => {
@@ -276,7 +297,9 @@ export default function LiveViewContent() {
                   <span>{metrics.activeCarts}</span>
                 </div>
                 <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-600 rounded-full" style={{ width: '14%' }} />
+                  <div className="h-full bg-blue-600 rounded-full transition-all duration-500" 
+                    style={{ width: `${metrics.visitors > 0 ? (metrics.activeCarts / metrics.visitors) * 100 : 0}%` }} 
+                  />
                 </div>
               </div>
               <div className="space-y-1">
@@ -285,7 +308,9 @@ export default function LiveViewContent() {
                   <span>{metrics.checkingOut}</span>
                 </div>
                 <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#9b59b6] rounded-full" style={{ width: '0%' }} />
+                  <div className="h-full bg-[#9b59b6] rounded-full transition-all duration-500" 
+                    style={{ width: `${metrics.visitors > 0 ? (metrics.checkingOut / metrics.visitors) * 100 : 0}%` }} 
+                  />
                 </div>
               </div>
            </div>
@@ -298,14 +323,33 @@ export default function LiveViewContent() {
               <div className="w-2 h-2 rounded-full bg-[#00C851] animate-pulse" />
            </div>
            <div className="divide-y divide-gray-50">
-              {realOrders.length > 0 ? realOrders.slice(0, 5).map((order) => (
-                <div key={order.id} className="flex gap-3 px-4 py-3 items-start animate-in fade-in slide-in-from-top-2 duration-300">
+              {activityEvents.length > 0 ? activityEvents.map((event, idx) => (
+                <div key={idx} className="flex gap-3 px-4 py-3 items-start animate-in fade-in slide-in-from-top-2 duration-300">
+                  <div className={cn(
+                    "w-7 h-7 rounded-lg flex items-center justify-center text-sm flex-shrink-0",
+                    event.type === 'cart' ? "bg-blue-50" : 
+                    event.type === 'checkout' ? "bg-purple-50" : "bg-green-50"
+                  )}>
+                    {event.type === 'cart' ? "🛒" : event.type === 'checkout' ? "💳" : "🛍️"}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-gray-700 leading-normal">
+                      <span className="font-bold">🇮🇳</span> Someone from {event.city} {
+                        event.type === 'cart' ? "added items to cart" : 
+                        event.type === 'checkout' ? "reached checkout" : "completed a purchase"
+                      }
+                    </p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">Just now</p>
+                  </div>
+                </div>
+              )) : realOrders.length > 0 ? realOrders.slice(0, 5).map((order) => (
+                <div key={order.id} className="flex gap-3 px-4 py-3 items-start">
                   <div className="w-7 h-7 rounded-lg bg-gray-50 flex items-center justify-center text-sm flex-shrink-0">🛍️</div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-gray-700 leading-normal">
                       <span className="font-bold">🇮🇳</span> Someone from {order.address?.city || 'India'} purchased {order.items?.[0]?.name || 'Product'}
                     </p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">Just now · <span className="text-[#d97706] font-bold">{formatINR(order.total || 0)}</span></p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">Recently · <span className="text-[#d97706] font-bold">{formatINR(order.total || 0)}</span></p>
                   </div>
                 </div>
               )) : (

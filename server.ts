@@ -348,33 +348,61 @@ async function startServer() {
       }
 
       // Broadcast update to all clients
+      const visitors = Array.from(activeVisitors.values());
+      const activeCarts = visitors.filter(v => v.lastCheckpoint === 'cart').length;
+      const checkingOut = visitors.filter(v => v.lastCheckpoint === 'checkout').length;
+
       io.emit("live_analytics_update", {
         activeCount: activeVisitors.size,
-        visitors: Array.from(activeVisitors.values())
+        visitors,
+        behavior: {
+          activeCarts,
+          checkingOut
+        }
       });
     });
 
     socket.on("checkpoint_reached", (data) => {
       console.log(`📍 Checkpoint reached: ${data.type} by ${data.sessionId}`);
-      const visitor = activeVisitors.get(socket.id);
-      if (visitor) {
+      
+      // Find visitor by socket.id or sessionId
+      let visitorEntry = Array.from(activeVisitors.entries()).find(([sid, v]) => sid === socket.id || v.sessionId === data.sessionId);
+      
+      if (visitorEntry) {
+        const [sid, visitor] = visitorEntry;
         visitor.lastCheckpoint = data.type;
         visitor.lastSeen = new Date().toISOString();
-        activeVisitors.set(socket.id, visitor);
+        activeVisitors.set(sid, visitor);
+        
+        // Update Firestore as well
+        if (db) {
+          db.collection('active_sessions').doc(sid).update({
+            lastCheckpoint: data.type,
+            lastSeen: admin.firestore.FieldValue.serverTimestamp()
+          }).catch(() => {});
+        }
       }
       
       // Broadcast activity event for the live feed
       io.emit("live_activity_event", {
         type: data.type,
         sessionId: data.sessionId,
-        city: visitor?.city || 'Unknown',
+        city: visitorEntry?.[1]?.city || 'Unknown',
         timestamp: new Date().toISOString()
       });
 
-      // Also update visitors list
+      // Broadcast update to all clients
+      const visitorsList = Array.from(activeVisitors.values());
+      const activeCarts = visitorsList.filter(v => v.lastCheckpoint === 'cart').length;
+      const checkingOut = visitorsList.filter(v => v.lastCheckpoint === 'checkout').length;
+
       io.emit("live_analytics_update", {
         activeCount: activeVisitors.size,
-        visitors: Array.from(activeVisitors.values())
+        visitors: visitorsList,
+        behavior: {
+          activeCarts,
+          checkingOut
+        }
       });
     });
 

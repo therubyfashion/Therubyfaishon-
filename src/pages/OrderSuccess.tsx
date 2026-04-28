@@ -4,10 +4,25 @@ import { CheckCircle2, Package, Truck, Home, ShoppingBag, ArrowRight, MapPin, Cr
 import { motion } from 'motion/react';
 
 import { generateInvoice } from '../utils/invoiceGenerator';
+import { io } from 'socket.io-client';
 
 export default function OrderSuccess() {
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Track purchased behavior
+  React.useEffect(() => {
+    const socket = io();
+    socket.emit('checkpoint_reached', {
+      type: 'purchased',
+      sessionId: sessionStorage.getItem('visitor_session_id') || 'unknown',
+      timestamp: new Date().toISOString()
+    });
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
+
   const orderData = location.state || {
     orderId: '#LF-2025-84729',
     deliveryDate: 'Apr 5-7, 2025',
