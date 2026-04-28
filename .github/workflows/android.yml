@@ -40,15 +40,13 @@ jobs:
       - name: Build Android APK
         run: |
           cd android
-          echo "Checking gradle version..."
-          gradle -v
           # Clean and recreate wrapper with a stable version
           rm -rf gradle/wrapper
           mkdir -p gradle/wrapper
           gradle wrapper --gradle-version 8.2.1 --distribution-type bin
           chmod +x gradlew
           export GRADLE_OPTS="-Xmx2048m"
-          ./gradlew assembleDebug --stacktrace --no-daemon --info
+          ./gradlew assembleDebug --stacktrace --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
