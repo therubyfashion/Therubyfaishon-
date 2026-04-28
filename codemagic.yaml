@@ -5,7 +5,7 @@ workflows:
     instance_type: mac_mini_m1
     environment:
       node: 22
-      java: 17
+      java: 21
     scripts:
       - name: Environment Info
         script: |
@@ -23,9 +23,13 @@ workflows:
       - name: Build Android APK
         script: |
           cd android
-          # Fix for corrupt wrapper jar
-          gradle wrapper --gradle-version 8.10.2 --distribution-type bin
+          # Fix for corrupt wrapper jar: download it fresh
+          rm -f gradle/wrapper/gradle-wrapper.jar
+          # Use system gradle to regenerate the wrapper
+          gradle wrapper --gradle-version 8.14.3 --distribution-type bin
           chmod +x gradlew
+          # Increase heap size for build stability
+          export GRADLE_OPTS="-Xmx2048m"
           ./gradlew clean assembleDebug
     artifacts:
       - android/app/build/outputs/apk/debug/app-debug.apk
