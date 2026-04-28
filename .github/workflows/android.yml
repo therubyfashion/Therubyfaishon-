@@ -47,12 +47,18 @@ jobs:
           rm -rf gradle/wrapper
           gradle wrapper --gradle-version 8.4 --distribution-type bin
 
+      # ✅ Clean Gradle
+      - name: Clean Gradle
+        run: |
+          cd android
+          ./gradlew clean
+
       # ✅ Build APK (CI safe flags)
       - name: Build APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew clean assembleDebug \
+          ./gradlew assembleDebug \
             --no-daemon \
             --stacktrace \
             --warning-mode all
