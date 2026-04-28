@@ -42,6 +42,10 @@ allprojects {
             if (project.hasProperty('android')) {
                 project.android {
                     compileSdkVersion rootProject.ext.compileSdkVersion
+                    defaultConfig {
+                        minSdkVersion rootProject.ext.minSdkVersion
+                        targetSdkVersion rootProject.ext.targetSdkVersion
+                    }
                 }
             }
         }
