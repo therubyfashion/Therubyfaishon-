@@ -46,7 +46,7 @@ jobs:
           gradle wrapper --gradle-version 8.10.2 --distribution-type bin
           chmod +x gradlew
           export GRADLE_OPTS="-Xmx2048m"
-          ./gradlew clean assembleDebug --stacktrace --info
+          ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
