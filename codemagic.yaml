@@ -23,6 +23,8 @@ workflows:
       - name: Build Android APK
         script: |
           cd android
+          # Fix for corrupt wrapper jar: regenerate it using the system gradle
+          gradle wrapper
           chmod +x gradlew
           ./gradlew assembleDebug
     artifacts:
