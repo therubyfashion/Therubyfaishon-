@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "mobile:sync": "npm run build && npx cap sync android"
+    "mobile:sync": "npm run build && npx cap sync android",
+    "postinstall": "node scripts/patch-google-auth.js"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",
