@@ -71,7 +71,14 @@ export default function Login() {
     try {
       if (Capacitor.isNativePlatform()) {
         try {
+          console.log("Starting Native Google Login...");
           const userNative = await GoogleAuth.signIn();
+          console.log("Native Google User:", userNative);
+          
+          if (!userNative.authentication || !userNative.authentication.idToken) {
+            throw new Error("No ID Token received from Google Auth");
+          }
+
           const credential = GoogleAuthProvider.credential(userNative.authentication.idToken);
           const { user } = await signInWithCredential(auth, credential);
           
@@ -89,12 +96,17 @@ export default function Login() {
           toast.success("Welcome back!");
           navigate('/');
         } catch (nativeError: any) {
-          console.error("Native Google Login error:", nativeError);
-          // Only show error if it's not a user cancellation
-          if (nativeError.message !== 'USER_CANCELLED') {
-             toast.error("Native login failed. Trying web flow...");
-             // Fallback to web if native fails
+          console.error("Native Google Login error details:", nativeError);
+          // Show specifically why it failed to help debugging
+          const errorMessage = nativeError.message || nativeError.error || JSON.stringify(nativeError);
+          
+          if (errorMessage !== 'USER_CANCELLED') {
+             toast.error(`Login failed: ${errorMessage}`);
+             // If it's a configuration issue, fallback might not help, but let's try
+             console.log("Attempting web fallback...");
              await webGoogleLogin();
+          } else {
+             console.log("User cancelled login.");
           }
         }
       } else {

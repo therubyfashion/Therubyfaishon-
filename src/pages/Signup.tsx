@@ -77,7 +77,14 @@ export default function Signup() {
     try {
       if (Capacitor.isNativePlatform()) {
         try {
+          console.log("Starting Native Google Signup...");
           const userNative = await GoogleAuth.signIn();
+          console.log("Native Google User:", userNative);
+
+          if (!userNative.authentication || !userNative.authentication.idToken) {
+            throw new Error("No ID Token received from Google Auth");
+          }
+
           const credential = GoogleAuthProvider.credential(userNative.authentication.idToken);
           const { user } = await signInWithCredential(auth, credential);
           
@@ -95,10 +102,15 @@ export default function Signup() {
           toast.success("Signup Successful! 🎉");
           navigate('/');
         } catch (nativeError: any) {
-          console.error("Native Google Signup error:", nativeError);
-          if (nativeError.message !== 'USER_CANCELLED') {
-             toast.error("Native signup failed. Trying web flow...");
+          console.error("Native Google Signup error details:", nativeError);
+          const errorMessage = nativeError.message || nativeError.error || JSON.stringify(nativeError);
+          
+          if (errorMessage !== 'USER_CANCELLED') {
+             toast.error(`Signup failed: ${errorMessage}`);
+             console.log("Attempting web fallback...");
              await webGoogleLogin();
+          } else {
+             console.log("User cancelled signup.");
           }
         }
       } else {
