@@ -11,6 +11,13 @@ const config: CapacitorConfig = {
       'accounts.google.com',
       'therubyfaishon.shop'
     ]
+  },
+  plugins: {
+    GoogleAuth: {
+      scopes: ['profile', 'email'],
+      serverClientId: '987019399933-uda5bcfbav0ag272b4r47rrn624gdkei.apps.googleusercontent.com',
+      forceCodeForRefreshToken: true
+    }
   }
 };
 

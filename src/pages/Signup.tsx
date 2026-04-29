@@ -9,13 +9,16 @@ import {
   updateProfile, 
   signOut,
   setPersistence,
-  browserLocalPersistence 
+  browserLocalPersistence,
+  signInWithCredential
 } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import { Mail, Lock, User, ArrowRight, Phone, CheckCircle2 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 
 export default function Signup() {
   const navigate = useNavigate();
@@ -72,30 +75,34 @@ export default function Signup() {
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      
-      try {
-        const { user } = await signInWithPopup(auth, provider);
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (!userDoc.exists()) {
-          await setDoc(doc(db, 'users', user.uid), {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            role: 'user',
-            isVerified: true,
-            createdAt: new Date().toISOString()
-          });
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const userNative = await GoogleAuth.signIn();
+          const credential = GoogleAuthProvider.credential(userNative.authentication.idToken);
+          const { user } = await signInWithCredential(auth, credential);
+          
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (!userDoc.exists()) {
+            await setDoc(doc(db, 'users', user.uid), {
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              role: 'user',
+              isVerified: true,
+              createdAt: new Date().toISOString()
+            });
+          }
+          toast.success("Signup Successful! 🎉");
+          navigate('/');
+        } catch (nativeError: any) {
+          console.error("Native Google Signup error:", nativeError);
+          if (nativeError.message !== 'USER_CANCELLED') {
+             toast.error("Native signup failed. Trying web flow...");
+             await webGoogleLogin();
+          }
         }
-        toast.success("Signup Successful! 🎉");
-        navigate('/');
-      } catch (popupError: any) {
-        if (popupError.code === 'auth/popup-blocked' || popupError.code === 'auth/operation-not-supported-in-this-environment') {
-          await signInWithRedirect(auth, provider);
-        } else {
-          throw popupError;
-        }
+      } else {
+        await webGoogleLogin();
       }
     } catch (error: any) {
       console.error("Signup error:", error);
@@ -104,6 +111,34 @@ export default function Signup() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const webGoogleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    
+    try {
+      const { user } = await signInWithPopup(auth, provider);
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      if (!userDoc.exists()) {
+        await setDoc(doc(db, 'users', user.uid), {
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName,
+          role: 'user',
+          isVerified: true,
+          createdAt: new Date().toISOString()
+        });
+      }
+      toast.success("Signup Successful! 🎉");
+      navigate('/');
+    } catch (popupError: any) {
+      if (popupError.code === 'auth/popup-blocked' || popupError.code === 'auth/operation-not-supported-in-this-environment') {
+        await signInWithRedirect(auth, provider);
+      } else {
+        throw popupError;
+      }
     }
   };
 

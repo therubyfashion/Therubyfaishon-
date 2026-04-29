@@ -7,7 +7,8 @@ import {
   GoogleAuthProvider, 
   signInWithEmailAndPassword,
   setPersistence,
-  browserLocalPersistence 
+  browserLocalPersistence,
+  signInWithCredential
 } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -15,6 +16,8 @@ import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import { Mail, Lock, ArrowRight, LogIn, Smartphone } from 'lucide-react';
 import PhoneVerification from '../components/PhoneVerification';
+import { Capacitor } from '@capacitor/core';
+import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -66,30 +69,36 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      
-      try {
-        const { user } = await signInWithPopup(auth, provider);
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (!userDoc.exists()) {
-          await setDoc(doc(db, 'users', user.uid), {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            role: 'user',
-            isVerified: true,
-            createdAt: new Date().toISOString()
-          });
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const userNative = await GoogleAuth.signIn();
+          const credential = GoogleAuthProvider.credential(userNative.authentication.idToken);
+          const { user } = await signInWithCredential(auth, credential);
+          
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (!userDoc.exists()) {
+            await setDoc(doc(db, 'users', user.uid), {
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              role: 'user',
+              isVerified: true,
+              createdAt: new Date().toISOString()
+            });
+          }
+          toast.success("Welcome back!");
+          navigate('/');
+        } catch (nativeError: any) {
+          console.error("Native Google Login error:", nativeError);
+          // Only show error if it's not a user cancellation
+          if (nativeError.message !== 'USER_CANCELLED') {
+             toast.error("Native login failed. Trying web flow...");
+             // Fallback to web if native fails
+             await webGoogleLogin();
+          }
         }
-        toast.success("Welcome back!");
-        navigate('/');
-      } catch (popupError: any) {
-        if (popupError.code === 'auth/popup-blocked' || popupError.code === 'auth/operation-not-supported-in-this-environment') {
-          await signInWithRedirect(auth, provider);
-        } else {
-          throw popupError;
-        }
+      } else {
+        await webGoogleLogin();
       }
     } catch (error: any) {
       console.error("Login error:", error);
@@ -98,6 +107,34 @@ export default function Login() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const webGoogleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    
+    try {
+      const { user } = await signInWithPopup(auth, provider);
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      if (!userDoc.exists()) {
+        await setDoc(doc(db, 'users', user.uid), {
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName,
+          role: 'user',
+          isVerified: true,
+          createdAt: new Date().toISOString()
+        });
+      }
+      toast.success("Welcome back!");
+      navigate('/');
+    } catch (popupError: any) {
+      if (popupError.code === 'auth/popup-blocked' || popupError.code === 'auth/operation-not-supported-in-this-environment') {
+        await signInWithRedirect(auth, provider);
+      } else {
+        throw popupError;
+      }
     }
   };
 
