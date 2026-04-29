@@ -4,4 +4,5 @@
     <string name="title_activity_main">The Ruby</string>
     <string name="package_name">com.theruby.app</string>
     <string name="custom_url_scheme">com.theruby.app</string>
+    <string name="google_client_id">987019399933-uda5bcfbav0ag272b4r47rrn624gdkei.apps.googleusercontent.com</string>
 </resources>
