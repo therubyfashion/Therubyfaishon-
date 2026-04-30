@@ -7,6 +7,7 @@
     "dev": "tsx server.ts",
     "start": "tsx server.ts",
     "build": "vite build",
+    "generate-assets": "capacitor-assets generate --android",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
@@ -16,6 +17,7 @@
   "dependencies": {
     "@capacitor/android": "^6.2.0",
     "@capacitor/app": "^6.0.3",
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/browser": "^6.0.6",
     "@capacitor/cli": "^6.2.0",
     "@capacitor/core": "^6.2.0",

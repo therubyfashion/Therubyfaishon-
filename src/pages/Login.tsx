@@ -101,10 +101,8 @@ export default function Login() {
           const errorMessage = nativeError.message || nativeError.error || JSON.stringify(nativeError);
           
           if (errorMessage !== 'USER_CANCELLED') {
-             toast.error(`Login failed: ${errorMessage}`);
-             // If it's a configuration issue, fallback might not help, but let's try
-             console.log("Attempting web fallback...");
-             await webGoogleLogin();
+             toast.error(`Native Login failed: ${errorMessage}. Please check SHA-1 fingerprint in Firebase.`);
+             console.log("Native login failed. Fallback to web is disabled on mobile to avoid 403 error.");
           } else {
              console.log("User cancelled login.");
           }
