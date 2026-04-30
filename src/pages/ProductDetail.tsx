@@ -374,17 +374,22 @@ export default function ProductDetail() {
   });
 
   const handleShare = async () => {
+    const currentUrl = window.location.href;
+    const shareUrl = currentUrl.includes('localhost') 
+      ? `https://therubyfashion.shop/product/${product.id}`
+      : currentUrl;
+
     const shareData = {
       title: product.name,
       text: `Check out this ${product.name} at The Ruby!`,
-      url: window.location.href,
+      url: shareUrl,
     };
 
     try {
       if (navigator.share) {
         await navigator.share(shareData);
       } else {
-        await navigator.clipboard.writeText(window.location.href);
+        await navigator.clipboard.writeText(shareUrl);
         toast.success("Link copied to clipboard!");
       }
     } catch (err: any) {
