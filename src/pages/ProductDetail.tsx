@@ -7,6 +7,8 @@ import { Product, Review } from '../types';
 import { useCart } from '../contexts/CartContext';
 import { useWishlist } from '../contexts/WishlistContext';
 import { toast } from 'sonner';
+import { Share } from '@capacitor/share';
+import { Capacitor } from '@capacitor/core';
 import { ShoppingBag, Heart, Share2, ChevronRight, Truck, ShieldCheck, RefreshCw, X, Ruler, Star, MessageSquare, ThumbsUp, User, Minus, Plus, Send, ChevronDown, Maximize2 } from 'lucide-react';
 import { motion, AnimatePresence, useScroll, useTransform } from 'motion/react';
 import { Swiper, SwiperSlide } from 'swiper/react';
@@ -386,7 +388,9 @@ export default function ProductDetail() {
     };
 
     try {
-      if (navigator.share) {
+      if (Capacitor.isNativePlatform()) {
+        await Share.share(shareData);
+      } else if (navigator.share) {
         await navigator.share(shareData);
       } else {
         await navigator.clipboard.writeText(shareUrl);
@@ -395,7 +399,9 @@ export default function ProductDetail() {
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         console.error("Error sharing:", err);
-        toast.error("Failed to share product");
+        // Fallback to clipboard if share fails
+        await navigator.clipboard.writeText(shareUrl);
+        toast.success("Link copied to clipboard!");
       }
     }
   };
