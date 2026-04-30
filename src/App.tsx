@@ -12,6 +12,8 @@ import BottomNav from './components/BottomNav';
 import ChatWidget from './components/ChatWidget';
 import SplashScreen from './components/SplashScreen';
 import { AnimatePresence } from 'motion/react';
+import OneSignal from 'onesignal-cordova-plugin';
+import { Capacitor } from '@capacitor/core';
 
 // Lazy load pages
 const Home = React.lazy(() => import('./pages/Home'));
@@ -100,13 +102,11 @@ function AppContent() {
     
     const initOneSignal = async () => {
       try {
-        // @ts-ignore
-        let appId = (import.meta.env.VITE_ONESIGNAL_APP_ID || '').trim();
+        let appId = ((import.meta as any).env.VITE_ONESIGNAL_APP_ID || '').trim();
         const settingsAppId = (settings?.oneSignalAppId || '').trim();
         
         const isPlaceholder = (id: string) => !id || id === 'dummy-id' || id === 'YOUR_ONESIGNAL_APP_ID' || id.length < 10;
         
-        // Prefer settings from DB if env is a placeholder or missing
         if (isPlaceholder(appId) && !isPlaceholder(settingsAppId)) {
           appId = settingsAppId;
         }
@@ -116,33 +116,49 @@ function AppContent() {
           return;
         }
 
-        // @ts-ignore
-        window.OneSignalDeferred = window.OneSignalDeferred || [];
-        // @ts-ignore
-        window.OneSignalDeferred.push(async (OneSignal) => {
-          await OneSignal.init({
-            appId: appId,
-            safari_web_id: "web.onesignal.auto.40e188d7-5f7a-4af3-8ac5-05427adc97a7",
-            allowLocalhostAsSecureOrigin: true,
-            serviceWorkerParam: { scope: '/' },
-            serviceWorkerPath: 'OneSignalSDKWorker.js',
+        if (Capacitor.isNativePlatform()) {
+          // Native App Initialization
+          (OneSignal as any).setAppId(appId);
+          
+          // Request Permission
+          (OneSignal as any).promptForPushNotificationsWithUserResponse((accepted: any) => {
+            console.log("User accepted notifications:", accepted);
           });
 
           if (user && profile?.isVerified) {
-            await OneSignal.login(user.uid);
-            await OneSignal.User.addTag("role", isAdmin ? 'admin' : 'customer');
-            await OneSignal.User.addTag("email", user.email);
+            (OneSignal as any).setExternalUserId(user.uid);
+            (OneSignal as any).sendTags({
+              "role": isAdmin ? 'admin' : 'customer',
+              "email": user.email || ''
+            });
           } else {
-            await OneSignal.logout();
+            (OneSignal as any).removeExternalUserId();
           }
-        });
+          
+          (OneSignal as any).setNotificationOpenedHandler((jsonData: any) => {
+            console.log('notificationOpenedCallback:', JSON.stringify(jsonData));
+          });
+        } else {
+          // Fallback for Web (if script was manually included or for testing)
+          // @ts-ignore
+          const OneSignalWeb = window.OneSignal;
+          if (OneSignalWeb) {
+            await OneSignalWeb.init({
+              appId: appId,
+              allowLocalhostAsSecureOrigin: true,
+            });
+            if (user && profile?.isVerified) {
+              await OneSignalWeb.login(user.uid);
+            }
+          }
+        }
       } catch (error) {
         console.error("Error initializing OneSignal:", error);
       }
     };
 
     initOneSignal();
-  }, [user, isAdmin, settings, settingsLoading]);
+  }, [user, isAdmin, settings, settingsLoading, profile]);
 
   React.useEffect(() => {
     const timer = setTimeout(() => {

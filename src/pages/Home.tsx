@@ -12,6 +12,8 @@ import { Product, Category } from '../types';
 import ProductCard from '../components/ProductCard';
 import { ProductCardSkeleton } from '../components/Skeleton';
 import { toast } from 'sonner';
+import OneSignal from 'onesignal-cordova-plugin';
+import { Capacitor } from '@capacitor/core';
 
 export default function Home() {
   const [trendingProducts, setTrendingProducts] = useState<Product[]>([]);
@@ -133,10 +135,10 @@ export default function Home() {
         });
 
         // Tag in OneSignal
-        // @ts-ignore
-        if (window.OneSignal) {
-          // @ts-ignore
-          await window.OneSignal.User.addTag("newsletter_subscriber", "true");
+        if (Capacitor.isNativePlatform()) {
+          (OneSignal as any).sendTag("newsletter_subscriber", "true");
+        } else if ((window as any).OneSignal) {
+          await (window as any).OneSignal.User.addTag("newsletter_subscriber", "true");
         }
 
         toast.success("Welcome to the Ruby Circle! 💎");

@@ -38,6 +38,8 @@ import { generateShippingLabel } from '../utils/shippingLabelGenerator';
 import ReactGlobe from 'react-globe.gl';
 import Barcode from 'react-barcode';
 import { io } from 'socket.io-client';
+import OneSignal from 'onesignal-cordova-plugin';
+import { Capacitor } from '@capacitor/core';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -1715,12 +1717,23 @@ export default function AdminDashboard() {
   };
 
   const handlePromptPermission = () => {
-    const OneSignal = (window as any).OneSignal;
-    if (OneSignal?.Notifications) {
-      OneSignal.Notifications.requestPermission();
-    } else if (OneSignal?.push) {
-      OneSignal.push(() => {
-        OneSignal.showNativePrompt?.() || OneSignal.registerForPushNotifications?.();
+    if (Capacitor.isNativePlatform()) {
+      (OneSignal as any).promptForPushNotificationsWithUserResponse((accepted: any) => {
+        if (accepted) {
+          toast.success("Push notifications enabled!");
+        } else {
+          toast.error("Notifications were denied.");
+        }
+      });
+      return;
+    }
+
+    const OS = (window as any).OneSignal;
+    if (OS?.Notifications) {
+      OS.Notifications.requestPermission();
+    } else if (OS?.push) {
+      OS.push(() => {
+        OS.showNativePrompt?.() || OS.registerForPushNotifications?.();
       });
     } else {
       toast.error("OneSignal SDK not loaded yet. Please refresh.");
@@ -7193,14 +7206,14 @@ export default function AdminDashboard() {
                             <div className="space-y-2">
                               <div className="flex items-center justify-between text-[10px]">
                                 <span className="text-blue-600">OneSignal SDK:</span>
-                                <span className={(window as any).OneSignal ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
-                                  {(window as any).OneSignal ? "Ready" : "Not Loaded"}
+                                <span className={Capacitor.isNativePlatform() || (window as any).OneSignal ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
+                                  {Capacitor.isNativePlatform() ? "Ready (App)" : ((window as any).OneSignal ? "Ready (Web)" : "Not Loaded")}
                                 </span>
                               </div>
                               <div className="flex items-center justify-between text-[10px]">
                                 <span className="text-blue-600">Permissions:</span>
-                                <span className={String((window as any).OneSignal?.Notifications?.permission) === 'granted' ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
-                                  {String((window as any).OneSignal?.Notifications?.permission || 'Not Requested')}
+                                <span className={String((window as any).OneSignal?.Notifications?.permission) === 'granted' || Capacitor.isNativePlatform() ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
+                                  {Capacitor.isNativePlatform() ? "Managed by OS" : (String((window as any).OneSignal?.Notifications?.permission || 'Not Requested'))}
                                 </span>
                               </div>
                               <div className="flex items-center justify-between text-[10px] pt-2 border-t border-blue-100">
