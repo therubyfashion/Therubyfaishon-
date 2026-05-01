@@ -244,12 +244,27 @@ async function sendOneSignalNotification(notification: any, config?: { appId?: s
     'Authorization': `Basic ${cleanRestKey}`
   };
 
-  console.log(`🚀 Sending OneSignal notification (Target App ID: ${appId.substring(0, 8)}...)`);
-
-  return await axios.post('https://onesignal.com/api/v1/notifications', 
-    { ...notification, app_id: appId },
-    { headers }
-  );
+  try {
+    const response = await axios.post('https://onesignal.com/api/v1/notifications', 
+      { ...notification, app_id: appId },
+      { headers }
+    );
+    console.log(`✅ OneSignal SUCCESS: Notification sent. ID: ${response.data.id}`);
+    return response;
+  } catch (axiosErr: any) {
+    const errorData = axiosErr.response?.data;
+    console.error(`❌ OneSignal AXIOS ERROR:`, JSON.stringify(errorData || axiosErr.message));
+    
+    // Check for specific common errors
+    if (errorData?.errors?.includes("Invalid REST API Key")) {
+      throw new Error("OneSignal Error: Your REST API Key is invalid. Please check Admin Settings.");
+    }
+    if (errorData?.errors?.includes("app_id not found")) {
+      throw new Error("OneSignal Error: Your App ID is invalid or doesn't match the REST Key.");
+    }
+    
+    throw axiosErr;
+  }
 }
 
 // Cache for store settings to avoid frequent Firestore calls

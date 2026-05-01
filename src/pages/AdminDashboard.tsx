@@ -1718,13 +1718,20 @@ export default function AdminDashboard() {
 
   const handlePromptPermission = () => {
     if (Capacitor.isNativePlatform()) {
-      (OneSignal as any).promptForPushNotificationsWithUserResponse((accepted: any) => {
-        if (accepted) {
-          toast.success("Push notifications enabled!");
-        } else {
-          toast.error("Notifications were denied.");
-        }
-      });
+      const OS = OneSignal as any;
+      const promptMethod = OS.promptForPushNotificationsWithUserResponse || OS.Notifications?.requestPermission;
+      
+      if (typeof promptMethod === 'function') {
+        promptMethod((accepted: any) => {
+          if (accepted) {
+            toast.success("Push notifications enabled! 🚀");
+          } else {
+            toast.error("Notifications were denied. Please allow them in settings.");
+          }
+        });
+      } else {
+        toast.info("Notification management is handled by your system.");
+      }
       return;
     }
 

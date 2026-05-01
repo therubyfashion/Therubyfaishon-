@@ -117,27 +117,42 @@ function AppContent() {
         }
 
         if (Capacitor.isNativePlatform()) {
+          console.log("🚀 OneSignal: Initializing Native Plugin with ID:", appId);
           // Native App Initialization
-          (OneSignal as any).setAppId(appId);
-          
-          // Request Permission
-          (OneSignal as any).promptForPushNotificationsWithUserResponse((accepted: any) => {
-            console.log("User accepted notifications:", accepted);
-          });
+          try {
+            const OS = OneSignal as any;
+            if (typeof OS.setAppId === 'function') {
+              OS.setAppId(appId);
+            } else if (typeof OS.initialize === 'function') {
+              OS.initialize(appId);
+            }
 
-          if (user && profile?.isVerified) {
-            (OneSignal as any).setExternalUserId(user.uid);
-            (OneSignal as any).sendTags({
-              "role": isAdmin ? 'admin' : 'customer',
-              "email": user.email || ''
-            });
-          } else {
-            (OneSignal as any).removeExternalUserId();
+            // In v5+ we need to opt-in or check permission
+            if (OS.promptForPushNotificationsWithUserResponse) {
+              OS.promptForPushNotificationsWithUserResponse((accepted: any) => {
+                console.log("🚀 OneSignal: Permission Response:", accepted);
+              });
+            }
+
+            if (user && profile?.isVerified) {
+              console.log("🚀 OneSignal: Syncing User ID:", user.uid);
+              if (OS.setExternalUserId) OS.setExternalUserId(user.uid);
+              else if (OS.login) OS.login(user.uid);
+
+              const tags = {
+                "role": isAdmin ? 'admin' : 'customer',
+                "email": user.email || '',
+                "verified": "true"
+              };
+              
+              if (OS.sendTags) OS.sendTags(tags);
+              else if (OS.User?.addTags) OS.User.addTags(tags);
+            }
+            
+            console.log("✅ OneSignal: Native Initialization Completed");
+          } catch (e) {
+            console.error("❌ OneSignal: Native Init Error:", e);
           }
-          
-          (OneSignal as any).setNotificationOpenedHandler((jsonData: any) => {
-            console.log('notificationOpenedCallback:', JSON.stringify(jsonData));
-          });
         } else {
           // Fallback for Web (if script was manually included or for testing)
           // @ts-ignore
