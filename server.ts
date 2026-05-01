@@ -1162,12 +1162,12 @@ async function startServer() {
   });
 
   app.post("/api/send-push", async (req, res) => {
-    const { title, body, url, type, appId, restKey } = req.body;
+    const { title, body, url, type, appId, restKey, playerId } = req.body;
     
     try {
-      console.log("OneSignal: Sending broadcast notification...");
+      console.log(`OneSignal: Sending ${type || 'broadcast'} notification...`);
       
-      const notification = {
+      const notification: any = {
         contents: {
           en: body || "New update from the store!",
         },
@@ -1175,8 +1175,14 @@ async function startServer() {
           en: title || "Store Update",
         },
         url: url || '/',
-        included_segments: type === 'all' ? ['Subscribed Users'] : (type === 'active' ? ['Active Users'] : ['Subscribed Users']),
       };
+
+      if (type === 'individual' && playerId) {
+        notification.include_player_ids = [playerId];
+        console.log(`OneSignal: Targetting player ID: ${playerId}`);
+      } else {
+        notification.included_segments = type === 'all' ? ['Subscribed Users'] : (type === 'active' ? ['Active Users'] : ['Subscribed Users']);
+      }
 
       const response = await sendOneSignalNotification(notification, { appId, restKey });
       const responseData = response.data;

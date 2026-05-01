@@ -1405,6 +1405,27 @@ export default function AdminDashboard() {
     }
   };
   const [firebaseDiagnostics, setFirebaseDiagnostics] = useState<any>(null);
+  const [onesignalSubscriptionId, setOnesignalSubscriptionId] = useState<string | null>(null);
+  const [onesignalUserId, setOnesignalUserId] = useState<string | null>(null);
+
+  // OneSignal Status Fetcher
+  useEffect(() => {
+    if (activeTab === 'settings' && activeSettingsTab === 'push' && Capacitor.isNativePlatform()) {
+      try {
+        const OS = OneSignal as any;
+        // Try multiple ways to get ID depending on version (v3 vs v5)
+        if (OS.getDeviceState) {
+          OS.getDeviceState((state: any) => {
+            setOnesignalSubscriptionId(state.userId || state.pushToken || null);
+          });
+        } else if (OS.User?.pushSubscription?.id) {
+          setOnesignalSubscriptionId(OS.User.pushSubscription.id);
+        }
+      } catch (e) {
+        console.error("Error fetching OneSignal device state:", e);
+      }
+    }
+  }, [activeTab, activeSettingsTab]);
   const [isLoadingStatus, setIsLoadingStatus] = useState(false);
   const [firebaseStatus, setFirebaseStatus] = useState<string>('Checking...');
   const [systemHealth, setSystemHealth] = useState<any>(null);
@@ -1627,7 +1648,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleSendTestPush = async () => {
+  const handleSendTestPush = async (toSelf = false) => {
     if (!settings.oneSignalAppId || !settings.oneSignalRestApiKey) {
       toast.error("Please configure and save OneSignal keys first");
       return;
@@ -1638,9 +1659,10 @@ export default function AdminDashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: "Test Notification",
-          body: "Bhai, agar ye message dikh raha hai toh OneSignal sahi se kaam kar raha hai! 🚀",
-          type: 'all',
+          title: toSelf ? "Direct Test Active! 🎯" : "Test Notification",
+          body: toSelf ? "Ye message sirf aapke device par bheja gaya hai." : "Bhai, agar ye message dikh raha hai toh OneSignal sahi se kaam kar raha hai! 🚀",
+          type: toSelf ? 'individual' : 'all',
+          playerId: toSelf ? onesignalSubscriptionId : null,
           appId: settings.oneSignalAppId,
           restKey: settings.oneSignalRestApiKey
         })
@@ -7154,12 +7176,21 @@ export default function AdminDashboard() {
                                 Enable Notifications
                               </button>
                               <button 
-                                onClick={handleSendTestPush}
+                                onClick={() => handleSendTestPush(false)}
                                 disabled={isSendingTestPush}
                                 className="px-3 py-1.5 bg-green-100 text-green-700 text-[10px] font-bold rounded-lg hover:bg-green-200 transition-colors uppercase tracking-wider disabled:opacity-50"
                               >
-                                {isSendingTestPush ? 'Sending...' : 'Send Test Push'}
+                                {isSendingTestPush ? 'Sending...' : 'Send All'}
                               </button>
+                              {onesignalSubscriptionId && (
+                                <button 
+                                  onClick={() => handleSendTestPush(true)}
+                                  disabled={isSendingTestPush}
+                                  className="px-3 py-1.5 bg-ruby text-white text-[10px] font-bold rounded-lg hover:bg-ruby-dark transition-colors uppercase tracking-wider disabled:opacity-50 shadow-md shadow-ruby/20"
+                                >
+                                  {isSendingTestPush ? '...' : 'Direct Test 🎯'}
+                                </button>
+                              )}
                               <button 
                                 onClick={handleTestOneSignal}
                                 disabled={isTestingOneSignal}
@@ -7223,6 +7254,16 @@ export default function AdminDashboard() {
                                   {Capacitor.isNativePlatform() ? "Managed by OS" : (String((window as any).OneSignal?.Notifications?.permission || 'Not Requested'))}
                                 </span>
                               </div>
+                              
+                              {Capacitor.isNativePlatform() && (
+                                <div className="flex items-center justify-between text-[10px]">
+                                  <span className="text-blue-600">My Subscription ID:</span>
+                                  <span className="text-[#1A2C54] font-mono font-bold truncate max-w-[150px]">
+                                    {onesignalSubscriptionId || "Connecting..."}
+                                  </span>
+                                </div>
+                              )}
+
                               <div className="flex items-center justify-between text-[10px] pt-2 border-t border-blue-100">
                                 <span className="text-blue-600">Firebase Status:</span>
                                 <span className={firebaseStatus.includes('Connected') ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
@@ -7230,6 +7271,24 @@ export default function AdminDashboard() {
                                 </span>
                               </div>
                             </div>
+                            
+                            {onesignalSubscriptionId && (
+                              <div className="mt-4 p-3 bg-white rounded-xl border border-blue-100 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
+                                  <span className="text-[10px] font-bold text-gray-600 uppercase tracking-tight">Active Connection Found</span>
+                                </div>
+                                <button 
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(onesignalSubscriptionId);
+                                    toast.success("ID Copied!");
+                                  }}
+                                  className="text-[9px] font-bold text-blue-600 hover:underline"
+                                >
+                                  Copy ID
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </motion.div>
