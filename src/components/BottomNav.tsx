@@ -1,11 +1,13 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, Grid, Search, ShoppingBag, User } from 'lucide-react';
+import { Home, Grid, Search, ShoppingBag, User, Bell } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useCart } from '../contexts/CartContext';
+import { useNotifications } from '../contexts/NotificationContext';
 
 export default function BottomNav() {
   const { items } = useCart();
+  const { unreadCount } = useNotifications();
   const location = useLocation();
   const cartCount = items.reduce((acc, item) => acc + item.quantity, 0);
 

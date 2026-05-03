@@ -7,6 +7,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import { 
+  Bell,
   Pencil,
   Camera,
   X,
@@ -27,13 +28,13 @@ import {
 import { collection, doc, updateDoc } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 
-import PhoneVerification from '../components/PhoneVerification';
+// import PhoneVerification from '../components/PhoneVerification';
 import { AnimatePresence } from 'motion/react';
 
 export default function Profile() {
   const { user, profile, loading, isAdmin } = useAuth();
   const navigate = useNavigate();
-  const [showPhoneVerify, setShowPhoneVerify] = React.useState(false);
+  // const [showPhoneVerify, setShowPhoneVerify] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
   const [isUploading, setIsUploading] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -160,6 +161,7 @@ export default function Profile() {
 
   const menuItems = [
     { icon: ShoppingBag, label: 'My Orders', path: '/my-orders', color: 'text-blue-500', bg: 'bg-blue-50' },
+    { icon: Bell, label: 'Notifications', path: '/notifications', color: 'text-ruby', bg: 'bg-ruby/5' },
     { icon: MapPin, label: 'Saved Addresses', path: '/addresses', color: 'text-green-500', bg: 'bg-green-50' },
     { icon: Heart, label: 'Wishlist', path: '/wishlist', color: 'text-ruby', bg: 'bg-ruby/5' },
     { icon: MessageCircle, label: 'Chat with Support', onClick: () => window.dispatchEvent(new CustomEvent('open-ruby-chat')), color: 'text-ruby', bg: 'bg-ruby/5' },
@@ -358,16 +360,9 @@ export default function Profile() {
                   <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Phone Number</p>
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-bold text-[#1A2C54] truncate">
-                      {profile?.phoneNumber ? `+91 ${profile.phoneNumber}` : 'Not Verified'}
+                      {profile?.phoneNumber ? `+91 ${profile.phoneNumber}` : 'Not Provided'}
                     </p>
-                    {!profile?.phoneVerified ? (
-                      <button 
-                        onClick={() => setShowPhoneVerify(true)}
-                        className="text-[10px] font-bold text-ruby uppercase tracking-widest hover:underline"
-                      >
-                        Verify Now
-                      </button>
-                    ) : (
+                    {profile?.phoneVerified && (
                       <div className="flex items-center gap-1 text-green-500">
                         <ShieldCheck size={12} />
                         <span className="text-[8px] font-bold uppercase tracking-widest">Verified</span>

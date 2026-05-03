@@ -32,33 +32,10 @@ export const useVisitorTracking = () => {
 
     const track = async () => {
       try {
-        let city = 'Unknown';
-        let country = 'Unknown';
+        let city = 'Platform Session';
+        let country = 'Online';
         let lat = undefined;
         let lng = undefined;
-
-        // Try geolocation first
-        if ("geolocation" in navigator) {
-          try {
-            const pos = await new Promise<GeolocationPosition>((res, rej) => {
-              navigator.geolocation.getCurrentPosition(res, rej, { timeout: 3000 });
-            });
-            lat = pos.coords.latitude;
-            lng = pos.coords.longitude;
-          } catch (e) {}
-        }
-
-        // Fallback to IP if needed
-        if (!lat) {
-          try {
-            const res = await fetch('https://ipapi.co/json/');
-            const data = await res.json();
-            city = data.city;
-            country = data.country_name;
-            lat = data.latitude;
-            lng = data.longitude;
-          } catch (e) {}
-        }
 
         socketRef.current?.emit('visitor_tracking', {
           sessionId,

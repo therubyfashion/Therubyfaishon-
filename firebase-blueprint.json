@@ -172,17 +172,19 @@
     },
     "Notification": {
       "title": "Notification",
-      "description": "Push notification history.",
+      "description": "User specific or global notifications.",
       "type": "object",
       "properties": {
+        "userId": { "type": "string", "description": "Recipient user ID. Null for global." },
         "title": { "type": "string" },
         "body": { "type": "string" },
-        "type": { "type": "string", "enum": ["all", "active", "new"] },
+        "type": { "type": "string", "enum": ["order", "coupon", "alert", "promotion"] },
+        "iconType": { "type": "string", "description": "Lucide icon name to display." },
+        "isRead": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
-        "sentBy": { "type": "string", "format": "email" },
-        "status": { "type": "string" }
+        "link": { "type": "string", "description": "Optional navigation link." }
       },
-      "required": ["title", "body", "type", "createdAt"]
+      "required": ["title", "body", "type", "createdAt", "isRead"]
     }
   },
   "firestore": {

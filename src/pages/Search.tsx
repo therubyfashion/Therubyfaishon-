@@ -47,7 +47,7 @@ export default function Search() {
     <div className="min-h-screen bg-white pt-24 pb-20 px-4">
       <div className="max-w-2xl mx-auto space-y-8">
         <div className="space-y-4">
-          <h1 className="text-3xl font-serif font-bold text-[#1A2C54]">Search <span className="text-ruby italic">The Ruby</span></h1>
+          <h1 className="text-3xl font-serif font-bold text-[#1A2C54]">Search <span className="text-ruby italic">The Ruby Fashion</span></h1>
           <div className="relative group">
             <div className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-ruby transition-colors">
               <SearchIcon size={20} />

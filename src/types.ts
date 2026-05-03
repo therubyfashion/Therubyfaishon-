@@ -81,3 +81,15 @@ export interface Review {
   createdAt: string;
   likes: number;
 }
+
+export interface Notification {
+  id: string;
+  userId?: string;
+  title: string;
+  body: string;
+  type: 'order' | 'coupon' | 'alert' | 'promotion';
+  iconType: string;
+  isRead: boolean;
+  createdAt: string;
+  link?: string;
+}

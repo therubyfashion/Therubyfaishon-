@@ -6,11 +6,11 @@ import { ChevronLeft, Sparkles } from 'lucide-react';
 const content: Record<string, { title: string; body: string }> = {
   'privacy': {
     title: 'Privacy Policy',
-    body: 'Your privacy is important to us. This policy explains how we collect, use, and protect your personal information when you use The Ruby.'
+    body: 'Your privacy is important to us. This policy explains how we collect, use, and protect your personal information when you use The Ruby Fashion.'
   },
   'terms': {
     title: 'Terms & Conditions',
-    body: 'By accessing or using The Ruby, you agree to be bound by these terms and conditions. Please read them carefully.'
+    body: 'By accessing or using The Ruby Fashion, you agree to be bound by these terms and conditions. Please read them carefully.'
   },
   'refund': {
     title: 'Refund Policy',

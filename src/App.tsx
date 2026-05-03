@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { collection, getDocs, query, limit } from 'firebase/firestore';
 import { db } from './firebase';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SettingsProvider, useSettings } from './contexts/SettingsContext';
+import { NotificationProvider } from './contexts/NotificationContext';
 import { CartProvider } from './contexts/CartContext';
 import { WishlistProvider } from './contexts/WishlistContext';
 import Footer from './components/Footer';
@@ -14,6 +15,8 @@ import SplashScreen from './components/SplashScreen';
 import { AnimatePresence } from 'motion/react';
 import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
+
+import { useVisitorTracking } from './hooks/useVisitorTracking';
 
 // Lazy load pages
 const Home = React.lazy(() => import('./pages/Home'));
@@ -29,6 +32,7 @@ const Contact = React.lazy(() => import('./pages/Contact'));
 const MyOrders = React.lazy(() => import('./pages/MyOrders'));
 const OrderSuccess = React.lazy(() => import('./pages/OrderSuccess'));
 const TrackOrder = React.lazy(() => import('./pages/TrackOrder'));
+const Notifications = React.lazy(() => import('./pages/Notifications'));
 const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
 const Search = React.lazy(() => import('./pages/Search'));
 const Profile = React.lazy(() => import('./pages/Profile'));
@@ -41,7 +45,7 @@ const FAQ = React.lazy(() => import('./pages/FAQ'));
 
 const ScrollToTop = () => {
   const location = useLocation();
-  React.useEffect(() => {
+  useEffect(() => {
     window.scrollTo(0, 0);
   }, [location]);
   return null;
@@ -57,25 +61,25 @@ export default function App() {
   return (
     <SettingsProvider>
       <AuthProvider>
-        <CartProvider>
-          <WishlistProvider>
-            <Router>
-              <AppContent />
-            </Router>
-          </WishlistProvider>
-        </CartProvider>
+        <NotificationProvider>
+          <CartProvider>
+            <WishlistProvider>
+              <Router>
+                <AppContent />
+              </Router>
+            </WishlistProvider>
+          </CartProvider>
+        </NotificationProvider>
       </AuthProvider>
     </SettingsProvider>
   );
 }
 
-import { useVisitorTracking } from './hooks/useVisitorTracking';
-
 function AppContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const isAdminPath = location.pathname.startsWith('/admin');
-  const [showSplash, setShowSplash] = React.useState(true);
+  const [showSplash, setShowSplash] = useState(true);
   
   // Track live visitors
   useVisitorTracking();
@@ -84,7 +88,7 @@ function AppContent() {
   const { settings, loading: settingsLoading } = useSettings();
 
   // Handle unverified email redirect
-  React.useEffect(() => {
+  useEffect(() => {
     if (authLoading) return;
     
     const publicPaths = ['/login', '/signup', '/verify-prompt', '/verify-email', '/about', '/contact', '/faq'];
@@ -97,7 +101,7 @@ function AppContent() {
   }, [user, profile, location.pathname, authLoading, navigate]);
 
   // Initialize OneSignal
-  React.useEffect(() => {
+  useEffect(() => {
     if (settingsLoading) return;
     
     const initOneSignal = async () => {
@@ -175,15 +179,15 @@ function AppContent() {
     initOneSignal();
   }, [user, isAdmin, settings, settingsLoading, profile]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const timer = setTimeout(() => {
       setShowSplash(false);
-    }, 2500);
+    }, 500);
     return () => clearTimeout(timer);
   }, []);
 
   // Apply SEO settings globally
-  React.useEffect(() => {
+  useEffect(() => {
     if (settingsLoading || !settings) return;
     
     try {
@@ -226,7 +230,7 @@ function AppContent() {
       </AnimatePresence>
       <ScrollToTop />
       <main className="flex-grow">
-        <React.Suspense fallback={<div className="h-screen flex items-center justify-center">Loading...</div>}>
+        <Suspense fallback={<div className="h-screen flex items-center justify-center">Loading...</div>}>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/shop" element={<Shop />} />
@@ -242,6 +246,7 @@ function AppContent() {
             <Route path="/order-success" element={<OrderSuccess />} />
             <Route path="/track" element={<TrackOrder />} />
             <Route path="/track/:id" element={<TrackOrder />} />
+            <Route path="/notifications" element={<Notifications />} />
             <Route path="/search" element={<Search />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<Settings />} />
@@ -259,7 +264,7 @@ function AppContent() {
               } 
             />
           </Routes>
-        </React.Suspense>
+        </Suspense>
       </main>
       {!isAdminPath && <Footer />}
       {!isAdminPath && <BottomNav />}

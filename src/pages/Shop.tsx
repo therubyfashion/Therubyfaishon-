@@ -25,19 +25,6 @@ export default function Shop() {
   ];
 
   useEffect(() => {
-    const fetchCategories = async () => {
-      try {
-        const snapshot = await getDocs(collection(db, 'categories'));
-        const catNames = snapshot.docs.map(doc => doc.data().name);
-        setCategories(['All', ...catNames]);
-      } catch (error) {
-        console.error("Error fetching categories:", error);
-      }
-    };
-    fetchCategories();
-  }, []);
-
-  useEffect(() => {
     const fetchProducts = async () => {
       setLoading(true);
       try {
@@ -45,8 +32,16 @@ export default function Shop() {
           ? query(collection(db, 'products'), where('category', '==', activeCategory), limit(24))
           : query(collection(db, 'products'), limit(24));
 
-        const snapshot = await getDocs(productsQuery);
-        let fetchedProducts = snapshot.docs.map(doc => ({
+        const [productsSnap, categoriesSnap] = await Promise.all([
+          getDocs(productsQuery),
+          getDocs(collection(db, 'categories'))
+        ]);
+
+        // Handle categories
+        const catNames = categoriesSnap.docs.map(doc => doc.data().name);
+        setCategories(['All', ...catNames]);
+
+        let fetchedProducts = productsSnap.docs.map(doc => ({
           id: doc.id,
           ...(doc.data() as Omit<Product, 'id'>)
         })) as Product[];

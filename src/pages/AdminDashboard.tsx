@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy, limit, 
   onSnapshot, serverTimestamp, setDoc, arrayUnion, arrayRemove, runTransaction 
 } from 'firebase/firestore';
 import { updateProfile, updatePassword, updateEmail, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db, auth, messaging, storage } from '../firebase';
+import { OperationType, handleFirestoreError } from '../lib/error-handler';
+import { sendNotification } from '../lib/notifications';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getToken } from 'firebase/messaging';
 import { Product, Category } from '../types';
@@ -15,7 +17,7 @@ import {
   TrendingUp, ShoppingCart, UserPlus, AlertTriangle, AlertCircle, Hash, ChevronRight, ChevronLeft,
   MoreVertical, Edit2, Trash2, Plus, Image as ImageIcon, Database, BarChart3, ExternalLink,
   Home, ArrowLeft, Camera, ChevronDown, ChevronUp, Bold, Heading, Globe, Truck, Printer,
-  TrendingDown, Shield, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info, MapPin, History,
+  TrendingDown, Shield, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info, History,
   Activity, Send, Rocket, MessageSquare, User, CreditCard, Download, Eye, Check, ArrowRight,
   Cloud, RefreshCw, CheckCircle, Clock, MousePointer2, Zap
 } from 'lucide-react';
@@ -31,27 +33,12 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { cn } from '../lib/utils';
-import LiveViewContent from '../components/LiveViewContent';
-
 import { generateInvoice } from '../utils/invoiceGenerator';
 import { generateShippingLabel } from '../utils/shippingLabelGenerator';
-import ReactGlobe from 'react-globe.gl';
 import Barcode from 'react-barcode';
 import { io } from 'socket.io-client';
 import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
-
-// Fix Leaflet marker icon issue
-// @ts-ignore
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
 
 // ═══════════════════════════════════════════════
 // LIVE VIEW HELPER COMPONENTS
@@ -65,6 +52,33 @@ const ensureDate = (val: any) => {
   if (val.seconds) return new Date(val.seconds * 1000);
   const d = new Date(val);
   return isNaN(d.getTime()) ? new Date() : d;
+};
+
+// ═══════════════════════════════════════════════
+// BADGE CONFIG
+// ═══════════════════════════════════════════════
+const BADGE_CFG: Record<string, any> = {
+  Paid: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'PAID' },
+  Confirmed: { bg: 'bg-ruby/5', text: 'text-ruby', dot: 'bg-ruby', label: 'CONFIRMED' },
+  Shipped: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500', label: 'SHIPPED' },
+  Delivered: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'DELIVERED' },
+  Fulfilled: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'FULFILLED' },
+  Unfulfilled: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500', label: 'UNFULFILLED' },
+  Pending: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500', label: 'PENDING' },
+  Processing: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500', label: 'PROCESSING' },
+  Cancelled: { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-500', label: 'CANCELLED' },
+  'Refunded': { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-500', label: 'REFUNDED' },
+  'On Hold': { bg: 'bg-gray-100', text: 'text-gray-500', dot: 'bg-gray-400', label: 'ON HOLD' },
+};
+
+const StatusBadge = ({ status, label, className }: { status: string, label?: string, className?: string }) => {
+  const c = BADGE_CFG[status] || BADGE_CFG['On Hold'];
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-sm ring-1 ring-inset ${c.bg} ${c.text} ${c.bg.replace('bg-', 'ring-').replace('-50', '-200')} ${className || ''}`}>
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 animate-pulse ${c.dot}`} />
+      {label || c.label || status}
+    </span>
+  );
 };
 
 const LiveSparkline = ({ data, color = '#E11D48', height = 40 }: { data: number[], color?: string, height?: number }) => {
@@ -95,7 +109,7 @@ const LiveSparkline = ({ data, color = '#E11D48', height = 40 }: { data: number[
 
 const LiveAnimNum = ({ value, prefix = '', suffix = '', className = '' }: { value: number | string, prefix?: string, suffix?: string, className?: string }) => {
   const [disp, setDisp] = useState<number | string>(value);
-  const prev = React.useRef(value);
+  const prev = useRef(value);
 
   useEffect(() => {
     if (typeof value === 'number' && typeof prev.current === 'number' && value !== prev.current) {
@@ -117,131 +131,12 @@ const LiveAnimNum = ({ value, prefix = '', suffix = '', className = '' }: { valu
   return <span className={className}>{prefix}{typeof disp === 'number' ? disp.toLocaleString('en-IN') : disp}{suffix}</span>;
 };
 
-const LiveTicker = ({ items }: { items: string[] }) => {
-  return (
-    <div className="bg-emerald-950/40 border-b border-emerald-900/30 py-2 overflow-hidden flex whitespace-nowrap">
-      <motion.div 
-        animate={{ x: [0, -1000] }}
-        transition={{ duration: 30, repeat: Infinity, ease: 'linear' }}
-        className="flex gap-12 px-6"
-      >
-        {[...items, ...items, ...items].map((text, i) => (
-          <span key={i} className="inline-flex items-center gap-2 text-[12px] text-emerald-300/80 font-bold tracking-wider">
-            <span className="text-emerald-400">●</span>
-            {text}
-          </span>
-        ))}
-      </motion.div>
-    </div>
-  );
-};
-
-const LiveMapSvg = ({ sessions }: { sessions: any[] }) => {
-  return (
-    <div className="relative w-full overflow-hidden" style={{ paddingBottom: '52%' }}>
-      <div className="absolute inset-0">
-        <svg viewBox="0 0 1000 520" className="w-full h-full opacity-[0.25] stroke-slate-200 fill-slate-100">
-           {/* Continents */}
-          <path d="M 80 80 L 280 70 L 300 90 L 290 130 L 260 160 L 240 200 L 200 220 L 170 280 L 150 260 L 120 240 L 100 200 L 80 180 L 60 140 Z" />
-          <path d="M 170 280 L 240 270 L 260 300 L 270 360 L 250 420 L 210 450 L 180 430 L 160 380 L 150 320 Z" />
-          <path d="M 440 60 L 540 55 L 560 80 L 550 110 L 520 120 L 490 130 L 460 120 L 440 100 Z" />
-          <path d="M 450 140 L 560 130 L 590 160 L 600 220 L 580 300 L 550 370 L 510 390 L 480 370 L 450 300 L 440 220 L 440 160 Z" />
-          <path d="M 560 50 L 850 45 L 880 80 L 870 130 L 840 160 L 800 170 L 760 160 L 720 180 L 700 200 L 680 190 L 650 160 L 620 150 L 580 140 L 560 120 Z" />
-          <path d="M 630 175 L 660 170 L 670 200 L 660 240 L 650 270 L 635 255 L 625 220 L 620 195 Z" />
-          <path d="M 750 190 L 800 185 L 820 210 L 800 230 L 770 225 L 750 210 Z" />
-          <path d="M 780 340 L 900 335 L 920 370 L 910 410 L 870 430 L 820 420 L 790 390 L 775 360 Z" />
-          {/* Grid lines */}
-          {[0, 1, 2, 3, 4].map(i => <line key={i} x1="0" y1={i * 130} x2="1000" y2={i * 130} stroke="rgba(0,0,0,0.03)" strokeWidth=".5" />)}
-          {[0, 1, 2, 3, 4, 5, 6, 7].map(i => <line key={i} x1={i * 142} y1="0" x2={i * 142} y2="520" stroke="rgba(0,0,0,0.03)" strokeWidth=".5" />)}
-        </svg>
-
-        {/* Animated Dots */}
-        <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
-          {sessions.filter(s => s.lat && s.lng).map((s, i) => {
-            const x = ((s.lng + 180) / 360) * 100;
-            const y = ((90 - s.lat) / 180) * 100;
-            return (
-              <g key={i}>
-                <circle cx={x} cy={y} r="0.8" fill="#E11D48" opacity="0.9" />
-                <circle cx={x} cy={y} r="0.8" fill="none" stroke="#E11D48" strokeWidth="0.3" opacity="0.4" className="animate-pulse" />
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-    </div>
-  );
-};
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  const errCode = (error as any)?.code || '';
-  
-  const errInfo: FirestoreErrorInfo = {
-    error: errorMessage,
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error Detail: ', JSON.stringify(errInfo));
-  
-  // Throw a user-friendly message
-  let friendlyMsg = `Bhai, database ke sath connect karne mein dikkat aa rahi hai. (Operation: ${operationType.toUpperCase()})`;
-  
-  if (errCode === 'resource-exhausted' || errorMessage.includes('quota')) {
-    friendlyMsg = "Bhai, aaj ka free data limit (quota) khatam ho gaya hai. Kal subah restart hoga.";
-  } else if (errCode === 'permission-denied') {
-    friendlyMsg = "Aapke paas is kaam ke liye permission nahi hai.";
-  }
-  
-  throw new Error(friendlyMsg);
-}
 
 const chartDataSample = [];
 const recentOrdersSample = [];
 const topProductsSample = [];
 
-type Tab = 'home' | 'dashboard' | 'products' | 'category' | 'orders' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights' | 'live';
+type Tab = 'home' | 'dashboard' | 'products' | 'category' | 'orders' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights';
 
 function Accordion({ title, icon: Icon, children }: { title: string, icon: any, children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -346,7 +241,7 @@ function DeleteConfirmationModal({ isOpen, onCancel, onConfirm, title, message }
 
 function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, categories, colors, sizes, loading }: any) {
   const [activeDescriptionTab, setActiveDescriptionTab] = useState<'edit' | 'preview'>('edit');
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [galleryTargetIndex, setGalleryTargetIndex] = useState(0);
 
   const addImage = () => {
@@ -1080,8 +975,10 @@ async function compressImage(base64Str: string, maxWidth = 1000, maxHeight = 100
 export default function AdminDashboard() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
+    setIsMounted(true);
     window.scrollTo(0, 0);
   }, [activeTab]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -1091,9 +988,9 @@ export default function AdminDashboard() {
   const [selectedChat, setSelectedChat] = useState<any | null>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [adminMessage, setAdminMessage] = useState('');
-  const chatScrollRef = React.useRef<HTMLDivElement>(null);
-  const adminChatFileRef = React.useRef<HTMLInputElement>(null);
-  const bannerImageInputRef = React.useRef<HTMLInputElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const adminChatFileRef = useRef<HTMLInputElement>(null);
+  const bannerImageInputRef = useRef<HTMLInputElement>(null);
   const [usersCount, setUsersCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -1128,44 +1025,7 @@ export default function AdminDashboard() {
   const [coupons, setCoupons] = useState<any[]>([]);
   const [liveSessions, setLiveSessions] = useState<any[]>([]);
   const [activeCount, setActiveCount] = useState(0);
-  const [liveMapType, setLiveMapType] = useState<'globe' | 'map'>('globe');
 
-  // Live View History for Sparklines
-  const [sessionHistory, setSessionHistory] = useState<number[]>(Array.from({ length: 20 }, () => 0));
-  const [orderHistory, setOrderHistory] = useState<number[]>(Array.from({ length: 20 }, () => 0));
-  const [revenueHistory, setRevenueHistory] = useState<number[]>(Array.from({ length: 20 }, () => 0));
-
-  useEffect(() => {
-    // Sync histories whenever live data changes or on a timer
-    const interval = setInterval(() => {
-      setSessionHistory(prev => [...prev.slice(1), activeCount]);
-      
-      const ordersToday = orders.filter(o => 
-        ensureDate(o.createdAt).toDateString() === new Date().toDateString()
-      );
-      setOrderHistory(prev => [...prev.slice(1), ordersToday.length]);
-      
-      const revenueToday = ordersToday.reduce((acc, o) => acc + (o.total || 0), 0);
-      setRevenueHistory(prev => [...prev.slice(1), revenueToday]);
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [activeCount, orders]);
-
-  useEffect(() => {
-    // Only connect when admin is on the live tab to save resources
-    const socket = io(window.location.origin);
-    
-    socket.on('live_analytics_update', (data) => {
-      console.log("Live update received:", data);
-      setActiveCount(data.activeCount);
-      setLiveSessions(data.visitors);
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
   const [customers, setCustomers] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
@@ -1176,32 +1036,14 @@ export default function AdminDashboard() {
   const [pushNotification, setPushNotification] = useState({ title: '', body: '', type: 'all' });
   const [isSendingNotification, setIsSendingNotification] = useState(false);
   const [isSubscribingPush, setIsSubscribingPush] = useState(false);
-  const [dashboardSubTab, setDashboardSubTab] = useState<'overview' | 'live' | 'reports'>('overview');
+  const [dashboardSubTab, setDashboardSubTab] = useState<'overview' | 'reports'>('overview');
   const [liveDashboardTab, setLiveDashboardTab] = useState<'overview' | 'sessions' | 'orders' | 'sources'>('overview');
   
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
-  const globeContainerRef = React.useRef<HTMLDivElement>(null);
-  const [globeSize, setGlobeSize] = useState({ width: 800, height: 600 });
-
-  useEffect(() => {
-    if (activeTab !== 'live' || !globeContainerRef.current) return;
-    const observer = new ResizeObserver((entries) => {
-      for (let entry of entries) {
-        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
-          setGlobeSize({
-            width: entry.contentRect.width,
-            height: entry.contentRect.height
-          });
-        }
-      }
-    });
-    observer.observe(globeContainerRef.current);
-    return () => observer.disconnect();
-  }, [activeTab]);
 
   const totalRevenue = orders.reduce((acc, order) => acc + (order.total || 0), 0);
 
-  const topStates = React.useMemo(() => {
+  const topStates = useMemo(() => {
     const counts: Record<string, number> = {};
     liveSessions.forEach(s => {
       const state = s.region || 'Unknown';
@@ -1212,7 +1054,7 @@ export default function AdminDashboard() {
       .map(([name, count]) => ({ name, count }));
   }, [liveSessions]);
 
-  const topCountries = React.useMemo(() => {
+  const topCountries = useMemo(() => {
     const counts: Record<string, number> = {};
     liveSessions.forEach(s => {
       const country = s.country || 'Unknown';
@@ -1223,7 +1065,7 @@ export default function AdminDashboard() {
       .map(([name, count]) => ({ name, count }));
   }, [liveSessions]);
   
-  const topProducts = React.useMemo(() => {
+  const topProducts = useMemo(() => {
     const productSales: Record<string, { name: string, sales: number, image: string }> = {};
     
     orders.forEach(order => {
@@ -1249,9 +1091,9 @@ export default function AdminDashboard() {
 
   // Orders Tab State
   const [settings, setSettings] = useState({
-    storeName: 'The Ruby',
+    storeName: 'The Ruby Fashion',
     storeLogo: '',
-    supportEmail: 'support@theruby.com',
+    supportEmail: 'support@therubyfashion.com',
     currency: 'INR (₹)',
     razorpayKeyId: '',
     razorpayKeySecret: '',
@@ -1259,8 +1101,8 @@ export default function AdminDashboard() {
     googleSheetApiKey: '',
     notificationSound: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3',
     favicon: '',
-    siteTitle: 'The Ruby | Premium Clothing',
-    metaDescription: 'Discover the latest trends in fashion at The Ruby.',
+    siteTitle: 'The Ruby Fashion | Premium Clothing',
+    metaDescription: 'Discover the latest trends in fashion at The Ruby Fashion.',
     resendApiKey: '',
     fromEmail: 'support@therubyfashion.shop',
     smtpUser: '',
@@ -1286,7 +1128,7 @@ export default function AdminDashboard() {
 
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
-  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     // Initialize audio
@@ -2298,19 +2140,23 @@ export default function AdminDashboard() {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const [productsSnap, ordersSnap, usersSnap, categoriesSnap, colorsSnap, sizesSnap, couponsSnap, bannersSnap, settingsSnap, reviewsSnap, cartsSnap, sessionsSnap] = await Promise.all([
-        getDocs(query(collection(db, 'products'), limit(500))).catch(e => handleFirestoreError(e, OperationType.GET, 'products')),
-        getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(500))).catch(e => handleFirestoreError(e, OperationType.GET, 'orders')),
-        getDocs(query(collection(db, 'users'), limit(500))).catch(e => handleFirestoreError(e, OperationType.GET, 'users')),
-        getDocs(collection(db, 'categories')).catch(e => handleFirestoreError(e, OperationType.GET, 'categories')),
-        getDocs(collection(db, 'colors')).catch(e => handleFirestoreError(e, OperationType.GET, 'colors')),
-        getDocs(collection(db, 'sizes')).catch(e => handleFirestoreError(e, OperationType.GET, 'sizes')),
-        getDocs(collection(db, 'coupons')).catch(e => handleFirestoreError(e, OperationType.GET, 'coupons')),
-        getDocs(collection(db, 'banners')).catch(e => handleFirestoreError(e, OperationType.GET, 'banners')),
-        getDocs(collection(db, 'settings')).catch(e => handleFirestoreError(e, OperationType.GET, 'settings')),
-        getDocs(query(collection(db, 'reviews'), orderBy('createdAt', 'desc'), limit(100))).catch(e => handleFirestoreError(e, OperationType.GET, 'reviews')),
-        getDocs(query(collection(db, 'carts'), orderBy('updatedAt', 'desc'), limit(100))).catch(e => handleFirestoreError(e, OperationType.GET, 'carts')),
-        getDocs(query(collection(db, 'active_sessions'), limit(100))).catch(e => handleFirestoreError(e, OperationType.GET, 'active_sessions'))
+      const [
+        productsSnap, ordersSnap, usersSnap, categoriesSnap, 
+        colorsSnap, sizesSnap, couponsSnap, bannersSnap, 
+        settingsSnap, reviewsSnap, cartsSnap, sessionsSnap
+      ] = await Promise.all([
+        getDocs(query(collection(db, 'products'), limit(500))),
+        getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(500))),
+        getDocs(query(collection(db, 'users'), limit(500))),
+        getDocs(collection(db, 'categories')),
+        getDocs(collection(db, 'colors')),
+        getDocs(collection(db, 'sizes')),
+        getDocs(collection(db, 'coupons')),
+        getDocs(collection(db, 'banners')),
+        getDocs(collection(db, 'settings')),
+        getDocs(query(collection(db, 'reviews'), orderBy('createdAt', 'desc'), limit(100))),
+        getDocs(query(collection(db, 'carts'), orderBy('updatedAt', 'desc'), limit(100))),
+        getDocs(query(collection(db, 'active_sessions'), limit(100)))
       ]);
 
       if (!settingsSnap.empty) {
@@ -2496,6 +2342,23 @@ export default function AdminDashboard() {
       if (viewingCustomer && viewingCustomer.id === orderId) {
         setViewingCustomer({ ...viewingCustomer, status: newStatus });
       }
+
+      // Send internal notification to user
+      if (order?.userId && order.userId !== 'guest') {
+        let iconType = 'package';
+        if (newStatus === 'Shipped') iconType = 'truck';
+        if (newStatus === 'Delivered') iconType = 'success';
+        
+        await sendNotification({
+          userId: order.userId,
+          title: `Order ${newStatus}`,
+          body: `Your order ${order.orderId} status has been updated to ${newStatus}.`,
+          type: 'order',
+          iconType: iconType,
+          link: '/my-orders'
+        });
+      }
+
       toast.success(`Order status updated to ${newStatus}`);
     } catch (error) {
       console.error('Error updating order status:', error);
@@ -2614,30 +2477,6 @@ export default function AdminDashboard() {
     { id: 'onhold', label: 'On hold' },
     { id: 'closed', label: 'Closed' }
   ];
-
-  const BADGE_CFG: Record<string, any> = {
-    Paid: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'PAID' },
-    Confirmed: { bg: 'bg-ruby/5', text: 'text-ruby', dot: 'bg-ruby', label: 'CONFIRMED' },
-    Shipped: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500', label: 'SHIPPED' },
-    Delivered: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'DELIVERED' },
-    Fulfilled: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'FULFILLED' },
-    Unfulfilled: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500', label: 'UNFULFILLED' },
-    Pending: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500', label: 'PENDING' },
-    Processing: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500', label: 'PROCESSING' },
-    Cancelled: { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-500', label: 'CANCELLED' },
-    'Refunded': { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-500', label: 'REFUNDED' },
-    'On Hold': { bg: 'bg-gray-100', text: 'text-gray-500', dot: 'bg-gray-400', label: 'ON HOLD' },
-  };
-
-  const StatusBadge = ({ status, label, className }: { status: string, label?: string, className?: string }) => {
-    const c = BADGE_CFG[status] || BADGE_CFG['On Hold'];
-    return (
-      <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-sm ring-1 ring-inset ${c.bg} ${c.text} ${c.bg.replace('bg-', 'ring-').replace('-50', '-200')} ${className || ''}`}>
-        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 animate-pulse ${c.dot}`} />
-        {label || c.label || status}
-      </span>
-    );
-  };
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -3068,6 +2907,15 @@ export default function AdminDashboard() {
         createdAt: new Date().toISOString() 
       });
 
+      // Internal notification for new coupon
+      await sendNotification({
+        title: 'New Discount Coupon! 🎟️',
+        body: `Use code ${couponForm.code.toUpperCase()} to get ${couponForm.discount}${couponForm.type === 'percentage' ? '%' : ' OFF'} on your next order!`,
+        type: 'coupon',
+        iconType: 'tag',
+        link: '/shop'
+      });
+
       // Send broadcast notification for new coupon
       try {
         fetch('/api/send-push', {
@@ -3245,7 +3093,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const menuItems = React.useMemo(() => [
+  const menuItems = useMemo(() => [
     { id: 'home', label: 'Home', icon: Home },
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'products', label: 'Products', icon: Package },
@@ -3338,7 +3186,7 @@ export default function AdminDashboard() {
             </div>
             {sidebarOpen && (
               <div className="ml-3 overflow-hidden">
-                <h2 className="text-white font-black text-lg leading-tight truncate">The Ruby</h2>
+                <h2 className="text-white font-black text-lg leading-tight truncate">The Ruby Fashion</h2>
                 <p className="text-white/60 text-[10px] font-bold uppercase tracking-widest truncate">Admin Panel</p>
               </div>
             )}
@@ -3474,13 +3322,6 @@ export default function AdminDashboard() {
           </div>
 
           <div className="flex items-center space-x-2 md:space-x-6">
-            <button 
-              onClick={() => setActiveTab('live')}
-              className="flex items-center space-x-2 px-2 md:px-3 py-1.5 bg-green-50 text-green-600 rounded-full hover:bg-green-100 transition-all group"
-            >
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
-              <span className="text-[9px] md:text-xs font-black uppercase tracking-widest">{liveSessions.length} <span className="hidden xs:inline">Live</span></span>
-            </button>
             <div className="hidden lg:flex items-center bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 w-72">
               <Search size={18} className="text-gray-400 mr-2" />
               <input type="text" placeholder="Search..." className="bg-transparent border-none focus:outline-none text-sm w-full font-medium" />
@@ -3610,7 +3451,7 @@ export default function AdminDashboard() {
                     </div>
                     <div className="flex items-center gap-3 w-full md:w-auto">
                       <div className="flex bg-gray-100 p-1 rounded-xl w-full md:w-auto">
-                        {(['overview', 'live', 'reports'] as const).map((tab) => (
+                        {(['overview', 'reports'] as const).map((tab) => (
                           <button
                             key={tab}
                             onClick={() => setDashboardSubTab(tab)}
@@ -3667,17 +3508,19 @@ export default function AdminDashboard() {
                               <p className="text-[7px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-widest truncate leading-none">{stat.label}</p>
                             </div>
                             <div className="h-8 sm:h-12 w-full mt-2 sm:mt-4">
-                              <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={stat.data.map((v, idx) => ({ v, idx }))}>
-                                  <Line 
-                                    type="monotone" 
-                                    dataKey="v" 
-                                    stroke={stat.color.includes('ruby') ? '#E11D48' : stat.color.includes('blue') ? '#3B82F6' : stat.color.includes('green') ? '#22C55E' : '#A855F7'} 
-                                    strokeWidth={2} 
-                                    dot={false} 
-                                  />
-                                </LineChart>
-                              </ResponsiveContainer>
+                              {isMounted && (
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <LineChart data={stat.data.map((v, idx) => ({ v, idx }))}>
+                                    <Line 
+                                      type="monotone" 
+                                      dataKey="v" 
+                                      stroke={stat.color.includes('ruby') ? '#E11D48' : stat.color.includes('blue') ? '#3B82F6' : stat.color.includes('green') ? '#22C55E' : '#A855F7'} 
+                                      strokeWidth={2} 
+                                      dot={false} 
+                                    />
+                                  </LineChart>
+                                </ResponsiveContainer>
+                              )}
                             </div>
                           </motion.div>
                         ))}
@@ -3703,8 +3546,9 @@ export default function AdminDashboard() {
                             </select>
                           </div>
                           <div className="h-[350px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                              <AreaChart data={chartData}>
+                            {isMounted && (
+                              <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={chartData}>
                                 <defs>
                                   <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
                                     <stop offset="5%" stopColor="#E11D48" stopOpacity={0.1}/>
@@ -3720,15 +3564,17 @@ export default function AdminDashboard() {
                                 <Area animationDuration={1500} type="monotone" dataKey="sales" stroke="#E11D48" strokeWidth={4} fillOpacity={1} fill="url(#colorSales)" />
                               </AreaChart>
                             </ResponsiveContainer>
-                          </div>
+                          )}
+                        </div>
                         </div>
 
                         {/* Order Status Distribution */}
                         <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 space-y-8">
                           <h3 className="text-xl font-bold text-[#1A2C54]">Order Status</h3>
                           <div className="h-[250px] w-full relative">
-                            <ResponsiveContainer width="100%" height="100%">
-                              <PieChart>
+                            {isMounted && (
+                              <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
                                 <Pie
                                   data={orderStatusData}
                                   innerRadius={60}
@@ -3743,6 +3589,7 @@ export default function AdminDashboard() {
                                 <Tooltip />
                               </PieChart>
                             </ResponsiveContainer>
+                          )}
                             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                               <span className="text-2xl font-black text-[#1A2C54]">{totalOrdersVal}</span>
                               <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">Total</span>
@@ -3900,84 +3747,6 @@ export default function AdminDashboard() {
                         </div>
                       </div>
                     </>
-                  )}
-
-                  {dashboardSubTab === 'live' && (
-                    <div className="space-y-6">
-                      <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 min-h-[400px] flex flex-col items-center justify-center text-center space-y-6 relative overflow-hidden">
-                        <div className="absolute inset-0 bg-gradient-to-br from-blue-50/50 to-transparent pointer-events-none" />
-                        <div className="w-24 h-24 bg-blue-50 text-blue-500 rounded-[2rem] flex items-center justify-center animate-pulse relative z-10">
-                          <Activity size={48} />
-                        </div>
-                        <div className="space-y-2 relative z-10">
-                          <h3 className="text-2xl font-bold text-[#1A2C54]">Live Traffic Map</h3>
-                          <p className="text-sm text-gray-400 max-w-md mx-auto">Real-time visualization of your store's global traffic and user sessions. This feature is being calibrated.</p>
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 sm:gap-8 w-full max-w-2xl pt-8 relative z-10">
-                          <div className="space-y-1">
-                            <p className="text-2xl sm:text-3xl font-black text-[#1A2C54]">{liveSessions.length}</p>
-                            <p className="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-tight">Active Users</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-2xl sm:text-3xl font-black text-[#1A2C54]">{liveSessions.filter(s => s.path === '/checkout').length}</p>
-                            <p className="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-tight">In Checkout</p>
-                          </div>
-                          <div className="space-y-1 col-span-2 sm:col-span-1 border-t sm:border-t-0 pt-4 sm:pt-0">
-                            <p className="text-2xl sm:text-3xl font-black text-[#1A2C54]">{liveSessions.filter(s => s.path === '/cart').length}</p>
-                            <p className="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-tight">In Cart</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 space-y-6">
-                          <h3 className="text-lg font-bold text-[#1A2C54]">Recent Activity</h3>
-                          <div className="space-y-4">
-                            {liveSessions.slice(0, 5).map((session, i) => (
-                              <div key={i} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                                <div className="flex items-center gap-4">
-                                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-blue-500 shadow-sm">
-                                    <User size={18} />
-                                  </div>
-                                  <div>
-                                    <p className="text-sm font-bold text-[#1A2C54]">{session.city || 'Unknown City'}, {session.country || 'India'}</p>
-                                    <p className="text-[10px] text-gray-400 font-medium">{session.path || '/'}</p>
-                                  </div>
-                                </div>
-                                <span className="text-[10px] font-bold text-green-500 uppercase tracking-widest">Active Now</span>
-                              </div>
-                            ))}
-                            {liveSessions.length === 0 && (
-                              <div className="text-center py-8 text-gray-400 italic text-sm">No active sessions at the moment</div>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 space-y-6">
-                          <h3 className="text-lg font-bold text-[#1A2C54]">Top Locations</h3>
-                          <div className="space-y-4">
-                            {topCountries.slice(0, 5).map((loc, i) => (
-                              <div key={i} className="space-y-2">
-                                <div className="flex justify-between text-xs font-bold uppercase tracking-widest">
-                                  <span className="text-gray-400">{loc.name}</span>
-                                  <span className="text-[#1A2C54]">{loc.count} users</span>
-                                </div>
-                                <div className="h-2 bg-gray-50 rounded-full overflow-hidden">
-                                  <motion.div 
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${(loc.count / liveSessions.length) * 100}%` }}
-                                    className="h-full bg-blue-500 rounded-full"
-                                  />
-                                </div>
-                              </div>
-                            ))}
-                            {topCountries.length === 0 && (
-                              <div className="text-center py-8 text-gray-400 italic text-sm">Waiting for traffic data...</div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
                   )}
 
                   {dashboardSubTab === 'reports' && (
@@ -4292,8 +4061,9 @@ export default function AdminDashboard() {
                       <p className="text-[6px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-widest truncate">{k.label}</p>
                     </div>
                     <div className="h-4 sm:h-12 w-full mt-1 sm:mt-4 opacity-70">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={(k as any).data.map((v: number, idx: number) => ({ v, idx }))}>
+                      {isMounted && (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={(k as any).data.map((v: number, idx: number) => ({ v, idx }))}>
                           <Line 
                             type="monotone" 
                             dataKey="v" 
@@ -4303,7 +4073,8 @@ export default function AdminDashboard() {
                           />
                         </LineChart>
                       </ResponsiveContainer>
-                    </div>
+                    )}
+                  </div>
                   </motion.div>
                 ))}
               </div>
@@ -5065,7 +4836,7 @@ export default function AdminDashboard() {
                            <p className="text-[13px] text-shop-text-muted">India</p>
                         </div>
                         <div className="flex items-center gap-1.5 text-[13px] text-red-600 font-[600] cursor-pointer hover:underline">
-                           <MapPin size={14} className="text-red-600" />
+                           <Activity size={14} className="text-red-600" />
                            <span>View on map</span>
                         </div>
                         <div className="bg-[#f6f6f7] rounded-lg p-3.5 border border-shop-border">
@@ -5216,10 +4987,6 @@ export default function AdminDashboard() {
               </AnimatePresence>
 
             </div>
-          )}
-
-          {activeTab === 'live' && (
-            <LiveViewContent />
           )}
 
           {activeTab === 'category' && (
@@ -5565,7 +5332,7 @@ export default function AdminDashboard() {
                             ))
                           ) : (
                             <div className="col-span-2 py-8 text-center bg-gray-50 rounded-xl border border-dashed border-gray-200">
-                              <MapPin size={24} className="text-gray-300 mx-auto mb-2" />
+                              <Activity size={24} className="text-gray-300 mx-auto mb-2" />
                               <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">No addresses saved</p>
                             </div>
                           )}
@@ -5761,8 +5528,9 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                   <div className="h-[350px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={chartData}>
+                    {isMounted && (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={chartData}>
                         <defs>
                           <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="#E11D48" stopOpacity={0.2}/>
@@ -5798,15 +5566,17 @@ export default function AdminDashboard() {
                         />
                       </AreaChart>
                     </ResponsiveContainer>
-                  </div>
+                  )}
+                </div>
                 </div>
 
                 {/* Status Distribution */}
                 <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-8">
                   <h3 className="text-lg font-black text-[#1A2C54] uppercase tracking-widest">Order Status</h3>
                   <div className="h-[250px] relative">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
+                    {isMounted && (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
                         <Pie
                           data={[
                             { name: 'Delivered', value: orders.filter(o => o.status === 'Delivered').length, color: '#22C55E' },
@@ -5832,7 +5602,8 @@ export default function AdminDashboard() {
                         </Pie>
                         <Tooltip />
                       </PieChart>
-                    </ResponsiveContainer>
+                      </ResponsiveContainer>
+                    )}
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                       <p className="text-2xl font-black text-[#1A2C54]">{orders.length}</p>
                       <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">Total Orders</p>
@@ -6602,8 +6373,9 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                   <div className="h-[350px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={products.sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)).slice(0, 6)}>
+                    {isMounted && (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={products.sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)).slice(0, 6)}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
                         <XAxis 
                           dataKey="name" 
@@ -6621,7 +6393,8 @@ export default function AdminDashboard() {
                         <Bar dataKey="wishlistCount" name="Wishlists" fill="#E11D48" radius={[6, 6, 0, 0]} barSize={24} />
                       </BarChart>
                     </ResponsiveContainer>
-                  </div>
+                  )}
+                </div>
                 </div>
 
                 {/* Conversion Gap */}
@@ -6818,7 +6591,7 @@ export default function AdminDashboard() {
                                 {[
                                   { event: 'Logged in', time: 'Just now', icon: CheckCircle, color: 'text-green-500' },
                                   { event: 'Password changed', time: '2 days ago', icon: Shield, color: 'text-blue-500' },
-                                  { event: 'New IP detected', time: '5 days ago', icon: MapPin, color: 'text-amber-500' },
+                                  { event: 'New IP detected', time: '5 days ago', icon: Activity, color: 'text-amber-500' },
                                 ].map((log, idx) => (
                                   <div key={idx} className="flex items-start gap-3">
                                     <div className={cn("p-1.5 rounded-lg bg-gray-50", log.color)}>
@@ -7832,7 +7605,7 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {activeTab !== 'dashboard' && activeTab !== 'products' && activeTab !== 'orders' && activeTab !== 'category' && activeTab !== 'colour' && activeTab !== 'size' && activeTab !== 'coupon' && activeTab !== 'customer' && activeTab !== 'rocket' && activeTab !== 'stats' && activeTab !== 'settings' && activeTab !== 'live' && activeTab !== 'notifications' && activeTab !== 'chats' && activeTab !== 'reviews' && activeTab !== 'abandoned' && activeTab !== 'insights' && !viewingCustomer && (
+          {activeTab !== 'dashboard' && activeTab !== 'products' && activeTab !== 'orders' && activeTab !== 'category' && activeTab !== 'colour' && activeTab !== 'size' && activeTab !== 'coupon' && activeTab !== 'customer' && activeTab !== 'rocket' && activeTab !== 'stats' && activeTab !== 'settings' && activeTab !== 'notifications' && activeTab !== 'chats' && activeTab !== 'reviews' && activeTab !== 'abandoned' && activeTab !== 'insights' && !viewingCustomer && (
             <div className="h-[60vh] flex flex-col items-center justify-center bg-white rounded-3xl border-2 border-dashed border-gray-100 text-gray-400 space-y-4">
               <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center">
                 <Settings size={32} className="text-gray-200 animate-spin-slow" />

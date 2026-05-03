@@ -10,7 +10,9 @@ import {
   ChevronLeft,
   Smartphone,
   Mail,
-  User
+  User,
+  LocateFixed,
+  Search
 } from 'lucide-react';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -18,6 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
+import { Capacitor } from '@capacitor/core';
 
 interface Address {
   id: string;
@@ -80,12 +83,16 @@ export default function Addresses() {
     if (!user) return;
 
     try {
+      const payload = {
+        ...formData
+      };
+
       if (editingAddress) {
-        await updateDoc(doc(db, `users/${user.uid}/addresses`, editingAddress.id), formData);
+        await updateDoc(doc(db, `users/${user.uid}/addresses`, editingAddress.id), payload);
         toast.success("Address updated successfully!");
       } else {
         await addDoc(collection(db, `users/${user.uid}/addresses`), {
-          ...formData,
+          ...payload,
           isDefault: addresses.length === 0,
           createdAt: new Date().toISOString()
         });

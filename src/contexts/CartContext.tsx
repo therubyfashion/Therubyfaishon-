@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { CartItem, Product } from '../types';
-import { io } from 'socket.io-client';
 
 interface CartContextType {
   items: CartItem[];
@@ -28,17 +27,6 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [items]);
 
   const addToCart = (product: Product, size: string, color?: string, quantity: number = 1) => {
-    // Live tracking
-    try {
-      const socket = io();
-      socket.emit('checkpoint_reached', {
-        type: 'cart',
-        sessionId: sessionStorage.getItem('visitor_session_id') || 'unknown',
-        timestamp: new Date().toISOString()
-      });
-      setTimeout(() => socket.disconnect(), 1000);
-    } catch (e) {}
-
     setItems(prev => {
       const existing = prev.find(i => 
         i.id === product.id && 

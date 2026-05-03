@@ -240,7 +240,7 @@ export default function Signup() {
                   <tr>
                     <td style="padding: 50px 60px; background-color: #1A2C54; text-align: center;">
                       <div style="margin-bottom: 24px;">
-                        <span style="color: #ffffff; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 3px;">${currentSettings?.storeName || 'The Ruby'} Premium</span>
+                        <span style="color: #ffffff; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 3px;">${currentSettings?.storeName || 'The Ruby Fashion'} Premium</span>
                       </div>
                       <p style="margin: 0; color: #94A3B8; font-size: 12px; line-height: 1.6;">If you didn't request this code, please ignore this email or contact our support team.</p>
                       <div style="margin-top: 30px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 30px;">
@@ -261,7 +261,7 @@ export default function Signup() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: formData.email,
-          fromName: currentSettings?.storeName || 'The Ruby',
+          fromName: currentSettings?.storeName || 'The Ruby Fashion',
           subject: `${otp} is your verification code ✨`,
           html: emailHtml
         })
@@ -316,7 +316,7 @@ export default function Signup() {
               <img src={storeSettings.storeLogo} alt={storeSettings.storeName} className="h-16 md:h-20 object-contain mb-4" />
             ) : (
               <div className="text-5xl font-serif font-bold tracking-tighter text-white">
-                {storeSettings?.storeName || 'The Ruby'}
+                {storeSettings?.storeName || 'The Ruby Fashion'}
               </div>
             )}
           </motion.div>

@@ -6,9 +6,11 @@ import { collection, addDoc, getDocs, doc, runTransaction, getDoc } from 'fireba
 import { db } from '../firebase';
 import { toast } from 'sonner';
 import { cn, syncToGoogleSheets } from '../lib/utils';
+import { sendNotification } from '../lib/notifications';
 import { ChevronLeft, ShoppingBag, MapPin, Home, Briefcase, Plus, CheckCircle2, Lock, Smartphone, Building2, Handshake, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import PhoneVerification from '../components/PhoneVerification';
+import { io } from 'socket.io-client';
+// import PhoneVerification from '../components/PhoneVerification';
 import { LoadingSpinner } from '../components/Skeleton';
 import SwipeButton from '../components/SwipeButton';
 
@@ -39,8 +41,6 @@ const MOCK_ADDRESSES = [
     number: '+91 98765 43210'
   }
 ];
-
-import { io } from 'socket.io-client';
 
 export default function Checkout() {
   const { items, total, itemCount, appliedPromo, clearCart } = useCart();
@@ -334,6 +334,18 @@ export default function Checkout() {
 
           await addDoc(collection(db, 'orders'), finalOrderData);
           
+          // Send internal notification
+          if (user?.uid) {
+            await sendNotification({
+              userId: user.uid,
+              title: 'Order Placed!',
+              body: `Your order ${finalOrderData.orderId} has been placed successfully.`,
+              type: 'order',
+              iconType: 'package',
+              link: '/my-orders'
+            });
+          }
+
           // Trigger Admin Push Notification via OneSignal
           try {
             await fetch('/api/send-admin-push', {
@@ -445,7 +457,7 @@ export default function Checkout() {
                       <!-- Footer -->
                       <div style="margin-top: 80px; text-align: center; border-top: 1px solid #1A1A1A; padding-top: 40px; padding-bottom: 40px;">
                         <p style="font-size: 12px; color: #444444; margin: 0;">
-                          &copy; ${new Date().getFullYear()} ${settingsData.storeName || 'The Ruby'}. All rights reserved.<br/>
+                          &copy; ${new Date().getFullYear()} ${settingsData.storeName || 'The Ruby Fashion'}. All rights reserved.<br/>
                           Secure payment processing. You're receiving this because you placed an order on our store.
                         </p>
                       </div>
@@ -549,7 +561,7 @@ export default function Checkout() {
             key: razorpayKey,
             amount: orderData.amount,
             currency: orderData.currency,
-            name: storeSettings?.storeName || 'The Ruby',
+            name: storeSettings?.storeName || 'The Ruby Fashion',
             description: `Order ${formattedOrderId}`,
             image: storeSettings?.storeLogo || 'https://cdn-icons-png.flaticon.com/512/2909/2909813.png',
             order_id: orderData.id,
@@ -598,7 +610,7 @@ export default function Checkout() {
       {/* Header - Not Sticky */}
       <div className="bg-white border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-[5%] h-16 sm:h-20 flex items-center justify-between">
-          <Link to="/" className="text-2xl sm:text-3xl font-serif italic text-ruby">The Ruby</Link>
+          <Link to="/" className="text-2xl sm:text-3xl font-serif italic text-ruby">The Ruby Fashion</Link>
           <button 
             onClick={() => navigate('/cart')} 
             className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-[#1A2C54] hover:text-ruby transition-colors"
@@ -643,56 +655,8 @@ export default function Checkout() {
               ))}
             </div>
 
-            {/* Phone Verification Modal */}
-            <AnimatePresence>
-              {showPhoneVerify && (
-                <PhoneVerification 
-                  prefillPhone={pendingAddress?.number || newAddress.number}
-                  onClose={() => {
-                    setShowPhoneVerify(false);
-                    setPendingAddress(null);
-                  }}
-                  onSuccess={async () => {
-                    setShowPhoneVerify(false);
-                    if (pendingAddress) {
-                      try {
-                        let savedAddress;
-                        if (user) {
-                          const docRef = await addDoc(collection(db, `users/${user.uid}/addresses`), pendingAddress);
-                          savedAddress = { id: docRef.id, ...pendingAddress };
-                          setSelectedAddress(docRef.id);
-                        } else {
-                          const guestId = Math.random().toString(36).substr(2, 9);
-                          savedAddress = { id: guestId, ...pendingAddress };
-                          setSelectedAddress(guestId);
-                        }
-                        
-                        setAddresses([...addresses, savedAddress]);
-                        setShowAddressForm(false);
-                        setNewAddress({
-                          name: '',
-                          email: '',
-                          number: '',
-                          address: '',
-                          landmark: '',
-                          state: '',
-                          city: '',
-                          pincode: '',
-                          label: 'Home'
-                        });
-                        setPendingAddress(null);
-                        toast.success('Phone verified & Address added! 🎉');
-                      } catch (error) {
-                        console.error("Error saving address after verification:", error);
-                        toast.error("Phone verified but failed to save address.");
-                      }
-                    } else {
-                      handlePlaceOrder(true);
-                    }
-                  }}
-                />
-              )}
-            </AnimatePresence>
+            {/* Phone Verification Modal Removed */}
+
 
             {/* Step Content */}
             <AnimatePresence mode="wait">

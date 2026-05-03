@@ -14,8 +14,10 @@ import { ProductCardSkeleton } from '../components/Skeleton';
 import { toast } from 'sonner';
 import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
+import { useNotifications } from '../contexts/NotificationContext';
 
 export default function Home() {
+  const { unreadCount } = useNotifications();
   const [trendingProducts, setTrendingProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
@@ -25,6 +27,11 @@ export default function Home() {
   const [currentBanner, setCurrentBanner] = useState(0);
   const [email, setEmail] = useState('');
   const navigate = useNavigate();
+
+  useEffect(() => {
+    // Scroll to top
+    window.scrollTo(0, 0);
+  }, []);
 
   const reviews = [
     {
@@ -78,23 +85,32 @@ export default function Home() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // Fetch Trending Products
         const productsQuery = query(
           collection(db, 'products'), 
           where('isTrending', '==', true),
           limit(8)
         );
-        const productsSnap = await getDocs(productsQuery);
-        const productsData = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+
+        const [productsSnap, categoriesSnap, bannersSnap] = await Promise.all([
+          getDocs(productsQuery),
+          getDocs(collection(db, 'categories')),
+          getDocs(collection(db, 'banners'))
+        ]);
+
+        // Handle products with fallback
+        let productsData = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+        if (productsData.length === 0) {
+          const fallbackQuery = query(collection(db, 'products'), limit(8));
+          const fallbackSnap = await getDocs(fallbackQuery);
+          productsData = fallbackSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+        }
         setTrendingProducts(productsData);
-
-        // Fetch Categories
-        const categoriesSnap = await getDocs(collection(db, 'categories'));
         setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-
-        // Fetch Banners
-        const bannersSnap = await getDocs(query(collection(db, 'banners'), where('active', '==', true)));
-        setBanners(bannersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        
+        const bannerData = bannersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Be very permissive with banners - show if active is true or not explicitly false
+        const activeBanners = bannerData.filter((b: any) => b.active !== false && b.active !== 'false');
+        setBanners(activeBanners);
       } catch (error: any) {
         if (error.code === 'resource-exhausted') {
           console.warn("Home Data: Firestore Quota reached. Content will load after reset.");
@@ -186,9 +202,17 @@ export default function Home() {
             </div>
           </Link>
           <div className="flex items-center space-x-1">
-            <button className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-50 transition-colors">
+            <Link 
+              to="/notifications"
+              className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-50 transition-colors relative"
+            >
               <Bell size={22} className="text-[#111]" />
-            </button>
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 border-white pointer-events-none">
+                  {unreadCount}
+                </span>
+              )}
+            </Link>
             <Link to="/wishlist" className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-50 transition-colors">
               <Heart size={22} className="text-[#111]" />
             </Link>

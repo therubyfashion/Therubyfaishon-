@@ -1,9 +1,10 @@
 import React from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { ShoppingBag, User, Menu, X, Search, Heart, Settings } from 'lucide-react';
+import { ShoppingBag, User, Menu, X, Search, Heart, Settings, Bell } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCart } from '../contexts/CartContext';
 import { useWishlist } from '../contexts/WishlistContext';
+import { useNotifications } from '../contexts/NotificationContext';
 import { auth, db } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
@@ -12,6 +13,7 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
   const { user, isAdmin } = useAuth();
   const { itemCount } = useCart();
   const { items: wishlistItems } = useWishlist();
+  const { unreadCount } = useNotifications();
   const navigate = useNavigate();
   const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
@@ -80,13 +82,13 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
               />
             ) : (
               <div className={`w-10 h-10 rounded-xl bg-ruby flex items-center justify-center text-white font-serif text-xl font-bold shadow-lg shadow-ruby/20 group-hover:rotate-12 transition-transform`}>
-                R
+                TR
               </div>
             )}
             <span className={`text-xl font-serif font-bold tracking-tighter ${
               isSolid ? 'text-gray-900' : 'text-white'
             }`}>
-              {storeSettings?.storeName || 'The Ruby'}
+              {storeSettings?.storeName || 'The Ruby Fashion'}
             </span>
           </Link>
 
@@ -113,11 +115,23 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
             <Link to="/search" className={`p-2 transition-colors ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
               <Search size={20} />
             </Link>
+
+            <Link 
+              to="/notifications"
+              className={`p-2 transition-colors relative group cursor-pointer flex items-center justify-center ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}
+            >
+              <Bell size={20} />
+              {unreadCount > 0 && (
+                <span className="absolute top-1 right-1 bg-red-500 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white pointer-events-none z-10">
+                  {unreadCount}
+                </span>
+              )}
+            </Link>
             
             <Link to="/wishlist" className={`p-2 transition-colors relative group ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
               <Heart size={20} />
               {wishlistItems.length > 0 && (
-                <span className="absolute top-0 right-0 bg-ruby text-white text-[8px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 border-white">
+                <span className="absolute top-0 right-0 bg-ruby text-white text-[8px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 border-white pointer-events-none">
                   {wishlistItems.length}
                 </span>
               )}
@@ -126,7 +140,7 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
             <Link to="/cart" className={`p-2 transition-colors relative group ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
               <ShoppingBag size={20} />
               {itemCount > 0 && (
-                <span className="absolute top-0 right-0 bg-ruby text-white text-[8px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 border-white">
+                <span className="absolute top-0 right-0 bg-ruby text-white text-[8px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 border-white pointer-events-none">
                   {itemCount}
                 </span>
               )}
@@ -184,7 +198,7 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
               className="fixed top-0 left-0 bottom-0 w-[80%] max-w-sm bg-white z-50 md:hidden p-8 flex flex-col"
             >
               <div className="flex justify-between items-center mb-12">
-                <span className="text-2xl font-serif font-bold text-ruby">The Ruby</span>
+                <span className="text-2xl font-serif font-bold text-ruby">The Ruby Fashion</span>
                 <button onClick={() => setIsMenuOpen(false)} className="p-2 bg-gray-50 rounded-full">
                   <X size={20} />
                 </button>

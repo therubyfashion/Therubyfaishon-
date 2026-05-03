@@ -31,7 +31,7 @@ export default function About() {
         <div className="space-y-8 text-center">
           <h2 className="text-3xl font-serif font-bold tracking-tight">Crafting Elegance Since 2024</h2>
           <p className="text-gray-500 text-lg font-light leading-relaxed tracking-wide">
-            The Ruby was born from a simple vision: to create clothing that embodies the strength, brilliance, and timeless beauty of its namesake gemstone. We believe that fashion is more than just what you wear—it's an expression of your inner radiance.
+            The Ruby Fashion was born from a simple vision: to create clothing that embodies the strength, brilliance, and timeless beauty of its namesake gemstone. We believe that fashion is more than just what you wear—it's an expression of your inner radiance.
           </p>
         </div>
 

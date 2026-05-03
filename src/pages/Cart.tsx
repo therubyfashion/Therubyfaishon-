@@ -158,7 +158,7 @@ export default function Cart() {
                         </>
                       )}
                       <span className="text-gray-200">•</span>
-                      <span>Brand: The Ruby</span>
+                      <span>Brand: The Ruby Fashion</span>
                     </div>
                   </div>
 

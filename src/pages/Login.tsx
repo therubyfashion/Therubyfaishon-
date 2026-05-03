@@ -12,10 +12,11 @@ import {
 } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
+import { sendNotification } from '../lib/notifications';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import { Mail, Lock, ArrowRight, LogIn, Smartphone } from 'lucide-react';
-import PhoneVerification from '../components/PhoneVerification';
+// import PhoneVerification from '../components/PhoneVerification';
 import { Capacitor } from '@capacitor/core';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 
@@ -55,6 +56,15 @@ export default function Login() {
               isVerified: true,
               createdAt: new Date().toISOString()
             });
+
+            await sendNotification({
+              userId: user.uid,
+              title: 'Welcome to The Ruby Fashion! ✨',
+              body: 'Thank you for joining us. Explore our latest collections and enjoy shopping!',
+              type: 'promotion',
+              iconType: 'stars',
+              link: '/shop'
+            });
           }
           toast.success("Welcome back!");
           navigate('/');
@@ -91,6 +101,15 @@ export default function Login() {
               role: 'user',
               isVerified: true,
               createdAt: new Date().toISOString()
+            });
+
+            await sendNotification({
+              userId: user.uid,
+              title: 'Welcome to The Ruby! ✨',
+              body: 'Thank you for joining us. Explore our latest collections and enjoy shopping!',
+              type: 'promotion',
+              iconType: 'stars',
+              link: '/shop'
             });
           }
           toast.success("Welcome back!");
@@ -193,7 +212,7 @@ export default function Login() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               to: user.email,
-              subject: 'Welcome Back to The Ruby! ✨',
+              subject: 'Welcome Back to The Ruby Fashion! ✨',
               html: `
                 <div style="font-family: sans-serif; padding: 20px; color: #1A2C54;">
                   <h1 style="color: #E11D48;">Welcome Back, ${userData?.name || 'Gorgeous'}!</h1>
@@ -239,7 +258,7 @@ export default function Login() {
               <img src={storeSettings.storeLogo} alt={storeSettings.storeName} className="h-16 md:h-20 object-contain mb-4" />
             ) : (
               <div className="text-5xl font-serif font-bold tracking-tighter text-white">
-                {storeSettings?.storeName || 'The Ruby'}
+                {storeSettings?.storeName || 'The Ruby Fashion'}
               </div>
             )}
           </motion.div>
@@ -345,6 +364,7 @@ export default function Login() {
             Google
           </button>
 
+          {/* 
           <button 
             onClick={() => setShowPhoneLogin(true)}
             disabled={loading}
@@ -363,6 +383,7 @@ export default function Login() {
               }}
             />
           )}
+          */}
 
           <p className="text-center text-sm text-gray-400">
             New here? <Link to="/signup" className="text-ruby font-bold hover:underline ml-1">Create Account</Link>

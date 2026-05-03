@@ -383,7 +383,7 @@ export default function ProductDetail() {
 
     const shareData = {
       title: product.name,
-      text: `Check out this ${product.name} at The Ruby!`,
+      text: `Check out this ${product.name} at The Ruby Fashion!`,
       url: shareUrl,
     };
 
@@ -414,7 +414,7 @@ export default function ProductDetail() {
       <Helmet>
         <title>{`${product.name} | The Ruby Fashion`}</title>
         <meta name="description" content={product.description.replace(/<[^>]*>/g, '').substring(0, 160)} />
-        <meta property="og:title" content={`${product.name} | The Ruby`} />
+        <meta property="og:title" content={`${product.name} | The Ruby Fashion`} />
         <meta property="og:description" content={product.description.replace(/<[^>]*>/g, '').substring(0, 160)} />
         <meta property="og:image" content={product.images[0]} />
         <meta property="og:url" content={`https://therubyfashion.shop/product/${product.id}`} />
