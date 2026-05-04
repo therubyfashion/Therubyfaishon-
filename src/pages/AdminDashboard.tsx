@@ -19,7 +19,7 @@ import {
   Home, ArrowLeft, Camera, ChevronDown, ChevronUp, Bold, Heading, Globe, Truck, Printer,
   TrendingDown, Shield, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info, History,
   Activity, Send, Rocket, MessageSquare, User, CreditCard, Download, Eye, Check, ArrowRight,
-  Cloud, RefreshCw, CheckCircle, Clock, MousePointer2, Zap
+  Cloud, RefreshCw, CheckCircle, Clock, MousePointer2, Zap, Save, Percent
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -43,6 +43,15 @@ import { Capacitor } from '@capacitor/core';
 // ═══════════════════════════════════════════════
 // LIVE VIEW HELPER COMPONENTS
 // ═══════════════════════════════════════════════
+
+const ChartContainer = ({ children, isMounted }: { children: React.ReactNode, isMounted: boolean }) => {
+  if (!isMounted) return <div className="w-full h-full bg-gray-50/50 animate-pulse rounded-2xl" />;
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      {children as any}
+    </ResponsiveContainer>
+  );
+};
 
 const ensureDate = (val: any) => {
   if (!val) return new Date();
@@ -980,7 +989,8 @@ export default function AdminDashboard() {
   useEffect(() => {
     setIsMounted(true);
     window.scrollTo(0, 0);
-  }, [activeTab]);
+  }, []);
+
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
@@ -1123,7 +1133,9 @@ export default function AdminDashboard() {
       email: 'hello@theruby.com',
       phone: '+1 (555) 123-4567',
       address: '123 Fashion Ave, NY 10001'
-    }
+    },
+    buy2Get1Free: false,
+    buy2GetPercentOff: 0
   });
 
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -1132,32 +1144,16 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     // Initialize audio
-    audioRef.current = new Audio(settings.notificationSound);
-    
-    const fetchAllData = async () => {
-      try {
-        const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(50));
-        const ordersSnap = await getDocs(q);
-        setOrders(ordersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-
-        const chatsQuery = query(collection(db, 'chats'), orderBy('lastMessageAt', 'desc'));
-        const chatsSnap = await getDocs(chatsQuery);
-        setChats(chatsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-
-        const sessionsSnap = await getDocs(collection(db, 'active_sessions'));
-        setLiveSessions(sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-
-        const notificationsQuery = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(50));
-        const noticesSnap = await getDocs(notificationsQuery);
-        setNotifications(noticesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } catch (error) {
-        console.error("Dashboard Quota Protect:", error);
-      }
-    };
-    
-    fetchAllData();
-    // No return since we don't have listeners now
+    if (settings.notificationSound && !audioRef.current) {
+      audioRef.current = new Audio(settings.notificationSound);
+    } else if (audioRef.current && settings.notificationSound) {
+      audioRef.current.src = settings.notificationSound;
+    }
   }, [settings.notificationSound]);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
 
   useEffect(() => {
     if (settings.siteTitle) document.title = settings.siteTitle;
@@ -2076,15 +2072,6 @@ export default function AdminDashboard() {
     isTrending: false,
     variants: []
   });
-
-  useEffect(() => {
-    console.log("AdminDashboard mounted");
-    return () => console.log("AdminDashboard unmounted");
-  }, []);
-
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
 
   useEffect(() => {
     if (orders.length > 0) {
@@ -3239,6 +3226,7 @@ export default function AdminDashboard() {
                           {[
                             { id: 'profile', label: 'Admin Profile', icon: User },
                             { id: 'store', label: 'Store Setting', icon: Settings },
+                            { id: 'promotions', label: 'Promotion Offers', icon: Ticket },
                             { id: 'push', label: 'Push Notification', icon: Bell },
                             { id: 'firebase', label: 'Firebase Status', icon: Cloud },
                             { id: 'sheets', label: 'Google Sheet URL', icon: Database },
@@ -3508,9 +3496,8 @@ export default function AdminDashboard() {
                               <p className="text-[7px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-widest truncate leading-none">{stat.label}</p>
                             </div>
                             <div className="h-8 sm:h-12 w-full mt-2 sm:mt-4">
-                              {isMounted && (
-                                <ResponsiveContainer width="100%" height="100%">
-                                  <LineChart data={stat.data.map((v, idx) => ({ v, idx }))}>
+                              <ChartContainer isMounted={isMounted}>
+                                <LineChart data={stat.data.map((v, idx) => ({ v, idx }))}>
                                     <Line 
                                       type="monotone" 
                                       dataKey="v" 
@@ -3519,8 +3506,7 @@ export default function AdminDashboard() {
                                       dot={false} 
                                     />
                                   </LineChart>
-                                </ResponsiveContainer>
-                              )}
+                              </ChartContainer>
                             </div>
                           </motion.div>
                         ))}
@@ -3546,9 +3532,8 @@ export default function AdminDashboard() {
                             </select>
                           </div>
                           <div className="h-[350px] w-full">
-                            {isMounted && (
-                              <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={chartData}>
+                            <ChartContainer isMounted={isMounted}>
+                              <AreaChart data={chartData}>
                                 <defs>
                                   <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
                                     <stop offset="5%" stopColor="#E11D48" stopOpacity={0.1}/>
@@ -3563,18 +3548,16 @@ export default function AdminDashboard() {
                                 />
                                 <Area animationDuration={1500} type="monotone" dataKey="sales" stroke="#E11D48" strokeWidth={4} fillOpacity={1} fill="url(#colorSales)" />
                               </AreaChart>
-                            </ResponsiveContainer>
-                          )}
-                        </div>
+                            </ChartContainer>
+                          </div>
                         </div>
 
                         {/* Order Status Distribution */}
                         <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 space-y-8">
                           <h3 className="text-xl font-bold text-[#1A2C54]">Order Status</h3>
                           <div className="h-[250px] w-full relative">
-                            {isMounted && (
-                              <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
+                            <ChartContainer isMounted={isMounted}>
+                              <PieChart>
                                 <Pie
                                   data={orderStatusData}
                                   innerRadius={60}
@@ -3588,8 +3571,7 @@ export default function AdminDashboard() {
                                 </Pie>
                                 <Tooltip />
                               </PieChart>
-                            </ResponsiveContainer>
-                          )}
+                            </ChartContainer>
                             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                               <span className="text-2xl font-black text-[#1A2C54]">{totalOrdersVal}</span>
                               <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">Total</span>
@@ -4061,9 +4043,8 @@ export default function AdminDashboard() {
                       <p className="text-[6px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-widest truncate">{k.label}</p>
                     </div>
                     <div className="h-4 sm:h-12 w-full mt-1 sm:mt-4 opacity-70">
-                      {isMounted && (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={(k as any).data.map((v: number, idx: number) => ({ v, idx }))}>
+                      <ChartContainer isMounted={isMounted}>
+                        <LineChart data={(k as any).data.map((v: number, idx: number) => ({ v, idx }))}>
                           <Line 
                             type="monotone" 
                             dataKey="v" 
@@ -4072,9 +4053,8 @@ export default function AdminDashboard() {
                             dot={false} 
                           />
                         </LineChart>
-                      </ResponsiveContainer>
-                    )}
-                  </div>
+                      </ChartContainer>
+                    </div>
                   </motion.div>
                 ))}
               </div>
@@ -5528,9 +5508,8 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                   <div className="h-[350px] w-full">
-                    {isMounted && (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={chartData}>
+                    <ChartContainer isMounted={isMounted}>
+                      <AreaChart data={chartData}>
                         <defs>
                           <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="#E11D48" stopOpacity={0.2}/>
@@ -5565,18 +5544,16 @@ export default function AdminDashboard() {
                           animationDuration={2000}
                         />
                       </AreaChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
+                    </ChartContainer>
+                  </div>
                 </div>
 
                 {/* Status Distribution */}
                 <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-8">
                   <h3 className="text-lg font-black text-[#1A2C54] uppercase tracking-widest">Order Status</h3>
                   <div className="h-[250px] relative">
-                    {isMounted && (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
+                    <ChartContainer isMounted={isMounted}>
+                      <PieChart>
                         <Pie
                           data={[
                             { name: 'Delivered', value: orders.filter(o => o.status === 'Delivered').length, color: '#22C55E' },
@@ -5602,8 +5579,7 @@ export default function AdminDashboard() {
                         </Pie>
                         <Tooltip />
                       </PieChart>
-                      </ResponsiveContainer>
-                    )}
+                    </ChartContainer>
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                       <p className="text-2xl font-black text-[#1A2C54]">{orders.length}</p>
                       <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">Total Orders</p>
@@ -6373,9 +6349,8 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                   <div className="h-[350px]">
-                    {isMounted && (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={products.sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)).slice(0, 6)}>
+                    <ChartContainer isMounted={isMounted}>
+                      <BarChart data={products.sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)).slice(0, 6)}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
                         <XAxis 
                           dataKey="name" 
@@ -6392,9 +6367,8 @@ export default function AdminDashboard() {
                         <Bar dataKey="viewCount" name="Views" fill="#1A2C54" radius={[6, 6, 0, 0]} barSize={24} />
                         <Bar dataKey="wishlistCount" name="Wishlists" fill="#E11D48" radius={[6, 6, 0, 0]} barSize={24} />
                       </BarChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
+                    </ChartContainer>
+                  </div>
                 </div>
 
                 {/* Conversion Gap */}
@@ -6919,6 +6893,15 @@ export default function AdminDashboard() {
                               </div>
                             </div>
                           </div>
+
+                          <div className="pt-6 flex justify-end">
+                            <button 
+                              onClick={handleSaveSettings}
+                              className="bg-ruby text-white px-10 py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 active:scale-95 flex items-center gap-2"
+                            >
+                              <Save size={16} /> Save Store Settings
+                            </button>
+                          </div>
                         </div>
                       </motion.div>
                     )}
@@ -7063,6 +7046,104 @@ export default function AdminDashboard() {
                               </div>
                             )}
                           </div>
+
+                          <div className="pt-6 flex justify-end">
+                            <button 
+                              onClick={handleSaveSettings}
+                              className="bg-ruby text-white px-10 py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 active:scale-95 flex items-center gap-2"
+                            >
+                              <Save size={16} /> Save Push Settings
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {activeSettingsTab === 'promotions' && (
+                      <motion.div 
+                        key="promotions"
+                        initial={{ opacity: 0, x: 10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -10 }}
+                        className="space-y-8"
+                      >
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-lg font-bold text-[#1A2C54] flex items-center">
+                            <Ticket size={20} className="mr-2 text-ruby" /> Marketing & Promotion Offers
+                          </h3>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          {/* Buy 2 Get 1 Free Card */}
+                          <div className={`p-6 rounded-[2rem] border-2 transition-all ${settings.buy2Get1Free ? 'border-ruby bg-ruby/5' : 'border-gray-100 bg-white'}`}>
+                            <div className="flex items-center justify-between mb-4">
+                              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${settings.buy2Get1Free ? 'bg-ruby text-white' : 'bg-gray-50 text-gray-400'}`}>
+                                <Zap size={24} />
+                              </div>
+                              <button
+                                onClick={() => setSettings({ ...settings, buy2Get1Free: !settings.buy2Get1Free, buy2GetPercentOff: 0 })}
+                                className={`w-12 h-6 rounded-full relative transition-all ${settings.buy2Get1Free ? 'bg-ruby' : 'bg-gray-300'}`}
+                              >
+                                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.buy2Get1Free ? 'left-7' : 'left-1'}`} />
+                              </button>
+                            </div>
+                            <h4 className="text-base font-bold text-[#1A2C54]">Buy 2 Get 1 Free</h4>
+                            <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+                              When active, customers will get the 3rd item for free when buying 3 of the same product. 
+                              <br /><b className="text-ruby">Note:</b> This overrides percentage discounts.
+                            </p>
+                          </div>
+
+                          {/* Buy 2 Get X% Off Card */}
+                          <div className={`p-6 rounded-[2rem] border-2 transition-all ${settings.buy2GetPercentOff > 0 ? 'border-ruby bg-ruby/5' : 'border-gray-100 bg-white'}`}>
+                            <div className="flex items-center justify-between mb-4">
+                              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${settings.buy2GetPercentOff > 0 ? 'bg-ruby text-white' : 'bg-gray-50 text-gray-400'}`}>
+                                <Percent size={24} />
+                              </div>
+                            </div>
+                            <h4 className="text-base font-bold text-[#1A2C54]">Buy 2 Get % Off</h4>
+                            <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+                              Apply a percentage discount when a customer buys 2 or more of the same item.
+                            </p>
+                            
+                            <div className="mt-4 flex items-center gap-3">
+                              <div className="relative flex-grow">
+                                <input 
+                                  type="number" 
+                                  placeholder="0"
+                                  disabled={settings.buy2Get1Free}
+                                  value={settings.buy2GetPercentOff || ''}
+                                  onChange={(e) => setSettings({ ...settings, buy2GetPercentOff: parseInt(e.target.value) || 0 })}
+                                  className="w-full bg-white border border-gray-100 rounded-xl px-4 py-2 text-sm font-bold focus:ring-2 focus:ring-ruby/20 outline-none disabled:opacity-50"
+                                />
+                                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-xs">%</span>
+                              </div>
+                              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest whitespace-nowrap">Discount</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="bg-amber-50 p-6 rounded-[2rem] border border-amber-100 flex gap-4">
+                          <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0">
+                            <Info size={20} />
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-sm font-bold text-amber-800 uppercase tracking-tight">How it works</p>
+                            <p className="text-xs text-amber-700/80 leading-relaxed font-medium">
+                              These offers are calculated automatically in the cart. 
+                              "Buy 2 Get 1 Free" means the 3rd, 6th, 9th... item is free. 
+                              "Buy 2 Get % Off" applies the discount to all items of that product if quantity is 2 or more.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="pt-6 border-t border-gray-50 flex justify-end">
+                           <button 
+                            onClick={handleSaveSettings}
+                            className="bg-ruby text-white px-10 py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 active:scale-95 flex items-center gap-2"
+                          >
+                            <Save size={16} /> Save Promotions
+                          </button>
                         </div>
                       </motion.div>
                     )}
@@ -7433,6 +7514,15 @@ export default function AdminDashboard() {
                               This sound will play whenever a new order is received. You can use any direct MP3/WAV link.
                             </p>
                           </div>
+
+                          <div className="pt-6 flex justify-end">
+                            <button 
+                              onClick={handleSaveSettings}
+                              className="bg-ruby text-white px-10 py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 active:scale-95 flex items-center gap-2"
+                            >
+                              <Save size={16} /> Save Sound Settings
+                            </button>
+                          </div>
                         </div>
                       </motion.div>
                     )}
@@ -7541,6 +7631,15 @@ export default function AdminDashboard() {
                                 <li>Click <b>Add domain</b> and add <b>therubyfashion.shop</b></li>
                               </ol>
                             </div>
+                          </div>
+
+                          <div className="pt-6 flex justify-end">
+                            <button 
+                              onClick={handleSaveSettings}
+                              className="bg-ruby text-white px-10 py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 active:scale-95 flex items-center gap-2"
+                            >
+                              <Save size={16} /> Save Branding & SEO
+                            </button>
                           </div>
                         </div>
                       </motion.div>

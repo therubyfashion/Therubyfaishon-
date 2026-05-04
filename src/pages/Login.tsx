@@ -16,7 +16,7 @@ import { sendNotification } from '../lib/notifications';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import { Mail, Lock, ArrowRight, LogIn, Smartphone } from 'lucide-react';
-// import PhoneVerification from '../components/PhoneVerification';
+import PhoneVerification from '../components/PhoneVerification';
 import { Capacitor } from '@capacitor/core';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 
@@ -336,59 +336,38 @@ export default function Login() {
             </div>
 
             <button 
-              type="submit"
-              disabled={loading}
-              className="w-full bg-[#1A2C54] text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-ruby transition-all shadow-xl shadow-[#1A2C54]/10 flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {loading ? "Signing In..." : (
-                <>
-                  Sign In
-                  <ArrowRight size={18} />
-                </>
-              )}
-            </button>
-          </form>
-
-          <div className="relative flex items-center gap-4 py-2">
-            <div className="flex-grow border-t border-gray-100"></div>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-300">or sign in with</span>
-            <div className="flex-grow border-t border-gray-100"></div>
-          </div>
-
-          <button 
-            onClick={handleGoogleLogin}
+            type="submit"
             disabled={loading}
-            className="w-full flex items-center justify-center gap-3 bg-white border border-gray-100 py-4 rounded-2xl text-sm font-bold text-[#1A2C54] hover:bg-gray-50 transition-all shadow-sm"
+            className="w-full bg-[#1A2C54] text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-ruby transition-all shadow-xl shadow-[#1A2C54]/10 flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
-            Google
+            {loading ? "Signing In..." : (
+              <>
+                Sign In
+                <ArrowRight size={18} />
+              </>
+            )}
           </button>
+        </form>
 
-          {/* 
-          <button 
-            onClick={() => setShowPhoneLogin(true)}
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-3 bg-white border border-gray-100 py-4 rounded-2xl text-sm font-bold text-[#1A2C54] hover:bg-gray-50 transition-all shadow-sm"
-          >
-            <Smartphone size={18} className="text-ruby" />
-            Phone Number
-          </button>
+        <div className="relative flex items-center gap-4 py-2">
+          <div className="flex-grow border-t border-gray-100"></div>
+          <span className="text-[10px] font-bold uppercase tracking-widest text-gray-300">or sign in with</span>
+          <div className="flex-grow border-t border-gray-100"></div>
+        </div>
 
-          {showPhoneLogin && (
-            <PhoneVerification 
-              onClose={() => setShowPhoneLogin(false)}
-              onSuccess={() => {
-                toast.success("Logged in with phone!");
-                navigate('/');
-              }}
-            />
-          )}
-          */}
+        <button 
+          onClick={handleGoogleLogin}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-3 bg-white border border-gray-100 py-4 rounded-2xl text-sm font-bold text-[#1A2C54] hover:bg-gray-50 transition-all shadow-sm"
+        >
+          <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
+          Google
+        </button>
 
-          <p className="text-center text-sm text-gray-400">
-            New here? <Link to="/signup" className="text-ruby font-bold hover:underline ml-1">Create Account</Link>
-          </p>
-        </motion.div>
+        <p className="text-center text-sm text-gray-400">
+          New here? <Link to="/signup" className="text-ruby font-bold hover:underline ml-1">Create Account</Link>
+        </p>
+      </motion.div>
       </div>
     </div>
   );

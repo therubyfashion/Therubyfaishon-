@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useCart } from '../contexts/CartContext';
 import { useWishlist } from '../contexts/WishlistContext';
 import { useNotifications } from '../contexts/NotificationContext';
+import { useSettings } from '../contexts/SettingsContext';
 import { auth, db } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
@@ -14,30 +15,17 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
   const { itemCount } = useCart();
   const { items: wishlistItems } = useWishlist();
   const { unreadCount } = useNotifications();
+  const { settings: storeSettings } = useSettings();
   const navigate = useNavigate();
   const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const [isScrolled, setIsScrolled] = React.useState(false);
-  const [storeSettings, setStoreSettings] = React.useState<any>(null);
 
   React.useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 20);
     };
     window.addEventListener('scroll', handleScroll);
-    
-    const fetchSettings = async () => {
-      try {
-        const querySnapshot = await getDocs(collection(db, 'settings'));
-        if (!querySnapshot.empty) {
-          setStoreSettings(querySnapshot.docs[0].data());
-        }
-      } catch (error) {
-        console.error("Error fetching settings:", error);
-      }
-    };
-    fetchSettings();
-
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
@@ -76,7 +64,7 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
             {storeSettings?.storeLogo ? (
               <img 
                 src={storeSettings.storeLogo} 
-                alt="Logo" 
+                alt={storeSettings.storeName || 'The Ruby Fashion'} 
                 className="h-10 w-auto object-contain transition-transform group-hover:scale-110" 
                 referrerPolicy="no-referrer"
               />

@@ -28,13 +28,13 @@ import {
 import { collection, doc, updateDoc } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 
-// import PhoneVerification from '../components/PhoneVerification';
+import PhoneVerification from '../components/PhoneVerification';
 import { AnimatePresence } from 'motion/react';
 
 export default function Profile() {
   const { user, profile, loading, isAdmin } = useAuth();
   const navigate = useNavigate();
-  // const [showPhoneVerify, setShowPhoneVerify] = React.useState(false);
+  const [showPhoneVerify, setShowPhoneVerify] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
   const [isUploading, setIsUploading] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -362,17 +362,37 @@ export default function Profile() {
                     <p className="text-sm font-bold text-[#1A2C54] truncate">
                       {profile?.phoneNumber ? `+91 ${profile.phoneNumber}` : 'Not Provided'}
                     </p>
-                    {profile?.phoneVerified && (
+                    {profile?.phoneVerified ? (
                       <div className="flex items-center gap-1 text-green-500">
                         <ShieldCheck size={12} />
                         <span className="text-[8px] font-bold uppercase tracking-widest">Verified</span>
                       </div>
+                    ) : (
+                      <button 
+                        onClick={() => setShowPhoneVerify(true)}
+                        className="text-[8px] font-bold uppercase tracking-widest text-ruby hover:underline"
+                      >
+                        Verify Now
+                      </button>
                     )}
                   </div>
                 </div>
               </div>
             </div>
           </div>
+
+          <AnimatePresence>
+            {showPhoneVerify && (
+              <PhoneVerification 
+                onClose={() => setShowPhoneVerify(false)}
+                onSuccess={() => {
+                  toast.success("Phone verified successfully!");
+                  setShowPhoneVerify(false);
+                }}
+                prefillPhone={profile?.phoneNumber}
+              />
+            )}
+          </AnimatePresence>
 
           {/* Menu Items */}
           <div className="bg-white overflow-hidden rounded-[2rem] shadow-sm border border-gray-50 divide-y divide-gray-50">

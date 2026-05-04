@@ -16,14 +16,16 @@ import { auth, db } from '../firebase';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
-import { Mail, Lock, User, ArrowRight, Phone, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, Phone, CheckCircle2, Smartphone } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
+import PhoneVerification from '../components/PhoneVerification';
 
 export default function Signup() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [storeSettings, setStoreSettings] = useState<any>(null);
+  const [showPhoneLogin, setShowPhoneLogin] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -394,18 +396,6 @@ export default function Signup() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 ml-1">Phone Number</label>
-              <input 
-                type="tel"
-                placeholder="Enter your phone number"
-                value={formData.phone}
-                onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                className="w-full bg-white border border-gray-100 px-5 py-3.5 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-ruby/10 focus:border-ruby transition-all"
-                required
-              />
-            </div>
-
-            <div className="space-y-1.5">
               <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 ml-1">Password</label>
               <input 
                 type="password"
@@ -430,38 +420,38 @@ export default function Signup() {
               </label>
             </div>
 
-            <button 
-              type="submit"
-              disabled={loading}
-              className="w-full bg-[#1A2C54] text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-ruby transition-all shadow-xl shadow-[#1A2C54]/10 flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {loading ? "Creating Account..." : (
-                <>
-                  Create Account
-                  <ArrowRight size={18} />
-                </>
-              )}
-            </button>
-          </form>
-
-          <div className="relative flex items-center gap-4 py-2">
-            <div className="flex-grow border-t border-gray-100"></div>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-300">or sign up with</span>
-            <div className="flex-grow border-t border-gray-100"></div>
-          </div>
-
           <button 
-            onClick={handleGoogleLogin}
+            type="submit"
             disabled={loading}
-            className="w-full flex items-center justify-center gap-3 bg-white border border-gray-100 py-4 rounded-2xl text-sm font-bold text-[#1A2C54] hover:bg-gray-50 transition-all shadow-sm"
+            className="w-full bg-[#1A2C54] text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-ruby transition-all shadow-xl shadow-[#1A2C54]/10 flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
-            Google
+            {loading ? "Creating Account..." : (
+              <>
+                Create Account
+                <ArrowRight size={18} />
+              </>
+            )}
           </button>
+        </form>
 
-          <p className="text-center text-sm text-gray-400">
-            Already have an account? <Link to="/login" className="text-ruby font-bold hover:underline ml-1">Sign In</Link>
-          </p>
+        <div className="relative flex items-center gap-4 py-2">
+          <div className="flex-grow border-t border-gray-100"></div>
+          <span className="text-[10px] font-bold uppercase tracking-widest text-gray-300">or sign up with</span>
+          <div className="flex-grow border-t border-gray-100"></div>
+        </div>
+
+        <button 
+          onClick={handleGoogleLogin}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-3 bg-white border border-gray-100 py-4 rounded-2xl text-sm font-bold text-[#1A2C54] hover:bg-gray-50 transition-all shadow-sm"
+        >
+          <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
+          Google
+        </button>
+
+        <p className="text-center text-sm text-gray-400">
+          Already have an account? <Link to="/login" className="text-ruby font-bold hover:underline ml-1">Sign In</Link>
+        </p>
         </motion.div>
       </div>
     </div>

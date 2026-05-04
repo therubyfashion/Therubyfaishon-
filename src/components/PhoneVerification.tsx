@@ -98,9 +98,39 @@ export default function PhoneVerification({ onSuccess, onClose, prefillPhone }: 
     };
   }, []);
 
+  const [otpCount, setOtpCount] = useState<number>(0);
+  const [limitReached, setLimitReached] = useState(false);
+
+  useEffect(() => {
+    const checkLimit = async () => {
+      try {
+        const settingsDoc = await getDoc(doc(db, 'settings', 'store'));
+        const statsDoc = await getDoc(doc(db, 'system', 'otp_stats'));
+        
+        if (settingsDoc.exists() && statsDoc.exists()) {
+          const limit = settingsDoc.data().otpMonthlyLimit || 9999;
+          const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+          const usage = statsDoc.data()[currentMonth] || 0;
+          
+          setOtpCount(usage);
+          if (usage >= limit) {
+            setLimitReached(true);
+          }
+        }
+      } catch (error) {
+        console.error("Error checking OTP limit:", error);
+      }
+    };
+    checkLimit();
+  }, []);
+
   const handleSendOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     
+    if (limitReached) {
+      toast.error("Monthly verification limit reached. Please contact support.");
+      return;
+    }
     // Clean phone number
     let cleanPhone = phoneNumber.replace(/\D/g, '');
     if (cleanPhone.startsWith('91') && cleanPhone.length === 12) {
@@ -122,6 +152,28 @@ export default function PhoneVerification({ onSuccess, onClose, prefillPhone }: 
 
       const confirmation = await signInWithPhoneNumber(auth, fullPhone, verifierRef.current);
       setConfirmationResult(confirmation);
+
+      // Increment global counter to track usage
+      try {
+        const currentMonth = new Date().toISOString().slice(0, 7);
+        const statsRef = doc(db, 'system', 'otp_stats');
+        const statsSnap = await getDoc(statsRef);
+        
+        if (statsSnap.exists()) {
+          const currentUsage = statsSnap.data()[currentMonth] || 0;
+          await updateDoc(statsRef, {
+            [currentMonth]: currentUsage + 1
+          });
+        } else {
+          await setDoc(statsRef, {
+            [currentMonth]: 1
+          });
+        }
+      } catch (err) {
+        console.error("Failed to increment OTP counter:", err);
+        // We don't block the user if just the counter fails, 
+        // but in a real production app you might want to.
+      }
 
       toast.success(`OTP sent to ${fullPhone}! 📲`);
       setStep('otp');

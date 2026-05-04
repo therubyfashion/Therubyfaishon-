@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
+import { useSettings } from '../contexts/SettingsContext';
 import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, ChevronLeft, Heart, Tag, Lock, CheckCircle2, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
@@ -11,7 +12,19 @@ import { LoadingSpinner } from '../components/Skeleton';
 import { useWishlist } from '../contexts/WishlistContext';
 
 export default function Cart() {
-  const { items, removeFromCart, updateQuantity, total, itemCount, appliedPromo, setAppliedPromo } = useCart();
+  const { 
+    items, 
+    removeFromCart, 
+    updateQuantity, 
+    total, 
+    subtotal, 
+    totalDiscount, 
+    autoOfferDiscount,
+    promoDiscount,
+    itemCount, 
+    appliedPromo, 
+    setAppliedPromo 
+  } = useCart();
   const { toggleWishlist, isInWishlist } = useWishlist();
   const navigate = useNavigate();
   const [promoCode, setPromoCode] = useState('');
@@ -74,10 +87,8 @@ export default function Cart() {
     setIsApplyingPromo(false);
   };
 
-  const subtotal = total;
-  const discount = appliedPromo ? appliedPromo.discount : 0;
-  const finalTotal = subtotal - discount;
-  const savings = discount + (productComparePriceTotal() - subtotal);
+  const finalTotal = total;
+  const savings = totalDiscount + (productComparePriceTotal() - subtotal);
 
   function productComparePriceTotal() {
     return items.reduce((sum, item) => sum + (item.comparePrice || item.price * 1.5) * item.quantity, 0);
@@ -267,13 +278,23 @@ export default function Cart() {
               <span className="text-[#1A2C54]">₹{subtotal.toLocaleString()}</span>
             </div>
             
-            {discount > 0 ? (
+            {autoOfferDiscount > 0 && (
+              <div className="flex justify-between text-sm font-bold text-ruby">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={14} />
+                  <span>{useSettings().settings?.buy2Get1Free ? 'Buy 2 Get 1 Free' : 'Bundle Discount'}</span>
+                </div>
+                <span>-₹{autoOfferDiscount.toLocaleString()}</span>
+              </div>
+            )}
+
+            {promoDiscount > 0 ? (
               <div className="flex justify-between text-sm font-bold text-ruby">
                 <div className="flex items-center gap-2">
                   <Tag size={14} />
-                  <span>Coupon</span>
+                  <span>Coupon ({appliedPromo?.code})</span>
                 </div>
-                <span>-₹{discount.toLocaleString()}</span>
+                <span>-₹{promoDiscount.toLocaleString()}</span>
               </div>
             ) : (
               <div className="flex justify-between text-sm font-medium text-gray-300 italic">
@@ -285,9 +306,9 @@ export default function Cart() {
             <div className="pt-6 border-t border-gray-50 flex justify-between items-end">
               <div className="space-y-1">
                 <p className="text-base sm:text-lg font-bold text-[#1A2C54]">Total Payable</p>
-                {discount > 0 && (
+                {totalDiscount > 0 && (
                   <p className="text-[9px] sm:text-[10px] font-bold text-green-500 uppercase tracking-widest flex items-center gap-1">
-                    🎉 You save ₹{appliedPromo?.discount.toLocaleString()} on this order!
+                    🎉 You save ₹{totalDiscount.toLocaleString()} on this order!
                   </p>
                 )}
               </div>

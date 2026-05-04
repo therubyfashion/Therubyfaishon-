@@ -10,7 +10,7 @@ import { sendNotification } from '../lib/notifications';
 import { ChevronLeft, ShoppingBag, MapPin, Home, Briefcase, Plus, CheckCircle2, Lock, Smartphone, Building2, Handshake, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { io } from 'socket.io-client';
-// import PhoneVerification from '../components/PhoneVerification';
+import EmailVerification from '../components/EmailVerification';
 import { LoadingSpinner } from '../components/Skeleton';
 import SwipeButton from '../components/SwipeButton';
 
@@ -74,7 +74,7 @@ export default function Checkout() {
   const [selectedPayment, setSelectedPayment] = useState('cod');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [showAddressForm, setShowAddressForm] = useState(false);
-  const [showPhoneVerify, setShowPhoneVerify] = useState(false);
+  const [showEmailVerify, setShowEmailVerify] = useState(false);
   const [pendingAddress, setPendingAddress] = useState<any>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [storeSettings, setStoreSettings] = useState<any>(null);
@@ -213,21 +213,12 @@ export default function Checkout() {
       createdAt: new Date().toISOString()
     };
 
-    // If phone is not verified, trigger verification first
-    if (!profile?.phoneVerified) {
+    // If email is not verified for address, trigger verification first
+    const isVerified = profile?.phoneVerified || profile?.addressConfirmedAt;
+    
+    if (!isVerified) {
       setPendingAddress(addressData);
-      setShowPhoneVerify(true);
-      
-      // Also trigger email verification if not verified
-      if (user && !user.emailVerified) {
-        try {
-          const { sendEmailVerification } = await import('firebase/auth');
-          await sendEmailVerification(user);
-          toast.info('A verification email has been sent to your Gmail. Please verify it for secure checkout.');
-        } catch (err) {
-          console.error("Email verify error:", err);
-        }
-      }
+      setShowEmailVerify(true);
       return;
     }
 
@@ -272,9 +263,11 @@ export default function Checkout() {
       return;
     }
 
-    // Check if phone is verified
-    if (!profile?.phoneVerified && !isVerifiedOverride) {
-      setShowPhoneVerify(true);
+    // Check if address is verified
+    const isVerified = profile?.phoneVerified || profile?.addressConfirmedAt;
+    
+    if (!isVerified && !isVerifiedOverride) {
+      setShowEmailVerify(true);
       return;
     }
 
@@ -655,7 +648,30 @@ export default function Checkout() {
               ))}
             </div>
 
-            {/* Phone Verification Modal Removed */}
+            {/* Email Verification Modal */}
+            {showEmailVerify && user && (
+              <EmailVerification 
+                email={user.email || ''}
+                userId={user.uid}
+                onClose={() => setShowEmailVerify(false)}
+                onSuccess={async () => {
+                  if (pendingAddress) {
+                    try {
+                      const docRef = await addDoc(collection(db, `users/${user.uid}/addresses`), pendingAddress);
+                      const savedAddress = { id: docRef.id, ...pendingAddress };
+                      setAddresses([...addresses, savedAddress]);
+                      setSelectedAddress(docRef.id);
+                      setShowAddressForm(false);
+                      setPendingAddress(null);
+                      toast.success('Address verified and saved! 🎉');
+                    } catch (err) {
+                      console.error("Error saving pending address:", err);
+                    }
+                  }
+                  setShowEmailVerify(false);
+                }}
+              />
+            )}
 
 
             {/* Step Content */}

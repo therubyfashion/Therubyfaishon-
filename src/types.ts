@@ -37,6 +37,7 @@ export interface UserProfile {
   displayName: string;
   phoneNumber?: string;
   phoneVerified?: boolean;
+  addressConfirmedAt?: string;
   role: 'admin' | 'user';
   isVerified: boolean;
   verificationToken?: string | null;

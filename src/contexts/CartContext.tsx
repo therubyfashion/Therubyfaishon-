@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { CartItem, Product } from '../types';
+import { useSettings } from './SettingsContext';
 
 interface CartContextType {
   items: CartItem[];
@@ -8,6 +9,10 @@ interface CartContextType {
   updateQuantity: (productId: string, size: string, quantity: number, color?: string) => void;
   clearCart: () => void;
   total: number;
+  subtotal: number;
+  totalDiscount: number;
+  autoOfferDiscount: number;
+  promoDiscount: number;
   itemCount: number;
   appliedPromo: { code: string; discount: number } | null;
   setAppliedPromo: (promo: { code: string; discount: number } | null) => void;
@@ -68,7 +73,40 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAppliedPromo(null);
   };
 
-  const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const { settings } = useSettings();
+
+  const calculateTotals = () => {
+    let subtotal = 0;
+    let promoDiscount = 0;
+    let autoOfferDiscount = 0;
+
+    items.forEach(item => {
+      const itemTotal = item.price * item.quantity;
+      subtotal += itemTotal;
+
+      // Automatic "Buy 2 Get 1 Free" Logic
+      if (settings?.buy2Get1Free) {
+        const freeItems = Math.floor(item.quantity / 3);
+        autoOfferDiscount += freeItems * item.price;
+      } 
+      // Automatic "Buy 2 Get X% Off" Logic (if Buy 2 Get 1 is NOT active or fails condition)
+      else if (settings?.buy2GetPercentOff && item.quantity >= 2) {
+        const discountRate = settings.buy2GetPercentOff / 100;
+        autoOfferDiscount += (item.price * item.quantity) * discountRate;
+      }
+    });
+
+    if (appliedPromo) {
+      promoDiscount = appliedPromo.discount;
+    }
+
+    const totalDiscount = promoDiscount + autoOfferDiscount;
+    const finalTotal = Math.max(0, subtotal - totalDiscount);
+
+    return { subtotal, totalDiscount, autoOfferDiscount, promoDiscount, finalTotal };
+  };
+
+  const { subtotal, totalDiscount, autoOfferDiscount, promoDiscount, finalTotal: total } = calculateTotals();
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
@@ -79,6 +117,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updateQuantity, 
       clearCart, 
       total, 
+      subtotal,
+      totalDiscount,
+      autoOfferDiscount,
+      promoDiscount,
       itemCount,
       appliedPromo,
       setAppliedPromo
