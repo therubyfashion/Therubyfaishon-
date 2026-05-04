@@ -45,11 +45,20 @@ import { Capacitor } from '@capacitor/core';
 // ═══════════════════════════════════════════════
 
 const ChartContainer = ({ children, isMounted }: { children: React.ReactNode, isMounted: boolean }) => {
-  if (!isMounted) return <div className="w-full h-full bg-gray-50/50 animate-pulse rounded-2xl" />;
+  if (!isMounted || !children) {
+    return (
+      <div className="w-full h-full bg-gray-50/50 animate-pulse rounded-2xl flex items-center justify-center text-[8px] font-bold text-gray-400 uppercase tracking-widest leading-none">
+        Loading...
+      </div>
+    );
+  }
+  
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      {children as any}
-    </ResponsiveContainer>
+    <div className="w-full h-full min-h-[1px] relative">
+      <ResponsiveContainer width="100%" height="100%">
+        {React.Children.only(children as React.ReactElement)}
+      </ResponsiveContainer>
+    </div>
   );
 };
 
@@ -116,29 +125,6 @@ const LiveSparkline = ({ data, color = '#E11D48', height = 40 }: { data: number[
   );
 };
 
-const LiveAnimNum = ({ value, prefix = '', suffix = '', className = '' }: { value: number | string, prefix?: string, suffix?: string, className?: string }) => {
-  const [disp, setDisp] = useState<number | string>(value);
-  const prev = useRef(value);
-
-  useEffect(() => {
-    if (typeof value === 'number' && typeof prev.current === 'number' && value !== prev.current) {
-      const startValue = typeof disp === 'number' ? disp : 0;
-      let start = startValue, end = value, dur = 400, st: number | null = null;
-      const step = (ts: number) => {
-        if (!st) st = ts;
-        const p = Math.min((ts - st) / dur, 1);
-        setDisp(Math.round(start + (end - start) * p));
-        if (p < 1) requestAnimationFrame(step);
-      };
-      requestAnimationFrame(step);
-    } else {
-      setDisp(value);
-    }
-    prev.current = value;
-  }, [value]);
-
-  return <span className={className}>{prefix}{typeof disp === 'number' ? disp.toLocaleString('en-IN') : disp}{suffix}</span>;
-};
 
 
 const chartDataSample = [];
@@ -3496,17 +3482,15 @@ export default function AdminDashboard() {
                               <p className="text-[7px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-widest truncate leading-none">{stat.label}</p>
                             </div>
                             <div className="h-8 sm:h-12 w-full mt-2 sm:mt-4">
-                              <ChartContainer isMounted={isMounted}>
-                                <LineChart data={stat.data.map((v, idx) => ({ v, idx }))}>
-                                    <Line 
-                                      type="monotone" 
-                                      dataKey="v" 
-                                      stroke={stat.color.includes('ruby') ? '#E11D48' : stat.color.includes('blue') ? '#3B82F6' : stat.color.includes('green') ? '#22C55E' : '#A855F7'} 
-                                      strokeWidth={2} 
-                                      dot={false} 
-                                    />
-                                  </LineChart>
-                              </ChartContainer>
+                              <LineChart width={150} height={40} data={stat.data.map((v, idx) => ({ v, idx }))}>
+                                <Line 
+                                  type="monotone" 
+                                  dataKey="v" 
+                                  stroke={stat.color.includes('ruby') ? '#E11D48' : stat.color.includes('blue') ? '#3B82F6' : stat.color.includes('green') ? '#22C55E' : '#A855F7'} 
+                                  strokeWidth={2} 
+                                  dot={false} 
+                                />
+                              </LineChart>
                             </div>
                           </motion.div>
                         ))}

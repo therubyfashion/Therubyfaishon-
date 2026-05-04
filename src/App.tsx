@@ -33,7 +33,7 @@ const MyOrders = React.lazy(() => import('./pages/MyOrders'));
 const OrderSuccess = React.lazy(() => import('./pages/OrderSuccess'));
 const TrackOrder = React.lazy(() => import('./pages/TrackOrder'));
 const Notifications = React.lazy(() => import('./pages/Notifications'));
-const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
+import AdminDashboard from './pages/AdminDashboard';
 const Search = React.lazy(() => import('./pages/Search'));
 const Profile = React.lazy(() => import('./pages/Profile'));
 const Settings = React.lazy(() => import('./pages/Settings'));
