@@ -45,7 +45,7 @@ import { Capacitor } from '@capacitor/core';
 // ═══════════════════════════════════════════════
 
 const ChartContainer = ({ children, isMounted }: { children: React.ReactNode, isMounted: boolean }) => {
-  if (!isMounted || !children) {
+  if (!isMounted) {
     return (
       <div className="w-full h-full bg-gray-50/50 animate-pulse rounded-2xl flex items-center justify-center text-[8px] font-bold text-gray-400 uppercase tracking-widest leading-none">
         Loading...
@@ -56,7 +56,7 @@ const ChartContainer = ({ children, isMounted }: { children: React.ReactNode, is
   return (
     <div className="w-full h-full min-h-[1px] relative">
       <ResponsiveContainer width="100%" height="100%">
-        {React.Children.only(children as React.ReactElement)}
+        {children as any}
       </ResponsiveContainer>
     </div>
   );
@@ -1121,6 +1121,7 @@ export default function AdminDashboard() {
       address: '123 Fashion Ave, NY 10001'
     },
     buy2Get1Free: false,
+    buy2GetPercentEnabled: false,
     buy2GetPercentOff: 0
   });
 
@@ -3525,8 +3526,8 @@ export default function AdminDashboard() {
                                   </linearGradient>
                                 </defs>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94A3B8', fontWeight: 600}} dy={10} />
-                                <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94A3B8', fontWeight: 600}} />
+                                <XAxis xAxisId={0} dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94A3B8', fontWeight: 600}} dy={10} />
+                                <YAxis yAxisId={0} axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94A3B8', fontWeight: 600}} />
                                 <Tooltip 
                                   contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 50px -20px rgba(0,0,0,0.1)', padding: '16px' }}
                                 />
@@ -7065,7 +7066,11 @@ export default function AdminDashboard() {
                                 <Zap size={24} />
                               </div>
                               <button
-                                onClick={() => setSettings({ ...settings, buy2Get1Free: !settings.buy2Get1Free, buy2GetPercentOff: 0 })}
+                                onClick={() => setSettings({ 
+                                  ...settings, 
+                                  buy2Get1Free: !settings.buy2Get1Free, 
+                                  buy2GetPercentEnabled: false 
+                                })}
                                 className={`w-12 h-6 rounded-full relative transition-all ${settings.buy2Get1Free ? 'bg-ruby' : 'bg-gray-300'}`}
                               >
                                 <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.buy2Get1Free ? 'left-7' : 'left-1'}`} />
@@ -7079,11 +7084,21 @@ export default function AdminDashboard() {
                           </div>
 
                           {/* Buy 2 Get X% Off Card */}
-                          <div className={`p-6 rounded-[2rem] border-2 transition-all ${settings.buy2GetPercentOff > 0 ? 'border-ruby bg-ruby/5' : 'border-gray-100 bg-white'}`}>
+                          <div className={`p-6 rounded-[2rem] border-2 transition-all ${settings.buy2GetPercentEnabled ? 'border-ruby bg-ruby/5' : 'border-gray-100 bg-white'}`}>
                             <div className="flex items-center justify-between mb-4">
-                              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${settings.buy2GetPercentOff > 0 ? 'bg-ruby text-white' : 'bg-gray-50 text-gray-400'}`}>
+                              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${settings.buy2GetPercentEnabled ? 'bg-ruby text-white' : 'bg-gray-50 text-gray-400'}`}>
                                 <Percent size={24} />
                               </div>
+                              <button
+                                onClick={() => setSettings({ 
+                                  ...settings, 
+                                  buy2GetPercentEnabled: !settings.buy2GetPercentEnabled,
+                                  buy2Get1Free: false // Mutual exclusion
+                                })}
+                                className={`w-12 h-6 rounded-full relative transition-all ${settings.buy2GetPercentEnabled ? 'bg-ruby' : 'bg-gray-300'}`}
+                              >
+                                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.buy2GetPercentEnabled ? 'left-7' : 'left-1'}`} />
+                              </button>
                             </div>
                             <h4 className="text-base font-bold text-[#1A2C54]">Buy 2 Get % Off</h4>
                             <p className="text-xs text-gray-500 mt-2 leading-relaxed">
@@ -7095,7 +7110,7 @@ export default function AdminDashboard() {
                                 <input 
                                   type="number" 
                                   placeholder="0"
-                                  disabled={settings.buy2Get1Free}
+                                  disabled={!settings.buy2GetPercentEnabled}
                                   value={settings.buy2GetPercentOff || ''}
                                   onChange={(e) => setSettings({ ...settings, buy2GetPercentOff: parseInt(e.target.value) || 0 })}
                                   className="w-full bg-white border border-gray-100 rounded-xl px-4 py-2 text-sm font-bold focus:ring-2 focus:ring-ruby/20 outline-none disabled:opacity-50"

@@ -89,8 +89,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const freeItems = Math.floor(item.quantity / 3);
         autoOfferDiscount += freeItems * item.price;
       } 
-      // Automatic "Buy 2 Get X% Off" Logic (if Buy 2 Get 1 is NOT active or fails condition)
-      else if (settings?.buy2GetPercentOff && item.quantity >= 2) {
+      // Automatic "Buy 2 Get X% Off" Logic
+      else if (settings?.buy2GetPercentEnabled && settings?.buy2GetPercentOff && item.quantity >= 2) {
         const discountRate = settings.buy2GetPercentOff / 100;
         autoOfferDiscount += (item.price * item.quantity) * discountRate;
       }
