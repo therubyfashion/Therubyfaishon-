@@ -44,7 +44,7 @@ export default function Search() {
   }, [searchTerm, products]);
 
   return (
-    <div className="min-h-screen bg-white pt-24 pb-20 px-4">
+    <div className="min-h-screen bg-white pt-10 pb-20 px-4">
       <div className="max-w-2xl mx-auto space-y-8">
         <div className="space-y-4">
           <h1 className="text-3xl font-serif font-bold text-[#1A2C54]">Search <span className="text-ruby italic">The Ruby Fashion</span></h1>
