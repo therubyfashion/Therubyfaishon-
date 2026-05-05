@@ -169,6 +169,19 @@ service cloud.firestore {
              (!('status' in data) || data.status == null || data.status is string);
     }
 
+    function isValidPromotion(data) {
+      return data.keys().hasAll(['name', 'priority', 'status', 'type', 'conditions', 'reward', 'limits', 'stackable', 'updatedAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.priority is number && data.priority >= 1 && data.priority <= 10 &&
+             data.status in ['active', 'draft', 'expired'] &&
+             data.type in ['bxgy', 'percentage', 'flat', 'shipping', 'bundle'] &&
+             data.conditions is map &&
+             data.reward is map &&
+             data.limits is map &&
+             data.stackable is bool &&
+             data.updatedAt is string;
+    }
+
     // Rules
     match /users/{userId} {
       allow read: if isAdmin() || isOwner(userId);
@@ -267,6 +280,14 @@ service cloud.firestore {
     match /counters/{counterId} {
       allow read: if true;
       allow write: if true;
+    }
+
+    match /promotions/{promotionId} {
+      allow get: if isAdmin() || resource.data.status == 'active';
+      allow list: if isAdmin() || resource.data.status == 'active';
+      allow create: if isAdmin() && isValidPromotion(request.resource.data);
+      allow update: if isAdmin() && isValidPromotion(request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }

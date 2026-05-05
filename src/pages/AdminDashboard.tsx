@@ -19,7 +19,7 @@ import {
   Home, ArrowLeft, Camera, ChevronDown, ChevronUp, Bold, Heading, Globe, Truck, Printer,
   TrendingDown, Shield, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info, History,
   Activity, Send, Rocket, MessageSquare, User, CreditCard, Download, Eye, Check, ArrowRight,
-  Cloud, RefreshCw, CheckCircle, Clock, MousePointer2, Zap, Save, Percent
+  Cloud, RefreshCw, CheckCircle, Clock, MousePointer2, Zap, Save, Percent, Gift, Tag, Layers
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -131,7 +131,7 @@ const chartDataSample = [];
 const recentOrdersSample = [];
 const topProductsSample = [];
 
-type Tab = 'home' | 'dashboard' | 'products' | 'category' | 'orders' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights';
+type Tab = 'home' | 'dashboard' | 'products' | 'category' | 'orders' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights' | 'promotions';
 
 function Accordion({ title, icon: Icon, children }: { title: string, icon: any, children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -1035,6 +1035,44 @@ export default function AdminDashboard() {
   const [dashboardSubTab, setDashboardSubTab] = useState<'overview' | 'reports'>('overview');
   const [liveDashboardTab, setLiveDashboardTab] = useState<'overview' | 'sessions' | 'orders' | 'sources'>('overview');
   
+  // Promotion Engine States
+  const [promotions, setPromotions] = useState<any[]>([]);
+  const [isPromotionModalOpen, setIsPromotionModalOpen] = useState(false);
+  const [editingPromotion, setEditingPromotion] = useState<any | null>(null);
+  const [promotionForm, setPromotionForm] = useState<any>({
+    name: '',
+    description: '',
+    priority: 1,
+    status: 'draft',
+    type: 'bxgy',
+    conditions: {
+      minCartValue: 0,
+      minQuantity: 0,
+      productIds: [],
+      categoryIds: [],
+      userType: 'all',
+      startDate: '',
+      endDate: ''
+    },
+    bxgyConfig: {
+      buyQty: 2,
+      getQty: 1,
+      applyOn: 'same',
+      maxFree: 1,
+      repeat: false
+    },
+    reward: {
+      method: 'auto',
+      value: 100
+    },
+    limits: {
+      perUser: 1,
+      totalUsage: 100,
+      maxDiscount: 0
+    },
+    stackable: false
+  });
+
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
 
   const totalRevenue = orders.reduce((acc, order) => acc + (order.total || 0), 0);
@@ -2117,7 +2155,7 @@ export default function AdminDashboard() {
       const [
         productsSnap, ordersSnap, usersSnap, categoriesSnap, 
         colorsSnap, sizesSnap, couponsSnap, bannersSnap, 
-        settingsSnap, reviewsSnap, cartsSnap, sessionsSnap
+        settingsSnap, reviewsSnap, cartsSnap, sessionsSnap, promotionsSnap
       ] = await Promise.all([
         getDocs(query(collection(db, 'products'), limit(500))),
         getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(500))),
@@ -2130,7 +2168,8 @@ export default function AdminDashboard() {
         getDocs(collection(db, 'settings')),
         getDocs(query(collection(db, 'reviews'), orderBy('createdAt', 'desc'), limit(100))),
         getDocs(query(collection(db, 'carts'), orderBy('updatedAt', 'desc'), limit(100))),
-        getDocs(query(collection(db, 'active_sessions'), limit(100)))
+        getDocs(query(collection(db, 'active_sessions'), limit(100))),
+        getDocs(query(collection(db, 'promotions'), orderBy('priority', 'asc')))
       ]);
 
       if (!settingsSnap.empty) {
@@ -2150,6 +2189,7 @@ export default function AdminDashboard() {
       setReviews(reviewsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setAbandonedCarts(cartsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)).filter(cart => cart.status === 'active' && cart.items?.length > 0));
       setLiveSessions(sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setPromotions(promotionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
     } finally {
@@ -2767,6 +2807,83 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleSavePromotion = async () => {
+    if (!promotionForm.name) {
+      toast.error("Promotion name is required");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const promoData = {
+        ...promotionForm,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (editingPromotion) {
+        await updateDoc(doc(db, 'promotions', editingPromotion.id), promoData);
+        toast.success("Promotion updated successfully");
+      } else {
+        promoData.createdAt = new Date().toISOString();
+        await addDoc(collection(db, 'promotions'), promoData);
+        toast.success("Promotion created successfully");
+      }
+
+      setIsPromotionModalOpen(false);
+      setEditingPromotion(null);
+      setPromotionForm({
+        name: '',
+        description: '',
+        priority: 1,
+        status: 'draft',
+        type: 'bxgy',
+        conditions: {
+          minCartValue: 0,
+          minQuantity: 0,
+          productIds: [],
+          categoryIds: [],
+          userType: 'all',
+          startDate: '',
+          endDate: ''
+        },
+        bxgyConfig: {
+          buyQty: 2,
+          getQty: 1,
+          applyOn: 'same',
+          maxFree: 1,
+          repeat: false
+        },
+        reward: {
+          method: 'auto',
+          value: 100
+        },
+        limits: {
+          perUser: 1,
+          totalUsage: 100,
+          maxDiscount: 0
+        },
+        stackable: false
+      });
+      fetchDashboardData();
+    } catch (error) {
+      console.error("Error saving promotion:", error);
+      toast.error("Failed to save promotion");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeletePromotion = async (id: string) => {
+    if (!window.confirm("Bhai, pakka is offer ko delete karna hai? Ye wapas nahi aayega!")) return;
+    try {
+      await deleteDoc(doc(db, 'promotions', id));
+      toast.success("Offer deleted permanently");
+      fetchDashboardData();
+    } catch (error) {
+      toast.error("Failed to delete promotion");
+    }
+  };
+
   const handleAddCategory = () => {
     setCategoryForm({ name: '', image: '' });
     setIsCategoryModalOpen(true);
@@ -3076,6 +3193,7 @@ export default function AdminDashboard() {
     { id: 'colour', label: 'Colour', icon: Palette },
     { id: 'size', label: 'Size', icon: Maximize2 },
     { id: 'coupon', label: 'Coupon', icon: Ticket },
+    { id: 'promotions', label: 'Promotion Engine', icon: Zap },
     { id: 'customer', label: 'Customer', icon: Users },
     { id: 'rocket', label: 'Marketing', icon: TrendingUp },
     { id: 'stats', label: 'Analytics', icon: BarChart3 },
@@ -5091,6 +5209,125 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'promotions' && (
+            <div className="space-y-8">
+              <div className="flex justify-between items-center bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm">
+                <div>
+                  <h2 className="text-2xl font-black text-[#1A2C54] tracking-tight uppercase italic">Promotion Engine <span className="text-ruby">PRO</span> 🔥</h2>
+                  <p className="text-sm text-gray-400 font-medium">Create and manage your advanced store offers and multi-buy logic</p>
+                </div>
+                <button 
+                  onClick={() => {
+                    setEditingPromotion(null);
+                    setPromotionForm({
+                      name: '',
+                      description: '',
+                      priority: 1,
+                      status: 'draft',
+                      type: 'bxgy',
+                      conditions: { minCartValue: 0, minQuantity: 0, productIds: [], categoryIds: [], userType: 'all', startDate: '', endDate: '' },
+                      bxgyConfig: { buyQty: 2, getQty: 1, applyOn: 'same', maxFree: 1, repeat: false },
+                      reward: { method: 'auto', value: 100 },
+                      limits: { perUser: 1, totalUsage: 100, maxDiscount: 0 },
+                      stackable: false
+                    });
+                    setIsPromotionModalOpen(true);
+                  }} 
+                  className="bg-ruby text-white px-8 py-4 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-ruby-dark transition-all flex items-center shadow-xl shadow-ruby/20 active:scale-95"
+                >
+                  <Plus size={18} className="mr-2" /> Create New Offer
+                </button>
+              </div>
+
+              {/* Promotion List Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {promotions.map((promo) => (
+                  <motion.div 
+                    key={promo.id}
+                    whileHover={{ y: -5 }}
+                    className="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden flex flex-col group hover:border-ruby/30 transition-all"
+                  >
+                    <div className={`p-6 ${promo.status === 'active' ? 'bg-emerald-50/50' : 'bg-gray-50/50'} border-b border-gray-50 flex items-center justify-between`}>
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${promo.status === 'active' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200' : 'bg-gray-200 text-gray-400 uppercase'}`}>
+                          {promo.type === 'bxgy' ? <Zap size={18} /> : promo.type === 'percentage' ? <Percent size={18} /> : (promo.type === 'shipping' ? <Truck size={18} /> : <Ticket size={18} />)}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">{promo.type} offer</p>
+                          <h3 className="text-sm font-black text-[#1A2C54] truncate max-w-[120px]">{promo.name}</h3>
+                        </div>
+                      </div>
+                      <div className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ring-1 ring-inset ${
+                        promo.status === 'active' ? 'bg-emerald-100 text-emerald-700 ring-emerald-200' : 'bg-gray-100 text-gray-400 ring-gray-200'
+                      }`}>
+                        {promo.status}
+                      </div>
+                    </div>
+                    
+                    <div className="p-6 flex-grow space-y-4">
+                      <p className="text-[11px] text-gray-500 line-clamp-2 font-medium leading-relaxed">{promo.description || 'No description provided for this promotion.'}</p>
+                      
+                      <div className="grid grid-cols-2 gap-3 pb-2 border-b border-gray-50">
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Priority</p>
+                          <p className="text-xs font-black text-[#1A2C54]">{promo.priority}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Stackable</p>
+                          <p className="text-xs font-black text-[#1A2C54]">{promo.stackable ? 'YES ✅' : 'NO ❌'}</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <h4 className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Conditions</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {promo.conditions.minCartValue > 0 && (
+                            <span className="px-2 py-1 bg-ruby/5 text-ruby text-[9px] font-bold rounded-md">Min: ₹{promo.conditions.minCartValue}</span>
+                          )}
+                          {promo.conditions.minQuantity > 0 && (
+                            <span className="px-2 py-1 bg-ruby/5 text-ruby text-[9px] font-bold rounded-md">Qty: {promo.conditions.minQuantity}+</span>
+                          )}
+                          <span className="px-2 py-1 bg-ruby/5 text-ruby text-[9px] font-bold rounded-md uppercase tracking-tight">Users: {promo.conditions.userType}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-gray-50/50 flex items-center justify-between gap-3">
+                      <button 
+                        onClick={() => {
+                          setEditingPromotion(promo);
+                          setPromotionForm(promo);
+                          setIsPromotionModalOpen(true);
+                        }}
+                        className="flex-grow py-2.5 bg-white border border-gray-100 text-[#1A2C54] rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-[#1A2C54] hover:text-white transition-all shadow-sm"
+                      >
+                        Edit Offer
+                      </button>
+                      <button 
+                        onClick={() => handleDeletePromotion(promo.id)}
+                        className="p-2.5 bg-white text-gray-400 hover:text-red-500 rounded-xl hover:bg-red-50 transition-all shadow-sm border border-gray-100"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </motion.div>
+                ))}
+
+                {promotions.length === 0 && (
+                  <div className="col-span-full py-20 bg-white rounded-[3rem] border-2 border-dashed border-gray-100 text-center space-y-6">
+                    <div className="w-24 h-24 bg-gray-50 rounded-[2.5rem] flex items-center justify-center mx-auto text-gray-200">
+                      <Zap size={40} />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-black text-[#1A2C54] uppercase tracking-widest">No active promotions</p>
+                      <p className="text-xs text-gray-400 font-medium">Click the button above to start creating your first advanced offer!</p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -7703,7 +7940,7 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {activeTab !== 'dashboard' && activeTab !== 'products' && activeTab !== 'orders' && activeTab !== 'category' && activeTab !== 'colour' && activeTab !== 'size' && activeTab !== 'coupon' && activeTab !== 'customer' && activeTab !== 'rocket' && activeTab !== 'stats' && activeTab !== 'settings' && activeTab !== 'notifications' && activeTab !== 'chats' && activeTab !== 'reviews' && activeTab !== 'abandoned' && activeTab !== 'insights' && !viewingCustomer && (
+          {activeTab !== 'dashboard' && activeTab !== 'products' && activeTab !== 'orders' && activeTab !== 'category' && activeTab !== 'colour' && activeTab !== 'size' && activeTab !== 'coupon' && activeTab !== 'promotions' && activeTab !== 'customer' && activeTab !== 'rocket' && activeTab !== 'stats' && activeTab !== 'settings' && activeTab !== 'notifications' && activeTab !== 'chats' && activeTab !== 'reviews' && activeTab !== 'abandoned' && activeTab !== 'insights' && !viewingCustomer && (
             <div className="h-[60vh] flex flex-col items-center justify-center bg-white rounded-3xl border-2 border-dashed border-gray-100 text-gray-400 space-y-4">
               <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center">
                 <Settings size={32} className="text-gray-200 animate-spin-slow" />
@@ -8086,6 +8323,414 @@ export default function AdminDashboard() {
         title="Delete Review"
         message="Are you sure you want to delete this review? This action cannot be undone."
       />
+
+      {/* Promotion Engine Modal */}
+      <AnimatePresence>
+        {isPromotionModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsPromotionModalOpen(false)}
+              className="absolute inset-0 bg-[#1A2C54]/40 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 30 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 30 }}
+              className="relative bg-white w-full max-w-4xl max-h-[90vh] rounded-[3rem] shadow-2xl overflow-hidden flex flex-col"
+            >
+              {/* Modal Header */}
+              <div className="p-8 border-b border-gray-100 flex items-center justify-between ruby-gradient shrink-0">
+                <div className="flex items-center gap-4 text-white">
+                  <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md shadow-lg border border-white/20">
+                    <Zap size={28} className="animate-pulse" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-black uppercase tracking-tighter italic">{editingPromotion ? 'Edit Offer' : 'Craft New Offer'} 💎</h2>
+                    <p className="text-xs text-white/70 font-bold uppercase tracking-widest leading-none mt-1">Promotion Engine Configuration</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setIsPromotionModalOpen(false)}
+                  className="w-10 h-10 bg-white/10 hover:bg-white/20 transition-all rounded-xl flex items-center justify-center text-white border border-white/10"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Modal Body - Scrollable Area */}
+              <div className="flex-grow overflow-y-auto p-8 space-y-10 custom-scrollbar bg-gray-50/30">
+                
+                {/* 1. BASIC INFO */}
+                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
+                  <div className="flex items-center gap-3 border-b border-gray-50 pb-4">
+                    <div className="w-8 h-8 rounded-lg bg-ruby/10 text-ruby flex items-center justify-center">
+                      <Info size={16} />
+                    </div>
+                    <h3 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest">Section 1: Basic Info</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 text-ruby">Offer Name *</label>
+                       <input 
+                         type="text" 
+                         value={promotionForm.name}
+                         onChange={e => setPromotionForm({...promotionForm, name: e.target.value})}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20 transition-all placeholder:text-gray-300"
+                         placeholder="e.g. Summer Mega Sale"
+                       />
+                    </div>
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Priority (1-10)</label>
+                       <input 
+                         type="number" 
+                         min="1"
+                         max="10"
+                         value={promotionForm.priority}
+                         onChange={e => setPromotionForm({...promotionForm, priority: parseInt(e.target.value)})}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20 transition-all"
+                       />
+                    </div>
+                    <div className="md:col-span-2 space-y-2">
+                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Description</label>
+                       <textarea 
+                         value={promotionForm.description}
+                         onChange={e => setPromotionForm({...promotionForm, description: e.target.value})}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20 transition-all min-h-[80px]"
+                         placeholder="Short details about this offer..."
+                       />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. OFFER TYPE */}
+                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
+                  <div className="flex items-center gap-3 border-b border-gray-50 pb-4">
+                    <div className="w-8 h-8 rounded-lg bg-ruby/10 text-ruby flex items-center justify-center">
+                      <Zap size={16} />
+                    </div>
+                    <h3 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest">Section 2: Offer Type</h3>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    {[
+                      { id: 'bxgy', label: 'Buy X Get Y', icon: Zap },
+                      { id: 'percentage', label: 'Percentage', icon: Percent },
+                      { id: 'flat', label: 'Flat Off', icon: Tag },
+                      { id: 'shipping', label: 'Free Shipping', icon: Truck },
+                      { id: 'bundle', label: 'Bundle', icon: ShoppingBag },
+                    ].map((type) => (
+                      <button
+                        key={type.id}
+                        type="button"
+                        onClick={() => setPromotionForm({...promotionForm, type: type.id as any})}
+                        className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all gap-2 ${
+                          promotionForm.type === type.id 
+                            ? 'border-ruby bg-ruby text-white' 
+                            : 'border-gray-50 bg-gray-50 text-gray-400 hover:border-ruby/20 hover:text-ruby'
+                        }`}
+                      >
+                        <type.icon size={20} />
+                        <span className="text-[9px] font-black uppercase tracking-tight">{type.label}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Dynamic Config based on Type */}
+                  <AnimatePresence mode="wait">
+                    {promotionForm.type === 'bxgy' && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="p-6 bg-ruby/5 rounded-3xl grid grid-cols-1 md:grid-cols-3 gap-6"
+                      >
+                        <div className="space-y-2">
+                          <label className="text-[9px] font-black text-ruby uppercase tracking-widest">Buy Qty</label>
+                          <input 
+                            type="number" 
+                            value={promotionForm.bxgyConfig.buyQty}
+                            onChange={e => setPromotionForm({
+                              ...promotionForm, 
+                              bxgyConfig: { ...promotionForm.bxgyConfig, buyQty: parseInt(e.target.value) }
+                            })}
+                            className="w-full bg-white border-none rounded-xl px-4 py-2.5 text-sm font-bold text-ruby"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[9px] font-black text-ruby uppercase tracking-widest">Get Qty (Free)</label>
+                          <input 
+                            type="number" 
+                            value={promotionForm.bxgyConfig.getQty}
+                            onChange={e => setPromotionForm({
+                              ...promotionForm, 
+                              bxgyConfig: { ...promotionForm.bxgyConfig, getQty: parseInt(e.target.value) }
+                            })}
+                            className="w-full bg-white border-none rounded-xl px-4 py-2.5 text-sm font-bold text-ruby"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[9px] font-black text-ruby uppercase tracking-widest">Apply On</label>
+                          <select 
+                            value={promotionForm.bxgyConfig.applyOn}
+                            onChange={e => setPromotionForm({
+                              ...promotionForm, 
+                              bxgyConfig: { ...promotionForm.bxgyConfig, applyOn: e.target.value as any }
+                            })}
+                            className="w-full bg-white border-none rounded-xl px-4 py-2.5 text-sm font-bold text-ruby outline-none"
+                          >
+                            <option value="same">Same Product</option>
+                            <option value="cheapest">Cheapest in Cart</option>
+                            <option value="specific">Specific Items</option>
+                          </select>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* 3. CONDITIONS */}
+                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
+                   <div className="flex items-center gap-3 border-b border-gray-50 pb-4">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                      <Shield size={16} />
+                    </div>
+                    <h3 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest">Section 3: Conditions</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Min Cart Value (₹)</label>
+                       <input 
+                         type="number" 
+                         value={promotionForm.conditions.minCartValue}
+                         onChange={e => setPromotionForm({
+                           ...promotionForm,
+                           conditions: { ...promotionForm.conditions, minCartValue: parseInt(e.target.value) }
+                         })}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
+                       />
+                    </div>
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Min Quantity</label>
+                       <input 
+                         type="number" 
+                         value={promotionForm.conditions.minQuantity}
+                         onChange={e => setPromotionForm({
+                           ...promotionForm,
+                           conditions: { ...promotionForm.conditions, minQuantity: parseInt(e.target.value) }
+                         })}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
+                       />
+                    </div>
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Target User Segment</label>
+                       <select 
+                         value={promotionForm.conditions.userType}
+                         onChange={e => setPromotionForm({
+                           ...promotionForm,
+                           conditions: { ...promotionForm.conditions, userType: e.target.value as any }
+                         })}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54] outline-none"
+                       >
+                         <option value="all">Every Customer</option>
+                         <option value="new">First Time Buyers</option>
+                         <option value="loyal">Repeat Customers</option>
+                       </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. REWARDS */}
+                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
+                  <div className="flex items-center gap-3 border-b border-gray-50 pb-4">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                      <Gift size={16} />
+                    </div>
+                    <h3 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest">Section 4: Rewards</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Discount Method</label>
+                       <select 
+                         value={promotionForm.reward.method}
+                         onChange={e => setPromotionForm({
+                           ...promotionForm,
+                           reward: { ...promotionForm.reward, method: e.target.value as any }
+                         })}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54] outline-none"
+                       >
+                         <option value="auto">Automatic (Cart Discount)</option>
+                         <option value="discount">Dynamic Percentage</option>
+                       </select>
+                    </div>
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Discount Value (%)</label>
+                       <input 
+                         type="number" 
+                         value={promotionForm.reward.value}
+                         onChange={e => setPromotionForm({
+                           ...promotionForm,
+                           reward: { ...promotionForm.reward, value: parseInt(e.target.value) }
+                         })}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
+                         placeholder="Value (e.g. 10)"
+                       />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 5. LIMITS & USAGE */}
+                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
+                   <div className="flex items-center gap-3 border-b border-gray-50 pb-4">
+                    <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+                      <History size={16} />
+                    </div>
+                    <h3 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest">Section 5: Limits & Usage</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Usage per Customer</label>
+                       <input 
+                         type="number" 
+                         value={promotionForm.limits.perUser}
+                         onChange={e => setPromotionForm({
+                           ...promotionForm,
+                           limits: { ...promotionForm.limits, perUser: parseInt(e.target.value) }
+                         })}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
+                       />
+                    </div>
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Total Store Usage</label>
+                       <input 
+                         type="number" 
+                         value={promotionForm.limits.totalUsage}
+                         onChange={e => setPromotionForm({
+                           ...promotionForm,
+                           limits: { ...promotionForm.limits, totalUsage: parseInt(e.target.value) }
+                         })}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
+                       />
+                    </div>
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Max Cap Discount (₹)</label>
+                       <input 
+                         type="number" 
+                         value={promotionForm.limits.maxDiscount}
+                         onChange={e => setPromotionForm({
+                           ...promotionForm,
+                           limits: { ...promotionForm.limits, maxDiscount: parseInt(e.target.value) }
+                         })}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
+                       />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 6. SCHEDULING (Combine Status here) */}
+                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
+                  <div className="flex items-center gap-3 border-b border-gray-50 pb-4">
+                    <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
+                      <Calendar size={16} />
+                    </div>
+                    <h3 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest">Section 6: Scheduling & Status</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Start Date</label>
+                       <input 
+                         type="date" 
+                         value={promotionForm.conditions.startDate || ''}
+                         onChange={e => setPromotionForm({
+                           ...promotionForm,
+                           conditions: { ...promotionForm.conditions, startDate: e.target.value }
+                         })}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
+                       />
+                    </div>
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">End Date</label>
+                       <input 
+                         type="date" 
+                         value={promotionForm.conditions.endDate || ''}
+                         onChange={e => setPromotionForm({
+                           ...promotionForm,
+                           conditions: { ...promotionForm.conditions, endDate: e.target.value }
+                         })}
+                         className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
+                       />
+                    </div>
+                    <div className="md:col-span-2 flex items-center justify-between p-4 bg-gray-50 rounded-3xl">
+                      <div>
+                        <p className="text-[10px] font-black text-[#1A2C54] uppercase tracking-widest">Offer Status</p>
+                        <p className="text-xs text-gray-400 font-medium italic">Active turns offer live instantly</p>
+                      </div>
+                      <div className="flex gap-2">
+                        {['draft', 'active', 'expired'].map((status) => (
+                          <button
+                            key={status}
+                            type="button"
+                            onClick={() => setPromotionForm({...promotionForm, status: status as any})}
+                            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                              promotionForm.status === status 
+                                ? 'bg-[#1A2C54] text-white' 
+                                : 'bg-white border border-gray-100 text-gray-400'
+                            }`}
+                          >
+                            {status}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 7. STACKING RULES */}
+                <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-6">
+                  <div className="flex items-center gap-3 border-b border-gray-50 pb-4">
+                    <div className="w-8 h-8 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center">
+                      <Layers size={16} />
+                    </div>
+                    <h3 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest">Section 7: Stacking Rules</h3>
+                  </div>
+                  <div className={`p-6 rounded-3xl border-2 transition-all flex items-center justify-between ${promotionForm.stackable ? 'border-emerald-100 bg-emerald-50/50' : 'border-gray-50 bg-gray-50/50'}`}>
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-black text-[#1A2C54]">Allow Stacking?</h4>
+                      <p className="text-[10px] text-gray-500 font-medium">Can this offer be used with other active promotions?</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPromotionForm({...promotionForm, stackable: !promotionForm.stackable})}
+                      className={`w-14 h-8 rounded-full relative transition-all ${promotionForm.stackable ? 'bg-emerald-500' : 'bg-gray-300'}`}
+                    >
+                      <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all shadow-md ${promotionForm.stackable ? 'left-7' : 'left-1'}`} />
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-8 border-t border-gray-100 flex items-center justify-between shrink-0 bg-white">
+                <button 
+                  onClick={() => setIsPromotionModalOpen(false)}
+                  className="px-8 py-4 bg-gray-100 text-gray-500 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-gray-200 transition-all border border-gray-200"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSavePromotion}
+                  disabled={loading}
+                  className="bg-ruby text-white px-12 py-4 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-xl shadow-ruby/30 disabled:opacity-50 active:scale-95 flex items-center gap-2"
+                >
+                  <Save size={18} />
+                  {loading ? 'Saving...' : (editingPromotion ? 'Update Offer' : 'Save Offer')}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

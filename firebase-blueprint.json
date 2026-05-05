@@ -185,6 +185,60 @@
         "link": { "type": "string", "description": "Optional navigation link." }
       },
       "required": ["title", "body", "type", "createdAt", "isRead"]
+    },
+    "Promotion": {
+      "title": "Promotion",
+      "description": "Advanced promotion engine rules.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "priority": { "type": "integer" },
+        "status": { "type": "string", "enum": ["active", "draft", "expired"] },
+        "type": { "type": "string", "enum": ["bxgy", "percentage", "flat", "shipping", "bundle"] },
+        "conditions": {
+          "type": "object",
+          "properties": {
+            "minCartValue": { "type": "number" },
+            "minQuantity": { "type": "integer" },
+            "productIds": { "type": "array", "items": { "type": "string" } },
+            "categoryIds": { "type": "array", "items": { "type": "string" } },
+            "userType": { "type": "string", "enum": ["all", "new", "loyal"] },
+            "startDate": { "type": "string", "format": "date-time" },
+            "endDate": { "type": "string", "format": "date-time" }
+          }
+        },
+        "bxgyConfig": {
+          "type": "object",
+          "properties": {
+            "buyQty": { "type": "integer" },
+            "getQty": { "type": "integer" },
+            "applyOn": { "type": "string", "enum": ["same", "cheapest", "specific"] },
+            "maxFree": { "type": "integer" },
+            "repeat": { "type": "boolean" }
+          }
+        },
+        "reward": {
+          "type": "object",
+          "properties": {
+            "method": { "type": "string", "enum": ["auto", "discount"] },
+            "value": { "type": "number" }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "perUser": { "type": "integer" },
+            "totalUsage": { "type": "integer" },
+            "maxDiscount": { "type": "number" }
+          }
+        },
+        "stackable": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "priority", "status", "type"]
     }
   },
   "firestore": {
@@ -201,6 +255,7 @@
     "/carts/{cartId}": { "schema": "Cart", "description": "Shopping carts" },
     "/settings/{settingId}": { "schema": "object", "description": "Global store settings" },
     "/active_sessions/{sessionId}": { "schema": "ActiveSession", "description": "Live visitor sessions" },
-    "/notifications/{notificationId}": { "schema": "Notification", "description": "Push notification history" }
+    "/notifications/{notificationId}": { "schema": "Notification", "description": "Push notification history" },
+    "/promotions/{promotionId}": { "schema": "Promotion", "description": "Promotion rules" }
   }
 }

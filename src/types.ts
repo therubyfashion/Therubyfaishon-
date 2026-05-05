@@ -94,3 +94,40 @@ export interface Notification {
   createdAt: string;
   link?: string;
 }
+
+export interface Promotion {
+  id: string;
+  name: string;
+  description: string;
+  priority: number;
+  status: 'active' | 'draft' | 'expired';
+  type: 'bxgy' | 'percentage' | 'flat' | 'shipping' | 'bundle';
+  conditions: {
+    minCartValue?: number;
+    minQuantity?: number;
+    productIds?: string[];
+    categoryIds?: string[];
+    userType?: 'all' | 'new' | 'loyal';
+    startDate?: string;
+    endDate?: string;
+  };
+  bxgyConfig?: {
+    buyQty: number;
+    getQty: number;
+    applyOn: 'same' | 'cheapest' | 'specific';
+    maxFree?: number;
+    repeat: boolean;
+  };
+  reward: {
+    method: 'auto' | 'discount';
+    value?: number;
+  };
+  limits: {
+    perUser?: number;
+    totalUsage?: number;
+    maxDiscount?: number;
+  };
+  stackable: boolean;
+  createdAt: string;
+  updatedAt: string;
+}

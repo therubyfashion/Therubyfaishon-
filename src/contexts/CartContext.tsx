@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { CartItem, Product } from '../types';
+import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { db } from '../firebase';
+import { CartItem, Product, Promotion } from '../types';
 import { useSettings } from './SettingsContext';
 
 interface CartContextType {
@@ -26,10 +28,28 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return saved ? JSON.parse(saved) : [];
   });
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discount: number } | null>(null);
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
 
   useEffect(() => {
     localStorage.setItem('ruby_cart', JSON.stringify(items));
   }, [items]);
+
+  useEffect(() => {
+    const fetchActivePromotions = async () => {
+      try {
+        const q = query(
+          collection(db, 'promotions'),
+          where('status', '==', 'active'),
+          orderBy('priority', 'asc')
+        );
+        const snap = await getDocs(q);
+        setPromotions(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Promotion)));
+      } catch (error) {
+        console.error("Error fetching promotions in checkout:", error);
+      }
+    };
+    fetchActivePromotions();
+  }, []);
 
   const addToCart = (product: Product, size: string, color?: string, quantity: number = 1) => {
     setItems(prev => {
@@ -81,18 +101,68 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let autoOfferDiscount = 0;
 
     items.forEach(item => {
-      const itemTotal = item.price * item.quantity;
-      subtotal += itemTotal;
+      subtotal += item.price * item.quantity;
+    });
 
-      // Automatic "Buy 2 Get 1 Free" Logic
-      if (settings?.buy2Get1Free) {
+    // Strategy 1: Legacy Settings-based Discounts (Optional/Fallback)
+    if (settings?.buy2Get1Free) {
+      items.forEach(item => {
         const freeItems = Math.floor(item.quantity / 3);
         autoOfferDiscount += freeItems * item.price;
-      } 
-      // Automatic "Buy 2 Get X% Off" Logic
-      else if (settings?.buy2GetPercentEnabled && settings?.buy2GetPercentOff && item.quantity >= 2) {
-        const discountRate = settings.buy2GetPercentOff / 100;
-        autoOfferDiscount += (item.price * item.quantity) * discountRate;
+      });
+    } else if (settings?.buy2GetPercentEnabled && settings?.buy2GetPercentOff) {
+      items.forEach(item => {
+        if (item.quantity >= 2) {
+          const discountRate = settings.buy2GetPercentOff / 100;
+          autoOfferDiscount += (item.price * item.quantity) * discountRate;
+        }
+      });
+    }
+
+    // Strategy 2: Advanced Promotion Engine Logic
+    let hasAppliedStackable = false;
+    promotions.forEach(promo => {
+      // 1. Check stackability
+      if (!promo.stackable && hasAppliedStackable) return;
+
+      // 2. Initial Conditions
+      const cartTotal = subtotal;
+      const cartQty = items.reduce((sum, i) => sum + i.quantity, 0);
+
+      const meetsValue = promo.conditions.minCartValue ? (cartTotal >= promo.conditions.minCartValue) : true;
+      const meetsQty = promo.conditions.minQuantity ? (cartQty >= promo.conditions.minQuantity) : true;
+
+      // TODO: Add Product/Category specific filters here
+      
+      if (meetsValue && meetsQty) {
+        let promoAppliedValue = 0;
+
+        if (promo.type === 'bxgy') {
+          items.forEach(item => {
+            const buyQty = promo.bxgyConfig?.buyQty || 2;
+            const getQty = promo.bxgyConfig?.getQty || 1;
+            const sets = Math.floor(item.quantity / (buyQty + getQty));
+            if (sets > 0) {
+              const freeQty = sets * getQty;
+              promoAppliedValue += freeQty * item.price;
+            }
+          });
+        } else if (promo.type === 'percentage') {
+          const rewardValue = promo.reward.value || 0;
+          promoAppliedValue = (cartTotal * rewardValue) / 100;
+        } else if (promo.type === 'flat') {
+          promoAppliedValue = promo.reward.value || 0;
+        }
+
+        // Apply Limits
+        if (promo.limits.maxDiscount && promoAppliedValue > promo.limits.maxDiscount) {
+          promoAppliedValue = promo.limits.maxDiscount;
+        }
+
+        if (promoAppliedValue > 0) {
+          autoOfferDiscount += promoAppliedValue;
+          if (!promo.stackable) hasAppliedStackable = true;
+        }
       }
     });
 
