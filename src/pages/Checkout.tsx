@@ -10,7 +10,6 @@ import { sendNotification } from '../lib/notifications';
 import { ChevronLeft, ShoppingBag, MapPin, Home, Briefcase, Plus, CheckCircle2, Lock, Smartphone, Building2, Handshake, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { io } from 'socket.io-client';
-import EmailVerification from '../components/EmailVerification';
 import { LoadingSpinner } from '../components/Skeleton';
 import SwipeButton from '../components/SwipeButton';
 
@@ -74,7 +73,6 @@ export default function Checkout() {
   const [selectedPayment, setSelectedPayment] = useState('cod');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [showAddressForm, setShowAddressForm] = useState(false);
-  const [showEmailVerify, setShowEmailVerify] = useState(false);
   const [pendingAddress, setPendingAddress] = useState<any>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [storeSettings, setStoreSettings] = useState<any>(null);
@@ -632,32 +630,6 @@ export default function Checkout() {
                 </React.Fragment>
               ))}
             </div>
-
-            {/* Email Verification Modal */}
-            {showEmailVerify && user && (
-              <EmailVerification 
-                email={user.email || ''}
-                userId={user.uid}
-                onClose={() => setShowEmailVerify(false)}
-                onSuccess={async () => {
-                  if (pendingAddress) {
-                    try {
-                      const docRef = await addDoc(collection(db, `users/${user.uid}/addresses`), pendingAddress);
-                      const savedAddress = { id: docRef.id, ...pendingAddress };
-                      setAddresses([...addresses, savedAddress]);
-                      setSelectedAddress(docRef.id);
-                      setShowAddressForm(false);
-                      setPendingAddress(null);
-                      toast.success('Address verified and saved! 🎉');
-                    } catch (err) {
-                      console.error("Error saving pending address:", err);
-                    }
-                  }
-                  setShowEmailVerify(false);
-                }}
-              />
-            )}
-
 
             {/* Step Content */}
             <AnimatePresence mode="wait">

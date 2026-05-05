@@ -91,9 +91,9 @@ function AppContent() {
   useEffect(() => {
     if (authLoading) return;
     
-    const publicPaths = ['/login', '/signup', '/verify-prompt', '/verify-email', '/about', '/contact', '/faq'];
+    const publicPaths = ['/login', '/signup', '/verify-prompt', '/verify-email', '/about', '/contact', '/faq', '/checkout', '/cart', '/track', '/order-success'];
     // Home ('/') is NOT public for logged-in but unverified users
-    const isPublicPath = publicPaths.includes(location.pathname) || location.pathname.startsWith('/product/');
+    const isPublicPath = publicPaths.includes(location.pathname) || location.pathname.startsWith('/product/') || location.pathname.startsWith('/track/');
     
     if (user && profile && !profile.isVerified && !isPublicPath) {
       navigate(`/verify-prompt?email=${encodeURIComponent(user.email || '')}&uid=${user.uid}`);
