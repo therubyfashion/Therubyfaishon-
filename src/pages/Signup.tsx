@@ -272,7 +272,7 @@ export default function Signup() {
       const emailData = await emailResponse.json();
       if (!emailResponse.ok) {
         console.error("Email send failed:", emailData.error);
-        if (emailData.error?.includes("Bhai")) {
+        if (emailData.error?.includes("initializing")) {
           toast.error(emailData.error, { duration: 6000 });
         } else {
           toast.error("Account created, but verification email failed to send. Resend it from the next screen.");
@@ -292,7 +292,7 @@ export default function Signup() {
       } else if (error.code === 'auth/network-request-failed') {
         toast.error("Network error! Please check your internet connection or disable ad-blockers.");
       } else if (error.code === 'not-found' || error.message?.includes('5 NOT_FOUND')) {
-        toast.error("Bhai, Database abhi ready ho raha hai (Google Provisioning). 2-3 minute baad dobara try karein, sab thik ho jayega! 💎", { duration: 6000 });
+        toast.error("The database is being provisioned (Google Provisioning). Please try again in 2-3 minutes! 💎", { duration: 6000 });
       } else if (error.message) {
         toast.error(error.message);
       } else {

@@ -1525,7 +1525,7 @@ export default function AdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: toSelf ? "Direct Test Active! 🎯" : "Test Notification",
-          body: toSelf ? "Ye message sirf aapke device par bheja gaya hai." : "Bhai, agar ye message dikh raha hai toh OneSignal sahi se kaam kar raha hai! 🚀",
+          body: toSelf ? "This message was sent only to your device." : "OneSignal is working correctly! 🚀",
           type: toSelf ? 'individual' : 'all',
           playerId: toSelf ? onesignalSubscriptionId : null,
           appId: settings.oneSignalAppId,
@@ -1538,7 +1538,7 @@ export default function AdminDashboard() {
         try {
           await addDoc(collection(db, 'notifications'), {
             title: "Test Notification",
-            message: "Bhai, agar ye message dikh raha hai toh OneSignal sahi se kaam kar raha hai! 🚀",
+            message: "OneSignal is working correctly! 🚀",
             type: 'test',
             createdAt: serverTimestamp(),
             status: 'unread'
@@ -1678,7 +1678,7 @@ export default function AdminDashboard() {
   const [isTestingEmail, setIsTestingEmail] = useState(false);
   const handleTestEmail = async () => {
     if (!settings.resendApiKey && (!settings.smtpUser || !settings.smtpPass)) {
-      toast.error('Bhai, ya toh Resend API Key dalein, ya Gmail App Password configure karein pehle.');
+      toast.error('Please enter a Resend API Key or configure Gmail App Password first.');
       return;
     }
     
@@ -2070,7 +2070,7 @@ export default function AdminDashboard() {
             if (!emailRes.ok) throw new Error("Email API responded with error");
           } else {
             console.warn("No target email found for order fulfillment notification");
-            toast.error("Bhai, order mein customer ka email nahi mila, isliye email send nahi ho paya.");
+            toast.error("Customer email not found in order, email could not be sent.");
           }
         } catch (e) {
           console.error("Failed to send shipment notifications:", e);
@@ -2550,12 +2550,12 @@ export default function AdminDashboard() {
     e.preventDefault();
     
     if (!formData.name || formData.price < 0 || !formData.category) {
-      toast.error("Bhai, Name, Price aur Category zaruri hai!");
+      toast.error("Name, Price, and Category are required!");
       return;
     }
 
     setLoading(true);
-    const uploadToast = toast.loading("Bhai, product details save ho rahi hain...");
+    const uploadToast = toast.loading("Saving product details...");
     
     try {
       // Parallel Image Upload Logic with longer timeout to avoid hanging
@@ -2597,7 +2597,7 @@ export default function AdminDashboard() {
       // Secondary check: Total payload size check (rough estimate)
       const totalSize = JSON.stringify(uploadedImages).length;
       if (totalSize > 900000) {
-         throw new Error("Bhai, total document size (images) 1MB limit cross kar raha hai. Kuch images kam karein ya size chota karein.");
+         throw new Error("Total document size (with images) exceeds the 1MB limit. Please reduce image count or size.");
       }
 
       const productData = {
@@ -2666,11 +2666,11 @@ export default function AdminDashboard() {
       toast.dismiss(uploadToast);
       console.error("Critical save error:", error);
       
-      let errorMsg = "Bhai, kuch error aaya hai. Refresh karke dekhein.";
+      let errorMsg = "Something went wrong. Please refresh the page.";
       if (error.message && error.message.includes('too large')) {
-         errorMsg = "Bhai, image bahut badi hai! Kam size wali use karein.";
+         errorMsg = "The image is too large! Please use a smaller size.";
       } else if (error.message && (error.message.includes('permission-denied') || error.message.includes('permissions'))) {
-         errorMsg = "Aapke paas data save karne ki permission nahi hai.";
+         errorMsg = "You do not have permission to save data.";
       }
       
       toast.error(errorMsg);
@@ -2909,7 +2909,7 @@ export default function AdminDashboard() {
   };
 
   const handleDeletePromotion = async (id: string) => {
-    if (!window.confirm("Bhai, pakka is offer ko delete karna hai? Ye wapas nahi aayega!")) return;
+    if (!window.confirm("Are you sure you want to delete this offer? This cannot be undone!")) return;
     try {
       await deleteDoc(doc(db, 'promotions', id));
       toast.success("Offer deleted permanently");
@@ -4016,7 +4016,7 @@ export default function AdminDashboard() {
                             </button>
                             <button 
                               onClick={() => {
-                                if (confirm('Bhai, kya aap sach mein is product ko delete karna chahte hain?')) {
+                                if (confirm('Are you sure you want to delete this product?')) {
                                   handleDeleteProduct(p.id);
                                 }
                               }}
@@ -4090,7 +4090,7 @@ export default function AdminDashboard() {
                           </button>
                           <button 
                             onClick={() => {
-                              if (confirm('Bhai, kya aap sach mein is product ko delete karna chahte hain?')) {
+                              if (confirm('Are you sure you want to delete this product?')) {
                                 handleDeleteProduct(p.id);
                               }
                             }}
@@ -7325,7 +7325,7 @@ export default function AdminDashboard() {
                                <Smartphone size={14} className="mr-2" /> Native App (APK) Setup
                              </h4>
                              <p className="text-[10px] text-amber-600 font-medium leading-relaxed">
-                               Bhai, agar aap APK ke liye notifications chahte hain, toh OneSignal Dashboard mein <b>Google Android (FCM)</b> setup zaroori hai. 
+                               For APK notifications, <b>Google Android (FCM)</b> setup is required in the OneSignal Dashboard. 
                                Wahan aapko <b>Firebase Console</b> se nikali hui <b>Service Account JSON</b> file upload karni hogi.
                              </p>
                            </div>
@@ -7555,7 +7555,7 @@ export default function AdminDashboard() {
                                   <p className="text-xs font-bold text-red-600 mb-1">Status Message:</p>
                                   <p className="text-xs text-[#1A2C54] opacity-80 leading-relaxed font-bold">
                                     {firebaseDiagnostics.error.includes('NOT_FOUND') 
-                                      ? "Bhai, database abhi tak ready nahi hua hai. Thoda intezar karein ya Firebase setup verify karein." 
+                                      ? "Database is not ready yet. Please wait a moment or verify Firebase setup." 
                                       : "Connection problem. Please refresh your browser or check your internet."}
                                   </p>
                                 </div>
@@ -7564,7 +7564,7 @@ export default function AdminDashboard() {
                               {firebaseStatus === 'Connected ✅' && (
                                 <div className="p-4 bg-green-50 border border-green-100 rounded-xl">
                                   <p className="text-xs font-bold text-green-600 flex items-center">
-                                    <CheckCircle size={14} className="mr-2" /> Sab sahi hai bhai! Database successfully connected hai.
+                                    <CheckCircle size={14} className="mr-2" /> Everything is set! Database is successfully connected.
                                   </p>
                                 </div>
                               )}
@@ -7575,8 +7575,8 @@ export default function AdminDashboard() {
                         <div className="p-6 bg-ruby/5 rounded-2xl border border-ruby/10">
                           <h4 className="text-sm font-bold text-[#1A2C54] mb-2">Technical Information</h4>
                           <p className="text-xs text-gray-500 leading-relaxed mb-4">
-                            Firebase database backend functions ke liye zaroori hai (jaise Orders save karna, Users manage karna, etc). 
-                            Agar ye "Not Connected" hai toh app ke kuch features kaam thoda slow kar sakte hain ya fail ho sakte hain.
+                            Firebase database is required for backend functions (saving orders, managing users, etc). 
+                            If this is "Not Connected", some app features might work slowly or fail.
                           </p>
                         </div>
                       </motion.div>
@@ -7759,7 +7759,7 @@ export default function AdminDashboard() {
                           <div className="space-y-2">
                             <h4 className="text-sm font-black text-amber-900 uppercase tracking-widest">Protective Guard Active</h4>
                             <p className="text-xs text-amber-700 leading-relaxed font-medium">
-                              Bhai, ye limits aapko unwanted bills se bachati hain. Agar aap Blaze plan par hain aur kisi wajah se bohot saare OTPs jaane lagein, to ye system unhe 9,999 ke baad rok dega taaki aapke paise na katein.
+                              These limits protect you from unwanted bills. If you're on the Blaze plan and many OTPs are sent unexpectedly, the system will stop them at 9,999 to save costs.
                             </p>
                           </div>
                         </div>
@@ -7806,7 +7806,7 @@ export default function AdminDashboard() {
                             <div className="space-y-1">
                               <h4 className="text-sm font-black text-[#1A2C54] uppercase tracking-widest">Full Zero-Cost Guarantee</h4>
                               <p className="text-[10px] text-gray-400 font-medium max-w-xs mx-auto">
-                                Bhai, hamesha Firebase Console me "Usage & Billing" par nazar rakhein. Limit badhane ke liye bas upar value change karke Save karein.
+                                Always monitor 'Usage & Billing' in the Firebase Console. To increase the limit, change the value above and save.
                               </p>
                             </div>
                             <button 
@@ -8011,7 +8011,7 @@ export default function AdminDashboard() {
                           <div>
                             <h4 className="text-lg font-black text-red-900 tracking-tight">Danger Zone: Production Reset</h4>
                             <p className="text-xs text-red-700 leading-relaxed font-medium max-w-md">
-                              Bhai, ye feature test data (orders, abandoned carts, users) ko saaf karne ke liye hai. Ek baar reset karne par pura data permanently delete ho jayega. Sirf production launch se pehle chalayein!
+                              This feature is for clearing test data (orders, abandoned carts, users). Once reset, all data is permanently deleted. Only use this before production launch!
                             </p>
                           </div>
                         </div>

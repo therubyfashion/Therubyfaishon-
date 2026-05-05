@@ -201,7 +201,7 @@ export default function VerifyPrompt() {
     } catch (error: any) {
       console.error("Verification error:", error);
       if (error.code === 'not-found' || error.message?.includes('5 NOT_FOUND')) {
-        toast.error("Bhai, Database abhi ready ho raha hai. 2-3 minute baad dobara try karein! 💎", { duration: 6000 });
+        toast.error("The database is initializing. Please try again in 2-3 minutes! 💎", { duration: 6000 });
       } else {
         toast.error("Failed to verify code.");
       }
@@ -314,7 +314,7 @@ export default function VerifyPrompt() {
 
       const emailData = await emailResponse.json();
       if (!emailResponse.ok) {
-        if (emailData.error?.includes("Bhai")) {
+        if (emailData.error?.includes("initializing")) {
           throw new Error(emailData.error);
         }
         throw new Error(emailData.error || "Failed to resend code");
@@ -324,7 +324,7 @@ export default function VerifyPrompt() {
     } catch (error: any) {
       console.error("Resend error:", error);
       if (error.code === 'not-found' || error.message?.includes('5 NOT_FOUND')) {
-        toast.error("Bhai, Database abhi ready ho raha hai. Thodi der mein dobara try karein! 💎", { duration: 6000 });
+        toast.error("The database is preparing. Please try again in a moment! 💎", { duration: 6000 });
       } else {
         toast.error(error.message || "Failed to resend code.");
       }

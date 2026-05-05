@@ -91,7 +91,7 @@ export default function TrackOrder() {
       }
 
       if (!foundOrder) {
-        throw new Error("Order nahi mila. Please check karein ki Order ID aur Email sahi hain. (Note: Order ID case-sensitive ho sakta hai)");
+        throw new Error("Order not found. Please verify that the Order ID and Email are correct. (Note: Order ID may be case-sensitive)");
       }
 
       setOrder(foundOrder);
@@ -101,10 +101,10 @@ export default function TrackOrder() {
       const urlId = cleanOid.replace('#', '').toUpperCase();
       window.history.pushState({}, '', `/track/${urlId}`);
       
-      toast.success("Order Found! Live journey load ho rahi hai... 📍");
+      toast.success("Order Found! Loading live journey... 📍");
     } catch (err: any) {
       console.error("Tracking error:", err);
-      setError(err.message || "Order trace karne mein dikkat aayi.");
+      setError(err.message || "Error tracing order.");
       setOrder(null);
     } finally {
       setLoading(false);
@@ -175,7 +175,7 @@ export default function TrackOrder() {
         handleScanError
       ).catch(err => {
         console.error("Scanner start error:", err);
-        setError("Camera access nahi mili. Please settings check karein.");
+        setError("Camera access denied. Please check your browser settings.");
         setShowScanner(false);
       });
 
@@ -539,7 +539,7 @@ export default function TrackOrder() {
                   <div>
                     <h4 className="text-sm font-black text-blue-900 uppercase tracking-widest leading-none mb-1">Packet is Being Prepared</h4>
                     <p className="text-[11px] text-blue-700 font-medium leading-relaxed">
-                      Bhai, aapka order abhi ship nahi hua hai. Hum ise pack kar rahe hain. Jaise hi packing khatam hogi, yahan tracking number update ho jayega.
+                      Your order hasn't been shipped yet. We are packing it with care. As soon as it's shipped, the tracking number will be updated here.
                     </p>
                   </div>
                 </div>
