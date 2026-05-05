@@ -213,15 +213,7 @@ export default function Checkout() {
       createdAt: new Date().toISOString()
     };
 
-    // If email is not verified for address, trigger verification first
-    const isVerified = profile?.phoneVerified || profile?.addressConfirmedAt;
-    
-    if (!isVerified) {
-      setPendingAddress(addressData);
-      setShowEmailVerify(true);
-      return;
-    }
-
+    // Removed verification check as requested - proceed directly to saving
     try {
       if (user) {
         const docRef = await addDoc(collection(db, `users/${user.uid}/addresses`), addressData);
@@ -263,14 +255,7 @@ export default function Checkout() {
       return;
     }
 
-    // Check if address is verified
-    const isVerified = profile?.phoneVerified || profile?.addressConfirmedAt;
-    
-    if (!isVerified && !isVerifiedOverride) {
-      setShowEmailVerify(true);
-      return;
-    }
-
+    // Removed verification check for placing order - proceed directly to processing
     setIsProcessingPayment(true);
     
     try {
