@@ -63,6 +63,21 @@
         "items": { "type": "array" },
         "total": { "type": "number" },
         "status": { "type": "string", "enum": ["pending", "processing", "shipped", "delivered"] },
+        "fulfillmentStatus": { "type": "string", "enum": ["Unfulfilled", "Fulfilled"] },
+        "fulfilledAt": { "type": "string", "format": "date-time" },
+        "trackingHistory": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "status": { "type": "string" },
+              "location": { "type": "string" },
+              "description": { "type": "string" },
+              "time": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
         "shippingMethod": { "type": "string", "enum": ["standard", "express", "economy"], "description": "Method of shipping chosen by the customer.", "default": "standard" },
         "shippingAddress": { "type": "object" },
         "createdAt": { "type": "string", "format": "date-time" }

@@ -19,7 +19,7 @@ import {
   Home, ArrowLeft, Camera, ChevronDown, ChevronUp, Bold, Heading, Globe, Truck, Printer,
   TrendingDown, Shield, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info, History,
   Activity, Send, Rocket, MessageSquare, User, CreditCard, Download, Eye, Check, ArrowRight,
-  Cloud, RefreshCw, CheckCircle, Clock, MousePointer2, Zap, Save, Percent, Gift, Tag, Layers
+  Cloud, RefreshCw, CheckCircle, Clock, MousePointer2, Zap, Save, Percent, Gift, Tag, Layers, MapPin
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -1217,6 +1217,8 @@ export default function AdminDashboard() {
 
   const [activeSettingsTab, setActiveSettingsTab] = useState('profile');
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+  const [trackingEvent, setTrackingEvent] = useState({ status: '', location: '', description: '' });
+  const [isAddingEvent, setIsAddingEvent] = useState(false);
   const [profileFormData, setProfileFormData] = useState({
     displayName: auth.currentUser?.displayName || '',
     phoneNumber: auth.currentUser?.phoneNumber || '',
@@ -1819,6 +1821,39 @@ export default function AdminDashboard() {
     if (typeof ts === 'number') return new Date(ts).toLocaleString();
     if (typeof ts === 'string') return new Date(ts).toLocaleString();
     return 'Just now';
+  };
+
+  const handleAddTrackingHistory = async () => {
+    if (!viewingCustomer || !trackingEvent.status) {
+      toast.error("Please enter a status/title for the event");
+      return;
+    }
+    setIsAddingEvent(true);
+    try {
+      const now = new Date();
+      const newEvent = {
+        ...trackingEvent,
+        time: serverTimestamp(),
+        id: Math.random().toString(36).substr(2, 9)
+      };
+      
+      await updateDoc(doc(db, 'orders', viewingCustomer.id), {
+        trackingHistory: arrayUnion(newEvent)
+      });
+      
+      setViewingCustomer({
+        ...viewingCustomer,
+        trackingHistory: [...(viewingCustomer.trackingHistory || []), { ...newEvent, time: now }]
+      });
+      
+      setTrackingEvent({ status: '', location: '', description: '' });
+      toast.success("Detailed tracking event added! 📍");
+    } catch (e) {
+      console.error("Error adding tracking event:", e);
+      toast.error("Failed to add tracking event");
+    } finally {
+      setIsAddingEvent(false);
+    }
   };
 
   const handleMarkAsDelivered = async (order: any) => {
@@ -4930,38 +4965,121 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
+                    {/* ADD TRACKING EVENT (ADMIN) */}
+                    <div className="bg-white border border-shop-border rounded-xl shadow-sm overflow-hidden">
+                       <div className="px-4 py-[14px] border-b border-shop-border flex items-center justify-between bg-gray-50/30">
+                         <h3 className="text-[11px] font-[900] text-shop-text uppercase tracking-widest flex items-center gap-2">
+                           <Rocket size={14} className="text-ruby" />
+                           Track Journey Updates
+                         </h3>
+                       </div>
+                       <div className="p-4 space-y-3">
+                         <div className="grid grid-cols-2 gap-3">
+                            <div>
+                               <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-1">Status Title</label>
+                               <input 
+                                 type="text" 
+                                 placeholder="e.g. Arrived at Hub"
+                                 value={trackingEvent.status}
+                                 onChange={e => setTrackingEvent({...trackingEvent, status: e.target.value})}
+                                 className="w-full h-9 border border-shop-border rounded-lg px-3 text-[12px] font-bold outline-none focus:border-ruby transition-colors"
+                               />
+                            </div>
+                            <div>
+                               <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-1">Location</label>
+                               <input 
+                                 type="text" 
+                                 placeholder="e.g. Delhi Hub"
+                                 value={trackingEvent.location}
+                                 onChange={e => setTrackingEvent({...trackingEvent, location: e.target.value})}
+                                 className="w-full h-9 border border-shop-border rounded-lg px-3 text-[12px] font-bold outline-none focus:border-ruby transition-colors"
+                               />
+                            </div>
+                         </div>
+                         <button 
+                           onClick={handleAddTrackingHistory}
+                           disabled={isAddingEvent || !trackingEvent.status}
+                           className="w-full h-9 bg-shop-text text-white rounded-lg text-[11px] font-black uppercase tracking-widest hover:bg-ruby transition-all disabled:opacity-40 shadow-lg shadow-gray-200 active:scale-95"
+                         >
+                           {isAddingEvent ? 'Updating Process...' : 'Publish Journey Event'}
+                         </button>
+                       </div>
+                    </div>
+
                     {/* TIMELINE */}
                     <div className="bg-white border border-shop-border rounded-xl shadow-sm overflow-hidden">
                       <div className="px-4 py-[14px] border-b border-shop-border flex items-center justify-between">
-                        <h3 className="text-[14px] font-[700] text-shop-text">Timeline</h3>
+                        <h3 className="text-[14px] font-[700] text-shop-text">Timeline Journey</h3>
+                        <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest">Real-time</span>
                       </div>
-                      <div className="p-4 pt-5 pb-2">
+                      <div className="p-4 pt-5 pb-5">
                         <div className="space-y-6 relative">
                           <div className="absolute left-[11px] top-4 bottom-4 w-px bg-gray-100" />
                           
-                          {[
-                            { title: 'Order Fulfilled', status: viewingCustomer.fulfillmentStatus === 'Fulfilled', date: viewingCustomer.fulfilledAt || null, icon: CheckCheck },
-                            { title: `Payment received via ${viewingCustomer.paymentMethod || 'Razorpay'}`, status: true, date: viewingCustomer.createdAt, icon: CreditCard, subtitle: `(₹${(viewingCustomer.total || 0).toLocaleString()})` },
-                            { title: `Order placed by ${viewingCustomer.address?.name || viewingCustomer.customerName || viewingCustomer.customer || 'Customer'}`, status: true, date: viewingCustomer.createdAt, icon: ShoppingBag },
-                          ].map((evt, i) => (
-                            <div key={i} className={cn("flex gap-3.5 items-start relative z-10", !evt.status && "opacity-40 grayscale")}>
-                              <div className={cn(
-                                "w-6 h-6 rounded-full flex items-center justify-center shrink-0 shadow-sm transition-all",
-                                evt.status ? "bg-shop-green text-white" : "bg-white border border-gray-200 text-gray-300",
-                                i === 1 && "bg-yellow-100 text-yellow-600",
-                                i === 2 && "bg-blue-100 text-blue-600"
-                              )}>
-                                {i === 1 ? <CreditCard size={12} /> : (i === 2 ? <ShoppingBag size={12} /> : <evt.icon size={12} />)}
+                          {/* REAL HISTORY IF EXISTS */}
+                          {viewingCustomer.trackingHistory && Array.isArray(viewingCustomer.trackingHistory) && viewingCustomer.trackingHistory.length > 0 ? (
+                            [...viewingCustomer.trackingHistory].sort((a, b) => {
+                              const dateA = a.time?.seconds ? a.time.seconds * 1000 : new Date(a.time).getTime();
+                              const dateB = b.time?.seconds ? b.time.seconds * 1000 : new Date(b.time).getTime();
+                              return dateB - dateA;
+                            }).map((evt, i) => {
+                              const dateObj = evt.time?.toDate ? evt.time.toDate() : new Date(evt.time);
+                              return (
+                                <div key={evt.id || i} className="flex gap-3.5 items-start relative z-10">
+                                  <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-ruby text-white shadow-lg shadow-ruby/20">
+                                    <MapPin size={12} />
+                                  </div>
+                                  <div>
+                                    <div className="text-[13px] font-[700] text-shop-text leading-tight">{evt.status}</div>
+                                    {evt.location && <p className="text-[11px] text-gray-500 mt-0.5">📍 {evt.location}</p>}
+                                    <p className="text-[10px] text-gray-400 mt-1 font-bold italic">
+                                      {dateObj.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} · {dateObj.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                                    </p>
+                                  </div>
+                                  <button 
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      if (confirm('Delete this event?')) {
+                                        const updatedHistory = viewingCustomer.trackingHistory.filter((it: any) => (it.id || it.time) !== (evt.id || evt.time));
+                                        await updateDoc(doc(db, 'orders', viewingCustomer.id), {
+                                          trackingHistory: updatedHistory
+                                        });
+                                        setViewingCustomer({ ...viewingCustomer, trackingHistory: updatedHistory });
+                                        toast.success('Event removed');
+                                      }
+                                    }}
+                                    className="ml-auto p-1.5 text-gray-200 hover:text-red-500 transition-colors"
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            [
+                              { title: 'Order Fulfilled', status: viewingCustomer.fulfillmentStatus === 'Fulfilled', date: viewingCustomer.fulfilledAt || null, icon: CheckCheck },
+                              { title: `Payment received via ${viewingCustomer.paymentMethod || 'Razorpay'}`, status: true, date: viewingCustomer.createdAt, icon: CreditCard, subtitle: `(₹${(viewingCustomer.total || 0).toLocaleString()})` },
+                              { title: `Order placed by ${viewingCustomer.address?.name || viewingCustomer.customerName || viewingCustomer.customer || 'Customer'}`, status: true, date: viewingCustomer.createdAt, icon: ShoppingBag },
+                            ].map((evt, i) => (
+                              <div key={i} className={cn("flex gap-3.5 items-start relative z-10", !evt.status && "opacity-40 grayscale")}>
+                                <div className={cn(
+                                  "w-6 h-6 rounded-full flex items-center justify-center shrink-0 shadow-sm transition-all",
+                                  evt.status ? "bg-shop-green text-white" : "bg-white border border-gray-200 text-gray-300",
+                                  i === 1 && "bg-yellow-100 text-yellow-600",
+                                  i === 2 && "bg-blue-100 text-blue-600"
+                                )}>
+                                  {i === 1 ? <CreditCard size={12} /> : (i === 2 ? <ShoppingBag size={12} /> : <evt.icon size={12} />)}
+                                </div>
+                                <div>
+                                  <div className={cn("text-[13px] font-[600] text-shop-text leading-tight mt-0.5", i === 0 && "mt-1")}>{evt.title}</div>
+                                  {evt.subtitle && <p className="text-[12px] text-shop-text-muted mt-0.5">{evt.subtitle}</p>}
+                                  <p className="text-[11px] text-gray-400 mt-1">
+                                    {evt.status ? (i === 0 ? new Date(evt.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ' · ' + new Date(evt.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'Today at ' + new Date(evt.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })) : 'Pending'}
+                                  </p>
+                                </div>
                               </div>
-                              <div>
-                                <div className={cn("text-[13px] font-[600] text-shop-text leading-tight mt-0.5", i === 0 && "mt-1")}>{evt.title}</div>
-                                {evt.subtitle && <p className="text-[12px] text-shop-text-muted mt-0.5">{evt.subtitle}</p>}
-                                <p className="text-[11px] text-gray-400 mt-1">
-                                  {evt.status ? (i === 0 ? new Date(evt.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ' · ' + new Date(evt.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'Today at ' + new Date(evt.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })) : 'Pending'}
-                                </p>
-                              </div>
-                            </div>
-                          ))}
+                            ))
+                          )}
                         </div>
                       </div>
                     </div>

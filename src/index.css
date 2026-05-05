@@ -5,6 +5,24 @@
 @import "swiper/css/navigation";
 @import "swiper/css/zoom";
 
+@keyframes scan {
+  0% { top: 0; }
+  50% { top: 100%; }
+  100% { top: 0; }
+}
+
+.scanner-laser {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #E11D48;
+  box-shadow: 0 0 15px #E11D48, 0 0 25px #E11D48;
+  animation: scan 3s linear infinite;
+  z-index: 10;
+  opacity: 0.8;
+}
+
 @theme {
   --color-ruby: #9b111e;
   --color-ruby-dark: #7a0d18;

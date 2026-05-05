@@ -11,11 +11,14 @@ import {
   QrCode,
   X,
   Camera,
-  Info
+  Info,
+  MapPin as MapIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
+import { db } from '../firebase';
+import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 
 const steps = [
   { key: 'packed', label: 'Packed', icon: Package },
@@ -35,49 +38,76 @@ export default function TrackOrder() {
   const [showSearch, setShowSearch] = React.useState(!id);
   const [showScanner, setShowScanner] = React.useState(false);
 
-  const fetchOrder = async (oid: string, emailStr: string, isRetry = false): Promise<void> => {
+  const fetchOrder = async (oid: string, emailStr: string): Promise<void> => {
+    if (!oid || !emailStr) return;
+    
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/track-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId: oid.trim(), email: emailStr.trim() })
-      });
+      const cleanOid = oid.trim();
+      const cleanEmail = emailStr.trim();
+      
+      // We try 3 variations of orderId format since users might enter with/without # or uppercase/lowercase
+      const idVariations = [
+        cleanOid,
+        cleanOid.startsWith('#') ? cleanOid : `#${cleanOid}`,
+        cleanOid.startsWith('#') ? cleanOid.substring(1) : cleanOid
+      ];
 
-      const contentType = response.headers.get("content-type");
-      if (contentType && contentType.indexOf("application/json") !== -1) {
-        const data = await response.json();
-        if (!response.ok) {
-          const errorMsg = data.hint ? `${data.error} \n\nHint: ${data.hint}` : 
-                          data.details ? `${data.error} \n\n${data.details}` :
-                          data.error || "Order not found or access denied.";
-          throw new Error(errorMsg);
-        }
-        setOrder(data);
-        setShowSearch(false);
-        window.history.pushState({}, '', `/track/${oid.trim().toUpperCase().replace('#', '')}`);
+      console.log("🔍 Looking for order with variations:", idVariations, "Email:", cleanEmail);
+
+      const ordersRef = collection(db, 'orders');
+      let foundOrder = null;
+
+      // Primary query: Strict match on ID and Email
+      const q = query(
+        ordersRef, 
+        where('orderId', 'in', idVariations),
+        where('email', '==', cleanEmail),
+        limit(1)
+      );
+
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        foundOrder = { id: querySnapshot.docs[0].id, ...querySnapshot.docs[0].data() };
       } else {
-        const text = await response.text();
-        console.error("Non-JSON response received:", text.substring(0, 500));
+        // Fallback: Some orders might store email in address.email
+        const q2 = query(
+          ordersRef,
+          where('orderId', 'in', idVariations),
+          limit(10) // Small limit to filter client-side
+        );
+        const snapshot2 = await getDocs(q2);
+        const match = snapshot2.docs.find(doc => {
+          const data = doc.data();
+          const addrEmail = data.address?.email;
+          return addrEmail?.toLowerCase() === cleanEmail.toLowerCase();
+        });
         
-        if (text.includes("wait while your application starts") || text.includes("Starting Server") || text.includes("<html")) {
-          if (!isRetry) {
-            console.log("⏳ Server warming up, retrying in 4s...");
-            setError("Server taiyaar ho raha hai... Please 4 second rukein, hum phir se try kar rahe hain. ⏳");
-            await new Promise(r => setTimeout(r, 4000));
-            return fetchOrder(oid, emailStr, true);
-          }
-          throw new Error("Server abhi bhi warming up mode mein hai. Bhai, thoda wait karke page Refresh karein. (It takes a few seconds to boot)");
+        if (match) {
+          foundOrder = { id: match.id, ...match.data() };
         }
-        
-        throw new Error("Server ne unexpected response diya. Please 10 second baad dobara try karein.");
       }
+
+      if (!foundOrder) {
+        throw new Error("Order nahi mila. Please check karein ki Order ID aur Email sahi hain. (Note: Order ID case-sensitive ho sakta hai)");
+      }
+
+      setOrder(foundOrder);
+      setShowSearch(false);
+      
+      // Update URL without reload to support bookmarks
+      const urlId = cleanOid.replace('#', '').toUpperCase();
+      window.history.pushState({}, '', `/track/${urlId}`);
+      
+      toast.success("Order Found! Live journey load ho rahi hai... 📍");
     } catch (err: any) {
-      setError(err.message);
+      console.error("Tracking error:", err);
+      setError(err.message || "Order trace karne mein dikkat aayi.");
       setOrder(null);
     } finally {
-      if (!isRetry) setLoading(false);
+      setLoading(false);
     }
   };
 
@@ -95,39 +125,64 @@ export default function TrackOrder() {
 
   React.useEffect(() => {
     if (showScanner) {
-      const scanner = new Html5QrcodeScanner(
-        "reader",
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        /* verbose= */ false
-      );
+      // Use Html5Qrcode for better control
+      const scannerId = "reader";
+      const html5QrCode = new Html5Qrcode(scannerId);
+      
+      const config = { 
+        fps: 20, 
+        qrbox: { width: 280, height: 280 },
+        aspectRatio: 1.0,
+        disableFlip: false
+      };
 
-      scanner.render((decodedText) => {
+      const handleScanSuccess = (decodedText: string) => {
         try {
-          const data = JSON.parse(decodedText);
-          if (data.orderId) {
-            setOrderIdInput(data.orderId);
-            if (data.email) {
-              setEmailInput(data.email);
-              fetchOrder(data.orderId, data.email);
-            } else {
-              toast.success("Order ID detected! Please enter email.");
+          // Play a small success vibration if available
+          if (navigator.vibrate) navigator.vibrate(50);
+          
+          let targetOrderId = decodedText;
+          try {
+            const data = JSON.parse(decodedText);
+            if (data.orderId) {
+              targetOrderId = data.orderId;
+              if (data.email) setEmailInput(data.email);
             }
-            setShowScanner(false);
-            scanner.clear();
+          } catch (e) { /* Not JSON, use raw text */ }
+
+          setOrderIdInput(targetOrderId);
+          toast.success("Order ID Captured! 🎯");
+          setShowScanner(false);
+          html5QrCode.stop().catch(() => {});
+          
+          // Fast fetch
+          if (targetOrderId && emailInput) {
+             fetchOrder(targetOrderId, emailInput);
           }
         } catch (e) {
-          // If not JSON, maybe it's just the order ID
-          setOrderIdInput(decodedText);
-          toast.success("Code scanned! Please verify Order ID.");
-          setShowScanner(false);
-          scanner.clear();
+          console.error("Scan error", e);
         }
-      }, (error) => {
-        // scan error, usually silent
+      };
+
+      const handleScanError = (errorMessage: string) => {
+        // Silent error
+      };
+
+      html5QrCode.start(
+        { facingMode: "environment" },
+        config,
+        handleScanSuccess,
+        handleScanError
+      ).catch(err => {
+        console.error("Scanner start error:", err);
+        setError("Camera access nahi mili. Please settings check karein.");
+        setShowScanner(false);
       });
 
       return () => {
-        scanner.clear().catch(err => console.error("Scanner cleanup failed", err));
+        if (html5QrCode.isScanning) {
+          html5QrCode.stop().catch(err => console.error("Scanner cleanup failed", err));
+        }
       };
     }
   }, [showScanner]);
@@ -153,7 +208,37 @@ export default function TrackOrder() {
   const getTimelineItems = () => {
     if (!order) return [];
     
-    const orderDate = order.createdAt ? new Date(order.createdAt) : new Date();
+    // IF REAL TRACKING HISTORY EXISTS, USE IT
+    if (order.trackingHistory && Array.isArray(order.trackingHistory) && order.trackingHistory.length > 0) {
+      return [...order.trackingHistory].sort((a, b) => {
+        const timeA = a.time?.seconds || a.time?._seconds || new Date(a.time).getTime() / 1000;
+        const timeB = b.time?.seconds || b.time?._seconds || new Date(b.time).getTime() / 1000;
+        return timeB - timeA; // Descending order (latest first)
+      }).map(item => {
+        let dateObj: Date;
+        if (item.time?.toDate) {
+          dateObj = item.time.toDate();
+        } else if (item.time?._seconds) {
+          dateObj = new Date(item.time._seconds * 1000);
+        } else if (item.time?.seconds) {
+          dateObj = new Date(item.time.seconds * 1000);
+        } else {
+          dateObj = new Date(item.time);
+        }
+        
+        return {
+          title: item.status || item.title,
+          date: isNaN(dateObj.getTime()) ? 'Recently' : dateObj.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }),
+          time: isNaN(dateObj.getTime()) ? '--:--' : dateObj.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+          location: item.location || 'Hub',
+          description: item.description,
+          completed: true
+        };
+      });
+    }
+
+    // FALLBACK TO GENERATED TIMELINE
+    const orderDate = order.createdAt ? (order.createdAt.toDate ? order.createdAt.toDate() : new Date(order.createdAt)) : new Date();
     const items = [
       {
         title: 'Verified Payments',
@@ -228,7 +313,22 @@ export default function TrackOrder() {
               <h2 className="text-xl font-bold font-syne mb-2">Scan Shipping Label</h2>
               <p className="text-gray-400 text-sm mb-8">Place the QR code on the label within the frame</p>
               
-              <div id="reader" className="bg-white rounded-3xl overflow-hidden shadow-2xl shadow-ruby/20 border-4 border-ruby/30"></div>
+              <div className="relative group">
+                <div id="reader" className="bg-black rounded-3xl overflow-hidden shadow-2xl shadow-ruby/40 border-4 border-ruby/30 min-h-[300px]"></div>
+                
+                {/* Pro Scanner Overlay */}
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  <div className="w-[280px] h-[280px] border-2 border-white/20 rounded-2xl relative overflow-hidden">
+                     <div className="scanner-laser"></div>
+                     
+                     {/* Corners */}
+                     <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-ruby rounded-tl-xl"></div>
+                     <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-ruby rounded-tr-xl"></div>
+                     <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-ruby rounded-bl-xl"></div>
+                     <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-ruby rounded-br-xl"></div>
+                  </div>
+                </div>
+              </div>
               
               <div className="mt-8 flex items-center justify-center gap-2 text-ruby font-bold">
                 <div className="w-2 h-2 rounded-full bg-ruby animate-ping" />
