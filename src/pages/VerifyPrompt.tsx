@@ -174,7 +174,7 @@ export default function VerifyPrompt() {
           })
         });
 
-        toast.success("successfully account created 🎉", { position: 'bottom-center', duration: 5000 });
+        toast.success("Account Created Successfully 🎉", { position: 'bottom-center', duration: 5000 });
 
         // Trigger Welcome Push Notification (Delayed to allow OneSignal to sync)
         setTimeout(() => {
@@ -409,18 +409,19 @@ export default function VerifyPrompt() {
           ))}
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-4 w-full">
           <button 
             onClick={handleVerifyOtp}
             disabled={verifying}
-            className="w-full bg-[#1A2C54] text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-[0.2em] hover:bg-ruby transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-xl shadow-[#1A2C54]/10 flex items-center justify-center gap-3 disabled:opacity-50"
+            className="w-full bg-gradient-to-r from-[#1A2C54] via-[#2d1b69] to-[#1A2C54] text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-[0.2em] hover:opacity-90 transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-xl shadow-[#1A2C54]/20 flex items-center justify-center gap-3 disabled:opacity-50 relative overflow-hidden group"
           >
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
             {verifying ? (
               <RefreshCw size={18} className="animate-spin" />
             ) : (
               <>
-                Verify Code
-                <CheckCircle2 size={18} />
+                <span className="relative z-10">Verify Code</span>
+                <CheckCircle2 size={18} className="relative z-10" />
               </>
             )}
           </button>
@@ -428,14 +429,14 @@ export default function VerifyPrompt() {
           <button 
             onClick={handleResendVerification}
             disabled={loading}
-            className="w-full bg-white border border-gray-100 text-[#1A2C54] py-5 rounded-2xl text-sm font-bold uppercase tracking-[0.2em] hover:bg-gray-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+            className="w-full bg-white/40 backdrop-blur-md border border-gray-100 text-[#1A2C54] py-5 rounded-2xl text-sm font-bold uppercase tracking-[0.2em] hover:bg-gray-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50 group"
           >
             {loading ? (
               <RefreshCw size={18} className="animate-spin" />
             ) : (
               <>
                 Resend Code
-                <RefreshCw size={18} />
+                <RefreshCw size={18} className="group-hover:rotate-180 transition-transform duration-500" />
               </>
             )}
           </button>

@@ -19,13 +19,12 @@ import { motion } from 'motion/react';
 import { Mail, Lock, User, ArrowRight, Phone, CheckCircle2, Smartphone } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
-import PhoneVerification from '../components/PhoneVerification';
 
 export default function Signup() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [storeSettings, setStoreSettings] = useState<any>(null);
-  const [showPhoneLogin, setShowPhoneLogin] = useState(false);
+  // Phone login removed
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -186,7 +185,7 @@ export default function Signup() {
           phoneNumber: formData.phone,
           role: 'user',
           isVerified: false,
-          phoneVerified: false,
+          phoneVerified: true,
           emailOtp: otp,
           createdAt: new Date().toISOString()
         })

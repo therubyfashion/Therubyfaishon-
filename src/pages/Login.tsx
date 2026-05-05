@@ -16,7 +16,6 @@ import { sendNotification } from '../lib/notifications';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import { Mail, Lock, ArrowRight, LogIn, Smartphone } from 'lucide-react';
-import PhoneVerification from '../components/PhoneVerification';
 import { Capacitor } from '@capacitor/core';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 
@@ -26,7 +25,7 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [storeSettings, setStoreSettings] = useState<any>(null);
-  const [showPhoneLogin, setShowPhoneLogin] = useState(false);
+  // Phone login logic removed
 
   useEffect(() => {
     const fetchSettings = async () => {

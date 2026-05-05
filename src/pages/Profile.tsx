@@ -28,13 +28,11 @@ import {
 import { collection, doc, updateDoc } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 
-import PhoneVerification from '../components/PhoneVerification';
 import { AnimatePresence } from 'motion/react';
 
 export default function Profile() {
   const { user, profile, loading, isAdmin } = useAuth();
   const navigate = useNavigate();
-  const [showPhoneVerify, setShowPhoneVerify] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
   const [isUploading, setIsUploading] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -341,7 +339,7 @@ export default function Profile() {
           {/* Contact Info */}
           <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-50 space-y-4">
             <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400 px-2">Contact Information</h3>
-            <div className="space-y-2">
+            <div className="space-y-4">
               <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-2xl">
                 <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-gray-400 shadow-sm">
                   <Mail size={18} />
@@ -358,41 +356,13 @@ export default function Profile() {
                 </div>
                 <div className="flex-grow min-w-0">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Phone Number</p>
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-bold text-[#1A2C54] truncate">
-                      {profile?.phoneNumber ? `+91 ${profile.phoneNumber}` : 'Not Provided'}
-                    </p>
-                    {profile?.phoneVerified ? (
-                      <div className="flex items-center gap-1 text-green-500">
-                        <ShieldCheck size={12} />
-                        <span className="text-[8px] font-bold uppercase tracking-widest">Verified</span>
-                      </div>
-                    ) : (
-                      <button 
-                        onClick={() => setShowPhoneVerify(true)}
-                        className="text-[8px] font-bold uppercase tracking-widest text-ruby hover:underline"
-                      >
-                        Verify Now
-                      </button>
-                    )}
-                  </div>
+                  <p className="text-sm font-bold text-[#1A2C54] truncate">
+                    {profile?.phoneNumber ? `+91 ${profile.phoneNumber}` : 'Not Provided'}
+                  </p>
                 </div>
               </div>
             </div>
           </div>
-
-          <AnimatePresence>
-            {showPhoneVerify && (
-              <PhoneVerification 
-                onClose={() => setShowPhoneVerify(false)}
-                onSuccess={() => {
-                  toast.success("Phone verified successfully!");
-                  setShowPhoneVerify(false);
-                }}
-                prefillPhone={profile?.phoneNumber}
-              />
-            )}
-          </AnimatePresence>
 
           {/* Menu Items */}
           <div className="bg-white overflow-hidden rounded-[2rem] shadow-sm border border-gray-50 divide-y divide-gray-50">
