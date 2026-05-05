@@ -293,7 +293,7 @@ async function startServer() {
     cors: { origin: "*" }
   });
   console.log(`✅ Socket.IO initialized.`);
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   
   // Real-time Analytics Store (Memory only for active count)
   const activeVisitors = new Map<string, any>();
@@ -481,7 +481,7 @@ async function startServer() {
         return res.sendFile(indexPath);
       } else {
         // Return 200 OK for Render Health Check even if dist is missing
-        return res.status(200).send("Server is UP, but 'dist' folder is missing. Bhai, please run 'npm run build'.");
+        return res.status(200).send("Server is UP, but 'dist' folder is missing. Please run 'npm run build'.");
       }
     }
     next();
@@ -496,7 +496,7 @@ async function startServer() {
     console.log(`🔍 Order tracking request: ID=${orderId}, Email=${email}`);
     
     if (!orderId || !email) {
-      return res.status(400).json({ error: "Bhai, Order ID aur Email dono zaroori hain." });
+      return res.status(400).json({ error: "Order ID and Email are both required." });
     }
 
     try {
@@ -506,7 +506,7 @@ async function startServer() {
       }
       
       if (!db) {
-        return res.status(503).json({ error: "Database abhi ready ho raha hai. 2-3 minute baad dobara try karein! 💎" });
+        return res.status(503).json({ error: "Database is still initializing. Please try again in 2-3 minutes! 💎" });
       }
       
       let orderData: any = null;
@@ -603,8 +603,8 @@ async function startServer() {
         // Logic above handles it.
         
         return res.status(404).json({ 
-          error: "Order nahi mila. Please check Order ID aur Email.",
-          hint: "Bhai, ya to Order ID galat hai ya Email. Kya aapne Checkout ke waqt yahi details dali thi?" 
+          error: "Order not found. Please check Order ID and Email.",
+          hint: "Either the Order ID or Email is incorrect. Did you enter these details correctly at checkout?" 
         });
       }
 
@@ -614,8 +614,8 @@ async function startServer() {
       if (customerEmail !== targetEmail) {
         console.log(`❌ Email mismatch: Found ${customerEmail}, expected ${targetEmail}`);
         return res.status(403).json({ 
-          error: "Email match nahi kar raha.",
-          details: `Is Order ID ke liye Email "${customerEmail.substring(0, 3)}***${customerEmail.substring(customerEmail.indexOf('@'))}" registered hai.`
+          error: "Email doesn't match.",
+          details: `The registered email for this Order ID is "${customerEmail.substring(0, 3)}***${customerEmail.substring(customerEmail.indexOf('@'))}".`
         });
       }
 
@@ -638,15 +638,15 @@ async function startServer() {
 
       let userFriendlyError = "Tracking failed on server. Please try again later.";
       if (isPermissionError) {
-        userFriendlyError = `Bhai, Firebase Permission Error!
+        userFriendlyError = `Firebase Permission Error!
         \nProject: ${adminApp?.options.projectId || 'unknown'}
         \nDatabase: ${currentFirestoreDatabaseId}
-        \nSamadhan: Ek baar Admin Panel mein 'Set up Firebase' button par click karein aur terms accept karein. Isse permissions reset ho jayengi.`;
+        \nSolution: Go to Admin Panel and click 'Set up Firebase' to accept terms and reset permissions.`;
       } else if (isNotFoundError) {
-        userFriendlyError = `Bhai, Database NOT_FOUND Error!
+        userFriendlyError = `Database NOT_FOUND Error!
         \nDatabase ID: ${currentFirestoreDatabaseId}
-        \nYe tab hota hai jab Firebase database abhi tak puri tarah "Active" nahi hua hai ya region galat hai. 
-        \nSamadhan: 2-3 minute wait karein, ya Dashboard se 'Set up Firebase' dobara karein.`;
+        \nThis happens when the Firebase database is not yet fully "Active" or the region is incorrect. 
+        \nSolution: Wait 2-3 minutes, or click 'Set up Firebase' again from the Dashboard.`;
       }
 
       res.status(500).json({ 
@@ -1098,7 +1098,7 @@ async function startServer() {
       if (!apiKey) {
         console.error("Email configuration missing (No SMTP and no API Key).");
         return res.status(400).json({ 
-          error: "Bhai, Email set karne ke do raste hain:\n1. Admin -> Settings mein Gmail User aur App Password daalein (Aasan).\n2. Ya phir Resend API Key set karein (Professional)." 
+          error: "Email can be set up in two ways:\n1. Enter Gmail User and App Password in Admin -> Settings (Easy).\n2. Or set a Resend API Key (Professional)." 
         });
       }
 
@@ -1138,13 +1138,13 @@ async function startServer() {
             errLower.includes("403") ||
             errLower.includes("restricted")) {
           
-          errorMessage = `Bhai, Resend 403 (Domain Error)!
-          \nResend keh raha hai: "${errorMessage}"
-          \nSamadhan:
-          1. Aapka verified domain "${VERIFIED_DOMAIN}" hai.
-          2. Aapne shayad "rubyfashion.shop" (missing 'the') use kiya hai jo Verified NAHI hai.
-          3. Admin Panel -> Settings mein jaa kar "From Email" ko "${DEFAULT_FROM_EMAIL}" set karein.
-          4. Jab tak domain verify nahi hota, Resend kisi aur ko email nahi bhejta.`;
+          errorMessage = `Resend 403 (Domain Error)!
+          \nResend says: "${errorMessage}"
+          \nSolution:
+          1. Your verified domain is "${VERIFIED_DOMAIN}".
+          2. You might have used "rubyfashion.shop" (missing 'the') which is NOT verified.
+          3. Go to Admin Panel -> Settings and set "From Email" to "${DEFAULT_FROM_EMAIL}".
+          4. Resend won't send emails to others until the domain is verified.`;
         }
 
         return res.status(400).json({ 
@@ -1194,7 +1194,7 @@ async function startServer() {
           console.warn(`OneSignal: Notification target resulted in 0 subscribers. (Expected if no one has opted in yet)`);
           return res.json({ 
             success: true, 
-            warning: "Bhai, API keys sahi hain, par abhi tak koi user Subscribed nahi hai (No one clicked Allow yet). Pehle app khol kar notifications 'Allow' kijiye taaki msg jaye.", 
+            warning: "API keys are correct, but no users are subscribed yet (No one clicked Allow yet). Please open the app and allow notifications first.", 
             id: null 
           });
         }
@@ -1209,25 +1209,25 @@ async function startServer() {
       console.error("OneSignal Broadcast Error Detail:", JSON.stringify(errorData || error.message, null, 2));
 
       // Friendly mapping of common OneSignal errors
-      let userFriendlyError = "Broadcast notification fail ho gaya. 🔔";
+      let userFriendlyError = "Broadcast notification failed. 🔔";
       let hint = "";
 
       if (errorMsg.includes("not subscribed") || errorMsg.includes("no users") || errorMsg.includes("players are not subscribed")) {
         console.warn("OneSignal Broadcast Warning: No subscribed users yet.");
         return res.json({ 
           success: true, 
-          warning: "Bhai, abhi tak kisi ne Push Notifications ON nahi kiya hai (No one subscribed yet). Isliye msg kisi ko nahi gaya. Pehle mobile par app khol kar 'Allow' kijiye.", 
+          warning: "No one has subscribed to Push Notifications yet (No one subscribed yet). Message not sent. Please open the app and allow notifications first.", 
           id: null 
         });
       }
 
       const errLower = errorMsg.toLowerCase();
       if (errLower.includes("app_id not found") || errLower.includes("invalid app_id") || errLower.includes("app_id")) {
-        hint = "❌ ERROR: OneSignal App ID galat hai! \nSamadhan: Admin Panel -> Settings mein check karein ki 'OneSignal App ID' bilkul sahi hai.";
+        hint = "❌ ERROR: OneSignal App ID is incorrect! \nSolution: Check that 'OneSignal App ID' is correct in Admin Panel -> Settings.";
       } else if (errLower.includes("rest api key") || errLower.includes("invalid rest api key") || errLower.includes("unauthorized")) {
-        hint = "❌ ERROR: REST API Key galat hai! \nSamadhan: OneSignal Settings -> Keys & IDs mein jaein, aur wo LAMBI waali key (REST API Key) copy karke Admin panel me dalein.";
+        hint = "❌ ERROR: REST API Key is incorrect! \nSolution: Go to OneSignal Settings -> Keys & IDs, and copy the long REST API Key into Admin panel.";
       } else if (errLower.includes("segment") || errLower.includes("filters")) {
-        hint = "❌ ERROR: OneSignal Segment Error! \nSamadhan: OneSignal Dashboard par check karein ki 'Subscribed Users' naam ka segment exist karta hai.";
+        hint = "❌ ERROR: OneSignal Segment Error! \nSolution: Check that 'Subscribed Users' segment exists in OneSignal Dashboard.";
       }
 
       res.status(500).json({ 
@@ -1284,7 +1284,7 @@ async function startServer() {
       }
 
       console.error("OneSignal User Push Error Detail:", JSON.stringify(errorData || error.message, null, 2));
-      let userFriendlyError = "Push notification fail ho gaya.";
+      let userFriendlyError = "Push notification failed.";
       if (errorData?.errors) {
         userFriendlyError = `OneSignal Error: ${errorMsg}`;
       }
@@ -1323,7 +1323,7 @@ async function startServer() {
         const errorMsg = responseData.errors.join(', ');
         if (errorMsg.includes("not subscribed") || errorMsg.includes("no users") || errorMsg.includes("players are not subscribed")) {
           console.warn("OneSignal: No admins subscribed yet.");
-          return res.json({ success: true, warning: "Bhai, koi bhi Admin abhi subscribed nahi hai (No admin has 'Allow' notifications yet).", id: null });
+          return res.json({ success: true, warning: "No admin is currently subscribed (No admin has 'Allow' notifications yet).", id: null });
         }
       }
       
@@ -1336,10 +1336,10 @@ async function startServer() {
       console.error("OneSignal Admin Push Error Detail:", JSON.stringify(errorData || error.message, null, 2));
 
       if (errorMsg.includes("not subscribed") || errorMsg.includes("no users") || errorMsg.includes("players are not subscribed")) {
-        return res.json({ success: true, warning: "Bhai, koi bhi Admin abhi subscribed nahi hai.", id: null });
+        return res.json({ success: true, warning: "No admin is currently subscribed.", id: null });
       }
       
-      let userFriendlyError = "Admin notification fail ho gaya.";
+      let userFriendlyError = "Admin notification failed.";
 
       res.status(500).json({ 
         error: userFriendlyError,
@@ -1356,7 +1356,7 @@ async function startServer() {
         return res.status(400).json({ 
           success: false, 
           error: "OneSignal App ID or REST API Key is missing.",
-          hint: "Bhai, App ID aur REST API Key enter karein, phir test karein."
+          hint: "Enter App ID and REST API Key, then test."
         });
       }
 
@@ -1386,7 +1386,7 @@ async function startServer() {
       res.status(500).json({ 
         success: false, 
         error: errorDetail || "Unknown error",
-        hint: "Bhai, ye key galat hai. OneSignal Dashboard -> Settings -> Keys & IDs mein jaein, aur 'REST API Key' copy karein. 'Key ID' mat copy karna!"
+        hint: "This key is incorrect. Go to OneSignal Dashboard -> Settings -> Keys & IDs, and copy the 'REST API Key'. Do not copy 'Key ID'!"
       });
     }
   });
@@ -1415,7 +1415,7 @@ async function startServer() {
       console.log("✅ Production static middleware applied.");
     } else {
       app.get('*', (req, res) => {
-        res.status(404).send("Bhai, 'dist' folder nahi mila. App build nahi hui hai. AI Studio mein 'compile_applet' run karein.");
+        res.status(404).send("The 'dist' folder was not found. The app hasn't been built. Please run 'npm run build'.");
       });
       console.warn("⚠️  dist folder missing in production mode.");
     }
@@ -1426,7 +1426,7 @@ async function startServer() {
   app.use((err: any, req: any, res: any, next: any) => {
     console.error("🔥 Global Server Error:", err);
     res.status(500).json({ 
-      error: "Bhai, server mein kuch problem ayi hai.",
+      error: "A server error occurred.",
       message: err.message,
       stack: process.env.NODE_ENV === 'production' ? undefined : err.stack
     });
