@@ -5,6 +5,8 @@ const config: CapacitorConfig = {
   appName: 'The Ruby',
   webDir: 'dist',
   server: {
+    url: 'https://therubyfaishon.shop/',
+    cleartext: true,
     allowNavigation: [
       '*.firebaseapp.com',
       '*.googleapis.com',

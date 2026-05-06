@@ -6,6 +6,7 @@ import { db, auth } from '../firebase';
 import { Product, Review } from '../types';
 import { useCart } from '../contexts/CartContext';
 import { useWishlist } from '../contexts/WishlistContext';
+import { trackPixelEvent } from '../lib/pixel';
 import { toast } from 'sonner';
 import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
@@ -339,6 +340,17 @@ export default function ProductDetail() {
 
   const handleAddToCart = () => {
     addToCart(product, selectedSize, selectedColor, quantity);
+    
+    // Meta Pixel Tracking
+    trackPixelEvent('AddToCart', {
+      content_name: product.name,
+      content_category: product.category,
+      content_ids: [product.id],
+      content_type: 'product',
+      value: product.price * quantity,
+      currency: 'INR'
+    });
+
     toast.success(`${product.name} added to cart`, {
       description: `Quantity: ${quantity}, Size: ${selectedSize}, Color: ${selectedColor}`,
       icon: <ShoppingBag className="text-ruby" size={16} />

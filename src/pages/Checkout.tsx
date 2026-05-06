@@ -12,6 +12,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { io } from 'socket.io-client';
 import { LoadingSpinner } from '../components/Skeleton';
 import SwipeButton from '../components/SwipeButton';
+import { trackPixelEvent } from '../lib/pixel';
 
 const STEPS = [
   { id: 1, label: 'Address' },
@@ -55,6 +56,16 @@ export default function Checkout() {
       userId: user?.uid || 'guest',
       timestamp: new Date().toISOString()
     });
+
+    // Meta Pixel Tracking
+    trackPixelEvent('InitiateCheckout', {
+      content_ids: items.map(i => i.id),
+      content_type: 'product',
+      num_items: itemCount,
+      value: total,
+      currency: 'INR'
+    });
+
     return () => {
       socket.disconnect();
     };
@@ -310,6 +321,15 @@ export default function Checkout() {
 
           await addDoc(collection(db, 'orders'), finalOrderData);
           
+          // Meta Pixel Tracking
+          trackPixelEvent('Purchase', {
+            content_ids: items.map(i => i.id),
+            content_type: 'product',
+            value: finalOrderData.total,
+            currency: 'INR',
+            order_id: finalOrderData.orderId
+          });
+
           // Send internal notification
           if (user?.uid) {
             await sendNotification({
