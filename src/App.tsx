@@ -17,6 +17,7 @@ import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
 
 import { useVisitorTracking } from './hooks/useVisitorTracking';
+import { trackPixelEvent } from './lib/pixel';
 
 // Lazy load pages
 const Home = React.lazy(() => import('./pages/Home'));
@@ -83,6 +84,11 @@ function AppContent() {
   
   // Track live visitors
   useVisitorTracking();
+
+  // Meta Pixel Route Tracking
+  useEffect(() => {
+    trackPixelEvent('PageView');
+  }, [location.pathname]);
 
   const { user, profile, isAdmin, loading: authLoading } = useAuth();
   const { settings, loading: settingsLoading } = useSettings();
