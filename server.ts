@@ -798,7 +798,7 @@ async function startServer() {
     
     // Very basic safety: In production you'd check better, but here we require a specific confirmation
     if (password !== "RESET_THE_RUBY_2026") {
-      return res.status(403).json({ error: "Invalid Reset Password! Bhai, ye bahut khatarnak action hai." });
+      return res.status(403).json({ error: "Invalid Reset Password! This is a dangerous action." });
     }
 
     if (!db) {
@@ -842,7 +842,7 @@ async function startServer() {
       console.log("✅ PROD CLEANUP FINISHED.");
       res.json({ 
         success: true, 
-        message: "Poora data saaf ho gaya hai! Ab aap fresh start kar sakte hain. 💎",
+        message: "All data has been cleared! You can now start fresh. 💎",
         results
       });
     } catch (error: any) {
@@ -1003,7 +1003,7 @@ async function startServer() {
             console.warn(`🛑 LIMIT REACHED: Monthly OTP limit (${monthlyLimit}) hit for ${currentMonth}. Blocking send.`);
             return res.status(429).json({ 
               error: "Monthly Limit Reached", 
-              message: `Bhai, safety limit (${monthlyLimit}) hit ho gayi hai taaki extra charges na lagein. Admin Panel -> Settings -> Security mein jaakar limit badhaein.` 
+              message: `Safety limit (${monthlyLimit}) hit to avoid extra charges. Increase the limit in Admin Panel -> Settings -> Security.` 
             });
           }
         } catch (limitErr) {
@@ -1078,9 +1078,9 @@ async function startServer() {
         } catch (smtpErr: any) {
           console.error("❌ GMAIL ERROR:", smtpErr.message);
           
-          let hint = "Bhai, Gmail login fail ho gaya. ";
+          let hint = "Gmail login failed. ";
           if (smtpErr.message.includes('Invalid login') || smtpErr.message.includes('Username and Password not accepted')) {
-            hint += "Pakka aapka 'App Password' galat hai. Google Account mein naya 16-letter code banayein.";
+            hint += "Your 'App Password' is likely incorrect. Create a new 16-letter code in your Google Account.";
           } else {
             hint += smtpErr.message;
           }

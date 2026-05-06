@@ -1570,7 +1570,7 @@ export default function AdminDashboard() {
 
   const handleProductionReset = async () => {
     if (resetPassword !== "RESET_THE_RUBY_2026") {
-      toast.error("Galat Password! Reset karne ke liye sahi password daalein.");
+      toast.error("Incorrect Password! Enter the correct password to reset.");
       return;
     }
 
@@ -7326,7 +7326,7 @@ export default function AdminDashboard() {
                              </h4>
                              <p className="text-[10px] text-amber-600 font-medium leading-relaxed">
                                For APK notifications, <b>Google Android (FCM)</b> setup is required in the OneSignal Dashboard. 
-                               Wahan aapko <b>Firebase Console</b> se nikali hui <b>Service Account JSON</b> file upload karni hogi.
+                               There you will need to upload the <b>Service Account JSON</b> file extracted from the <b>Firebase Console</b>.
                              </p>
                            </div>
                            

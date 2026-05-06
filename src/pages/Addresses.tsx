@@ -42,6 +42,10 @@ export default function Addresses() {
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [showOTPModal, setShowOTPModal] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [otp, setOTP] = useState(['', '', '', '', '', '']);
+  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [editingAddress, setEditingAddress] = useState<Address | null>(null);
   const [formData, setFormData] = useState({
     name: '',
@@ -135,13 +139,110 @@ export default function Addresses() {
       pincode: address.pincode,
       label: address.label
     });
+    setIsPhoneVerified(true);
     setShowForm(true);
+  };
+
+  const handleOTPChange = (index: number, value: string) => {
+    if (value.length > 1) return;
+    const newOTP = [...otp];
+    newOTP[index] = value;
+    setOTP(newOTP);
+
+    // Auto-focus next input
+    if (value && index < 5) {
+      const nextInput = document.getElementById(`otp-${index + 1}`);
+      nextInput?.focus();
+    }
+  };
+
+  const verifyOTP = async () => {
+    setVerifying(true);
+    // Simulate API call for OTP verification
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    if (otp.join('') === '123456' || otp.join('') === '888888') {
+      setIsPhoneVerified(true);
+      setShowOTPModal(false);
+      setOTP(['', '', '', '', '', '']);
+      toast.success("Phone verified successfully! ✨");
+    } else {
+      toast.error("Invalid OTP. Try again.");
+    }
+    setVerifying(false);
   };
 
   if (loading) return <div className="h-screen flex items-center justify-center">Loading...</div>;
 
   return (
-    <div className="min-h-screen bg-[#FAFAFA] pt-24 pb-32 px-4">
+    <div className="min-h-screen bg-[#FAFAFA] pt-24 pb-32 px-4 relative">
+      {/* OTP Modal Overlay */}
+      <AnimatePresence>
+        {showOTPModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-[#1A2C54]/80 backdrop-blur-sm z-[200] flex items-center justify-center p-6"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white max-w-md w-full rounded-[2.5rem] p-8 shadow-2xl space-y-8"
+            >
+              <div className="text-center space-y-2">
+                <div className="w-16 h-16 bg-ruby/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <Smartphone className="text-ruby" size={32} />
+                </div>
+                <h3 className="text-2xl font-serif font-bold text-[#1A2C54]">Verify Phone</h3>
+                <p className="text-gray-400 text-sm">We've sent a 6-digit code to <b>+91 {formData.number}</b></p>
+              </div>
+
+              <div className="flex justify-between gap-2">
+                {otp.map((digit, idx) => (
+                  <input
+                    key={idx}
+                    id={`otp-${idx}`}
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={1}
+                    value={digit}
+                    onChange={(e) => handleOTPChange(idx, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Backspace' && !otp[idx] && idx > 0) {
+                        const prevInput = document.getElementById(`otp-${idx - 1}`);
+                        prevInput?.focus();
+                      }
+                    }}
+                    className="w-12 h-14 bg-gray-50 border-none rounded-xl text-center text-xl font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby"
+                  />
+                ))}
+              </div>
+
+              <div className="space-y-4">
+                <button 
+                  onClick={verifyOTP}
+                  disabled={verifying || otp.join('').length < 6}
+                  className="w-full bg-[#1A2C54] text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-ruby transition-all shadow-xl shadow-ruby/10 flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {verifying ? "Verifying..." : "Confirm Code"}
+                </button>
+                <button 
+                  onClick={() => setShowOTPModal(false)}
+                  className="w-full text-gray-400 text-[10px] font-bold uppercase tracking-widest hover:text-ruby transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <p className="text-center text-[10px] text-gray-400 font-bold uppercase tracking-widest leading-relaxed">
+                Didn't get the code? <button className="text-ruby ml-1">Resend in 30s</button>
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="max-w-2xl mx-auto space-y-8">
         {/* Header */}
         <div className="flex items-center justify-between px-2">
@@ -207,14 +308,35 @@ export default function Addresses() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Phone</label>
-                    <div className="relative">
-                      <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                    <div className="relative group">
+                      <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-ruby transition-colors" size={18} />
                       <input 
                         type="tel" required value={formData.number}
-                        onChange={e => setFormData({...formData, number: e.target.value})}
-                        className="w-full bg-gray-50 border-none rounded-2xl py-4 pl-12 pr-4 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20"
+                        onChange={e => {
+                          setFormData({...formData, number: e.target.value});
+                          setIsPhoneVerified(false);
+                        }}
+                        className="w-full bg-gray-50 border-none rounded-2xl py-4 pl-12 pr-24 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20"
                         placeholder="10-digit number"
                       />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (formData.number.length === 10) {
+                            setShowOTPModal(true);
+                          } else {
+                            toast.error("Please enter a valid 10-digit number");
+                          }
+                        }}
+                        className={cn(
+                          "absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                          isPhoneVerified 
+                            ? "bg-green-100 text-green-600 cursor-default" 
+                            : "bg-ruby/10 text-ruby hover:bg-ruby hover:text-white"
+                        )}
+                      >
+                        {isPhoneVerified ? "Verified ✓" : "Verify"}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -271,9 +393,11 @@ export default function Addresses() {
 
                 <button 
                   type="submit" 
-                  className="w-full bg-[#1A2C54] text-white py-5 rounded-2xl text-xs font-bold uppercase tracking-[0.2em] hover:bg-ruby transition-all shadow-xl shadow-[#1A2C54]/10 mt-4"
+                  disabled={!isPhoneVerified && !editingAddress}
+                  className="w-full bg-[#1A2C54] text-white py-5 rounded-2xl text-xs font-bold uppercase tracking-[0.2em] hover:bg-ruby transition-all shadow-xl shadow-[#1A2C54]/10 mt-4 disabled:opacity-50"
                 >
                   {editingAddress ? 'Update Address' : 'Save Address'}
+                  {!isPhoneVerified && !editingAddress && " (Verify Phone First)"}
                 </button>
               </form>
             </motion.div>

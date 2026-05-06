@@ -47,7 +47,7 @@ export default function VerifyEmail() {
           });
           setStatus('success');
           setMessage('Your email has been successfully verified!');
-          toast.success("successfully account created 🎉", { position: 'bottom-center', duration: 5000 });
+          toast.success("Account created successfully! 🎉", { position: 'bottom-center', duration: 5000 });
         } else {
           setStatus('error');
           setMessage('Invalid or expired verification token.');

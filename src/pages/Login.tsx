@@ -346,6 +346,16 @@ export default function Login() {
               </>
             )}
           </button>
+
+          <button 
+            type="button"
+            onClick={() => navigate('/login-phone')}
+            disabled={loading}
+            className="w-full bg-white border border-gray-100 text-[#1A2C54] py-4 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-gray-50 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            <Smartphone size={18} />
+            Login with Phone
+          </button>
         </form>
 
         <div className="relative flex items-center gap-4 py-2">
