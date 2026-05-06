@@ -38,7 +38,6 @@ const Search = React.lazy(() => import('./pages/Search'));
 const Profile = React.lazy(() => import('./pages/Profile'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 const Addresses = React.lazy(() => import('./pages/Addresses'));
-const LoginPhone = React.lazy(() => import('./pages/LoginPhone'));
 const VerifyEmail = React.lazy(() => import('./pages/VerifyEmail'));
 const VerifyPrompt = React.lazy(() => import('./pages/VerifyPrompt'));
 const InfoPage = React.lazy(() => import('./pages/InfoPage'));
@@ -240,7 +239,6 @@ function AppContent() {
             <Route path="/wishlist" element={<Wishlist />} />
             <Route path="/checkout" element={<Checkout />} />
             <Route path="/login" element={<Login />} />
-            <Route path="/login-phone" element={<LoginPhone />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />

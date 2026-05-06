@@ -36,6 +36,7 @@ import { cn } from '../lib/utils';
 import { generateInvoice } from '../utils/invoiceGenerator';
 import { generateShippingLabel } from '../utils/shippingLabelGenerator';
 import Barcode from 'react-barcode';
+import LiveView from '../components/LiveView';
 import { io } from 'socket.io-client';
 import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
@@ -131,7 +132,7 @@ const chartDataSample = [];
 const recentOrdersSample = [];
 const topProductsSample = [];
 
-type Tab = 'home' | 'dashboard' | 'products' | 'category' | 'orders' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights' | 'promotions';
+type Tab = 'home' | 'dashboard' | 'live' | 'products' | 'category' | 'orders' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights' | 'promotions';
 
 function Accordion({ title, icon: Icon, children }: { title: string, icon: any, children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -988,6 +989,7 @@ export default function AdminDashboard() {
   const adminChatFileRef = useRef<HTMLInputElement>(null);
   const bannerImageInputRef = useRef<HTMLInputElement>(null);
   const [usersCount, setUsersCount] = useState(0);
+  const [sessionsCount, setSessionsCount] = useState(128); // Initial placeholder
   const [loading, setLoading] = useState(true);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isColorModalOpen, setIsColorModalOpen] = useState(false);
@@ -3222,6 +3224,7 @@ export default function AdminDashboard() {
   const menuItems = useMemo(() => [
     { id: 'home', label: 'Home', icon: Home },
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'live', label: 'Live View', icon: Globe },
     { id: 'products', label: 'Products', icon: Package },
     { id: 'category', label: 'Category', icon: Tags },
     { id: 'orders', label: 'Orders', icon: ShoppingBag },
@@ -3280,6 +3283,7 @@ export default function AdminDashboard() {
   const totalSalesVal = orders.reduce((acc, curr) => acc + (curr.total || 0), 0);
   const totalOrdersVal = orders.length;
   const totalCustomersVal = usersCount;
+  const totalSessionsVal = sessionsCount;
   const lowStockVal = products.filter(p => p.stock < 10).length;
 
   return (
@@ -3569,6 +3573,14 @@ export default function AdminDashboard() {
             />
           ) : (
             <>
+              {activeTab === 'live' && (
+                <LiveView 
+                  totalSales={totalSalesVal}
+                  totalOrders={totalOrdersVal}
+                  totalSessions={totalSessionsVal}
+                />
+              )}
+
               {activeTab === 'dashboard' && (
                 <div className="space-y-8">
                   {/* Dashboard Header */}

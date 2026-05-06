@@ -21,9 +21,9 @@ import { db } from '../firebase';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 
 const steps = [
+  { key: 'confirmed', label: 'Confirmed', icon: ShoppingBag },
   { key: 'packed', label: 'Packed', icon: Package },
   { key: 'shipped', label: 'Shipped', icon: Truck },
-  { key: 'in-delivery', label: 'In Delivery', icon: Truck },
   { key: 'delivered', label: 'Delivered', icon: CheckCircle2 },
 ];
 
@@ -199,9 +199,9 @@ export default function TrackOrder() {
   const currentStatusIdx = (() => {
     const status = order?.status?.toLowerCase();
     if (status === 'delivered') return 3;
-    if (status === 'shipped') return 1;
-    if (status === 'in delivery' || status === 'packet in delivery') return 2;
-    if (status === 'processing' || status === 'paid' || status === 'confirmed' || status === 'packed') return 0;
+    if (status === 'shipped') return 2;
+    if (status === 'packed' || status === 'processing') return 1;
+    if (status === 'confirmed' || status === 'paid') return 0;
     return -1; // pending/placed
   })();
 
