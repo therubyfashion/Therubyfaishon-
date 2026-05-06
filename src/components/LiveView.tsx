@@ -28,9 +28,12 @@ interface LiveViewProps {
   totalSales: number;
   totalOrders: number;
   totalSessions: number;
+  dateRange: { start: string, end: string };
+  setDateRange: React.Dispatch<React.SetStateAction<{ start: string, end: string }>>;
+  onRefresh?: () => void;
 }
 
-export default function LiveView({ totalSales, totalOrders, totalSessions }: LiveViewProps) {
+export default function LiveView({ totalSales, totalOrders, totalSessions, dateRange, setDateRange, onRefresh }: LiveViewProps) {
   const [activeVisitors, setActiveVisitors] = useState<Visitor[]>([]);
   const [behavior, setBehavior] = useState({ activeCarts: 0, checkingOut: 0 });
   const [activities, setActivities] = useState<any[]>([]);
@@ -61,11 +64,6 @@ export default function LiveView({ totalSales, totalOrders, totalSessions }: Liv
       socket.disconnect();
     };
   }, []);
-
-  const [dateRange, setDateRange] = useState({
-    start: format(new Date(), 'yyyy-MM-dd'),
-    end: format(new Date(), 'yyyy-MM-dd')
-  });
 
   // Map Initialization
   useEffect(() => {
@@ -228,7 +226,10 @@ export default function LiveView({ totalSales, totalOrders, totalSessions }: Liv
                   onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
                   className="bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-[10px] font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20 outline-none"
                 />
-                <button className="p-2 bg-ruby text-white rounded-xl hover:bg-black transition-all">
+                <button 
+                  onClick={() => onRefresh?.()}
+                  className="p-2 bg-ruby text-white rounded-xl hover:bg-black transition-all"
+                >
                   <Search size={14} />
                 </button>
               </div>
