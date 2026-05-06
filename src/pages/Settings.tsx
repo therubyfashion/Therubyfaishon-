@@ -77,7 +77,7 @@ export default function Settings() {
       error: 'Sync Failed',
     });
 
-    if (user && ['orderUpdates', 'promotions', 'newsletter'].includes(key)) {
+    if (user && typeof key === 'string' && ['orderUpdates', 'promotions', 'newsletter'].includes(key)) {
       try {
         await updateDoc(doc(db, 'users', user.uid), {
           [`notifications.${key}`]: newVal

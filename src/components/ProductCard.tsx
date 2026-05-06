@@ -4,6 +4,7 @@ import { ShoppingBag, Heart, Star } from 'lucide-react';
 import { Product } from '../types';
 import { useCart } from '../contexts/CartContext';
 import { useWishlist } from '../contexts/WishlistContext';
+import { trackPixelEvent } from '../lib/pixel';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
 
@@ -19,6 +20,17 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     e.preventDefault();
     e.stopPropagation();
     addToCart(product, product.sizes[0] || 'M');
+    
+    // Meta Pixel Tracking
+    trackPixelEvent('AddToCart', {
+      content_name: product.name,
+      content_category: product.category,
+      content_ids: [product.id],
+      content_type: 'product',
+      value: product.price,
+      currency: 'INR'
+    });
+
     toast.success(`${product.name} added to cart`);
   };
 
