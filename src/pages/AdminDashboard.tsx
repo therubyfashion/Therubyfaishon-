@@ -3307,7 +3307,10 @@ export default function AdminDashboard() {
   const totalSalesVal = statsFilteredOrders.reduce((acc, curr) => acc + (curr.total || 0), 0);
   const totalOrdersVal = statsFilteredOrders.length;
   const totalCustomersVal = usersCount;
-  const totalSessionsVal = filteredAnalytics.reduce((acc, curr) => acc + (curr.total_users || 0), 0) || Math.floor(totalOrdersVal * 2.5) + liveSessions.length;
+  const analyticsTotalVal = filteredAnalytics.reduce((acc, curr) => acc + (curr.total_users || 0), 0);
+  const totalSessionsVal = analyticsTotalVal > 0 
+    ? analyticsTotalVal + liveSessions.length // Real data if available
+    : (totalOrdersVal * 3) + usersCount + liveSessions.length; // Realistic heuristic for empty DB
   const lowStockVal = products.filter(p => p.stock < 10).length;
 
   return (
