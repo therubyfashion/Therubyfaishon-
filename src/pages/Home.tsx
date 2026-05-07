@@ -5,14 +5,15 @@ import {
   ShoppingBag, ArrowRight, Star, ShieldCheck, Truck, RotateCcw, 
   Search, Bell, Heart, User, Filter, ChevronRight, Package,
   Shirt, Smartphone, Watch, Laptop, ShoppingCart, Gem, Utensils, ToyBrick,
-  Plus, ThumbsUp, ThumbsDown, X
+  Plus, ThumbsUp, ThumbsDown, X, Camera, Image as ImageIcon
 } from 'lucide-react';
-import { collection, getDocs, query, where, limit, orderBy, addDoc, doc, updateDoc, increment } from 'firebase/firestore';
+import { collection, getDocs, query, where, limit, orderBy, addDoc, doc, updateDoc, increment, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Product, Category } from '../types';
 import ProductCard from '../components/ProductCard';
 import { ProductCardSkeleton } from '../components/Skeleton';
 import { toast } from 'sonner';
+import { compressImage } from '../utils/imageUtils';
 import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
 import { useNotifications } from '../contexts/NotificationContext';
@@ -28,8 +29,9 @@ export default function Home() {
   const [currentBanner, setCurrentBanner] = useState(0);
   const [email, setEmail] = useState('');
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
-  const [newReview, setNewReview] = useState({ rating: 5, text: '', tag: 'Fabric' });
+  const [newReview, setNewReview] = useState({ rating: 5, text: '', tag: 'Fabric', image: '' as string | null });
   const [reviews, setReviews] = useState<any[]>([]);
+  const [reviewLoading, setReviewLoading] = useState(false);
   const navigate = useNavigate();
 
   const fallbackReviews = [
@@ -87,9 +89,7 @@ export default function Home() {
         );
 
         const reviewsQuery = query(
-          collection(db, 'fabric_reviews'),
-          orderBy('createdAt', 'desc'),
-          limit(10)
+          collection(db, 'fabric_reviews')
         );
 
         const [productsSnap, categoriesSnap, bannersSnap, reviewsSnap] = await Promise.all([
@@ -114,7 +114,13 @@ export default function Home() {
         setBanners(activeBanners);
 
         // Handle reviews with fallback
-        const firestoreReviews = reviewsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const firestoreReviews = reviewsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+        // Sort client-side to avoid needing an index and to show docs even if createdAt is missing (though we add it now)
+        firestoreReviews.sort((a, b) => {
+          const dateA = a.createdAt ? (a.createdAt.toDate ? a.createdAt.toDate() : new Date(a.createdAt)) : new Date(0);
+          const dateB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt)) : new Date(0);
+          return dateB.getTime() - dateA.getTime();
+        });
         setReviews(firestoreReviews.length > 0 ? firestoreReviews : fallbackReviews);
 
       } catch (error: any) {
@@ -152,6 +158,9 @@ export default function Home() {
       return;
     }
 
+    setReviewLoading(true);
+    const postToast = toast.loading("Posting your review...");
+
     try {
       const colors = ['#5a4fcf', '#d85a30', '#0f6e56', '#993c1d', '#185fa5'];
       const randomColor = colors[Math.floor(Math.random() * colors.length)];
@@ -163,22 +172,32 @@ export default function Home() {
         rating: newReview.rating,
         text: newReview.text,
         tag: newReview.tag || 'Fabric',
+        image: newReview.image || null,
         date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
         likes: 0,
         dislikes: 0,
         userId: auth.currentUser.uid,
-        createdAt: new Date().toISOString()
+        createdAt: serverTimestamp()
       };
 
       const docRef = await addDoc(collection(db, 'fabric_reviews'), reviewData);
       
-      setReviews([{ id: docRef.id, ...reviewData }, ...reviews.filter(r => !r.id.startsWith('f'))]);
+      // Update local state with optimistic data (converting serverTimestamp to ISO for sorting if needed, but here we just prepend)
+      const optimisticReview = { 
+        ...reviewData, 
+        id: docRef.id, 
+        createdAt: new Date().toISOString() 
+      };
+      
+      setReviews(prev => [optimisticReview, ...prev.filter(r => !r.id.startsWith('f'))]);
       setIsReviewModalOpen(false);
-      setNewReview({ rating: 5, text: '', tag: 'Fabric' });
-      toast.success("Thank you for sharing your experience! ✨");
+      setNewReview({ rating: 5, text: '', tag: 'Fabric', image: null });
+      toast.success("Thank you for sharing your experience! ✨", { id: postToast });
     } catch (error) {
       console.error("Error adding review:", error);
-      toast.error("Failed to post review. Please try again.");
+      toast.error("Failed to post review. Please try again.", { id: postToast });
+    } finally {
+      setReviewLoading(false);
     }
   };
 
@@ -482,6 +501,17 @@ export default function Home() {
                     "{reviews[currentReview].text}"
                   </p>
 
+                  {reviews[currentReview].image && (
+                    <div className="w-full h-32 rounded-xl overflow-hidden bg-gray-50 border border-gray-100">
+                      <img 
+                        src={reviews[currentReview].image} 
+                        alt="Review Attachment" 
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between pt-2">
                     <div className="flex items-center space-x-2">
                       <span className="bg-ruby/10 text-ruby text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider">
@@ -594,6 +624,7 @@ export default function Home() {
                       {['Fabric', 'Color', 'Fit', 'Comfort', 'Quality'].map((tag) => (
                         <button
                           key={tag}
+                          type="button"
                           onClick={() => setNewReview({ ...newReview, tag })}
                           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
                             newReview.tag === tag 
@@ -606,14 +637,53 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
+
+                  {/* Image Upload */}
+                  <div className="space-y-3">
+                    <label className="text-[11px] font-bold text-gray-400 uppercase tracking-widest pl-1">Add Photos</label>
+                    <div className="flex items-center space-x-3">
+                      <label className="w-20 h-20 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-200 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 hover:border-ruby/30 transition-all group">
+                        <Camera size={24} className="text-gray-400 group-hover:text-ruby" />
+                        <span className="text-[10px] text-gray-400 font-bold mt-1">Upload</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = async () => {
+                                const compressed = await compressImage(reader.result as string, 800, 800, 0.6);
+                                setNewReview({ ...newReview, image: compressed });
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+                      {newReview.image && (
+                        <div className="relative w-20 h-20 rounded-2xl overflow-hidden border border-gray-100 group">
+                          <img src={newReview.image} alt="Preview" className="w-full h-full object-cover" />
+                          <button 
+                            onClick={() => setNewReview({ ...newReview, image: null })}
+                            className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X size={16} className="text-white" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="p-6 pt-0 mt-auto">
                   <button
                     onClick={handleAddReview}
-                    className="w-full bg-ruby text-white py-4 rounded-2xl text-sm font-black uppercase tracking-[0.2em] shadow-lg shadow-ruby/20 active:scale-95 transition-all"
+                    disabled={reviewLoading}
+                    className="w-full bg-ruby text-white py-4 rounded-2xl text-sm font-black uppercase tracking-[0.2em] shadow-lg shadow-ruby/20 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100"
                   >
-                    Post Review
+                    {reviewLoading ? 'Posting...' : 'Post Review'}
                   </button>
                 </div>
               </motion.div>

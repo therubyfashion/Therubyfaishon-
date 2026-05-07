@@ -10,17 +10,19 @@ import { trackPixelEvent } from '../lib/pixel';
 import { toast } from 'sonner';
 import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
-import { ShoppingBag, Heart, Share2, ChevronRight, Truck, ShieldCheck, RefreshCw, X, Ruler, Star, MessageSquare, ThumbsUp, User, Minus, Plus, Send, ChevronDown, Maximize2 } from 'lucide-react';
+import { ShoppingBag, Heart, Share2, ChevronRight, Truck, ShieldCheck, RefreshCw, X, Ruler, Star, MessageSquare, ThumbsUp, User, Minus, Plus, Send, ChevronDown, Maximize2, Camera, Image as ImageIcon } from 'lucide-react';
 import { motion, AnimatePresence, useScroll, useTransform } from 'motion/react';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import { Navigation, Pagination, Zoom, Thumbs } from 'swiper/modules';
 import type { Swiper as SwiperType } from 'swiper';
 import { ProductDetailSkeleton } from '../components/Skeleton';
 import ProductCard from '../components/ProductCard';
+import { compressImage } from '../utils/imageUtils';
 
 function ReviewForm({ productId, onReviewAdded }: { productId: string; onReviewAdded: () => void }) {
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
+  const [image, setImage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hoverRating, setHoverRating] = useState(0);
 
@@ -36,6 +38,7 @@ function ReviewForm({ productId, onReviewAdded }: { productId: string; onReviewA
     }
 
     setIsSubmitting(true);
+    const postToast = toast.loading("Submitting review...");
     try {
       await addDoc(collection(db, 'reviews'), {
         productId,
@@ -44,16 +47,18 @@ function ReviewForm({ productId, onReviewAdded }: { productId: string; onReviewA
         userImage: auth.currentUser.photoURL || '',
         rating,
         comment,
+        image,
         createdAt: new Date().toISOString(),
         likes: 0
       });
-      toast.success("Review submitted successfully!");
+      toast.success("Review submitted successfully!", { id: postToast });
       setComment('');
       setRating(5);
+      setImage(null);
       onReviewAdded();
     } catch (error) {
       console.error("Error adding review:", error);
-      toast.error("Failed to submit review");
+      toast.error("Failed to submit review", { id: postToast });
     } finally {
       setIsSubmitting(false);
     }
@@ -91,6 +96,44 @@ function ReviewForm({ productId, onReviewAdded }: { productId: string; onReviewA
           className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-6 py-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ruby/10 h-32 resize-none"
         />
       </div>
+
+      <div className="space-y-2">
+        <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Add Photos</label>
+        <div className="flex items-center gap-4">
+          <label className="w-16 h-16 rounded-xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-50 hover:border-ruby/30 transition-all group">
+            <Camera size={20} className="text-gray-400 group-hover:text-ruby" />
+            <input 
+              type="file" 
+              accept="image/*" 
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const reader = new FileReader();
+                  reader.onloadend = async () => {
+                    const compressed = await compressImage(reader.result as string, 800, 800, 0.6);
+                    setImage(compressed);
+                  };
+                  reader.readAsDataURL(file);
+                }
+              }}
+            />
+          </label>
+          {image && (
+            <div className="relative w-16 h-16 rounded-xl overflow-hidden group">
+              <img src={image} alt="Review" className="w-full h-full object-cover" />
+              <button 
+                type="button"
+                onClick={() => setImage(null)}
+                className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <X size={16} className="text-white" />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
       <button
         type="submit"
         disabled={isSubmitting}
@@ -192,6 +235,8 @@ function SizeChartModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
 }
 
 const SWIPER_ZOOM_MODULES = [Navigation, Pagination, Zoom];
+const MAIN_SWIPER_MODULES = [Navigation, Pagination, Thumbs];
+const THUMB_SWIPER_MODULES = [Navigation, Thumbs];
 
 function FullScreenViewer({ 
   isOpen, 
@@ -281,11 +326,6 @@ export default function ProductDetail() {
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [starFilter, setStarFilter] = useState<number | null>(null);
   const [sortBy, setSortBy] = useState<'newest' | 'highest' | 'lowest'>('newest');
-
-  // Stable modules to prevent Swiper re-initialization loops
-  const mainModules = React.useMemo(() => [Navigation, Pagination, Thumbs], []);
-  const thumbModules = React.useMemo(() => [Navigation, Thumbs], []);
-  const zoomModules = React.useMemo(() => [Navigation, Pagination, Zoom], []);
 
   useEffect(() => {
     const fetchProduct = async () => {
@@ -454,7 +494,7 @@ export default function ProductDetail() {
           <div className="relative group">
             <div className="w-full aspect-[3/4] bg-gradient-to-br from-[#fef5f7] to-[#fde8ed] rounded-[24px] overflow-hidden shadow-2xl shadow-ruby/5">
               <Swiper
-                modules={mainModules}
+                modules={MAIN_SWIPER_MODULES}
                 thumbs={{ swiper: thumbsSwiper && !thumbsSwiper.destroyed ? thumbsSwiper : undefined }}
                 pagination={{ clickable: true, dynamicBullets: true }}
                 onSlideChange={(swiper) => setActiveImage(swiper.activeIndex)}
@@ -502,7 +542,7 @@ export default function ProductDetail() {
                 spaceBetween={12}
                 slidesPerView={4}
                 watchSlidesProgress={true}
-                modules={thumbModules}
+                modules={THUMB_SWIPER_MODULES}
                 className="thumbs-swiper"
               >
                 {product.images.map((img, idx) => (
@@ -738,6 +778,11 @@ export default function ProductDetail() {
                     </div>
                   </div>
                   <p className="text-[14px] text-gray-600 leading-[1.6] font-light">{review.comment}</p>
+                  {review.image && (
+                    <div className="mt-4 w-24 h-24 rounded-xl overflow-hidden bg-gray-50 border border-gray-100">
+                      <img src={review.image} alt="Review" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    </div>
+                  )}
                   <div className="flex items-center justify-between mt-4">
                     <p className="text-[12px] text-gray-400 font-medium">
                       {new Date(review.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}

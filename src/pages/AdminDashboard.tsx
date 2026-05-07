@@ -35,6 +35,7 @@ import * as XLSX from 'xlsx';
 import { cn } from '../lib/utils';
 import { generateInvoice } from '../utils/invoiceGenerator';
 import { generateShippingLabel } from '../utils/shippingLabelGenerator';
+import { compressImage } from '../utils/imageUtils';
 import Barcode from 'react-barcode';
 import LiveView from '../components/LiveView';
 import { io } from 'socket.io-client';
@@ -932,40 +933,6 @@ function base64ToBlob(base64Data: string) {
     uInt8Array[i] = raw.charCodeAt(i);
   }
   return new Blob([uInt8Array], { type: contentType });
-}
-
-async function compressImage(base64Str: string, maxWidth = 1000, maxHeight = 1000, quality = 0.6): Promise<string> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.src = base64Str;
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      let width = img.width;
-      let height = img.height;
-
-      if (width > height) {
-        if (width > maxWidth) {
-          height *= maxWidth / width;
-          width = maxWidth;
-        }
-      } else {
-        if (height > maxHeight) {
-          width *= maxHeight / height;
-          height = maxHeight;
-        }
-      }
-
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx?.drawImage(img, 0, 0, width, height);
-      // Using jpeg for better compression
-      resolve(canvas.toDataURL('image/jpeg', quality));
-    };
-    img.onerror = () => {
-      resolve(base64Str); // Fallback to original if error
-    };
-  });
 }
 
 export default function AdminDashboard() {

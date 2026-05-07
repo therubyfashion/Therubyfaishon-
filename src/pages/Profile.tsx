@@ -5,7 +5,7 @@ import { db, auth, storage } from '../firebase';
 import { signOut, updateProfile } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { toast } from 'sonner';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Bell,
   Pencil,
@@ -28,7 +28,7 @@ import {
 import { collection, doc, updateDoc } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 
-import { AnimatePresence } from 'motion/react';
+// AnimatePresence is imported from motion/react above
 
 export default function Profile() {
   const { user, profile, loading, isAdmin } = useAuth();

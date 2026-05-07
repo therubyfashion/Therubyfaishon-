@@ -79,6 +79,7 @@ export interface Review {
   userImage?: string;
   rating: number;
   comment: string;
+  image?: string | null;
   createdAt: string;
   likes: number;
 }
