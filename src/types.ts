@@ -6,7 +6,7 @@ export interface Product {
   description: string;
   price: number;
   comparePrice?: number;
-  category: Category;
+  category: string[];
   sizes: string[];
   images: string[];
   stock: number;

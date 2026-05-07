@@ -261,7 +261,7 @@ export default function Home() {
 
   const filteredProducts = activeFilter === 'All' 
     ? trendingProducts 
-    : trendingProducts.filter(p => p.category === activeFilter);
+    : trendingProducts.filter(p => Array.isArray(p.category) ? p.category.includes(activeFilter) : p.category === activeFilter);
 
   const categoryIcons: Record<string, any> = {
     'Clothes': Shirt,
@@ -409,10 +409,19 @@ export default function Home() {
                     to={`/shop?category=${cat.name}`}
                     className="flex flex-col items-center space-y-2 flex-shrink-0 group"
                   >
-                    <div className="w-[60px] h-[60px] rounded-full bg-[#f0f0f0] flex items-center justify-center group-hover:bg-ruby/10 transition-colors">
-                      <Icon size={26} className="text-[#222] group-hover:text-ruby transition-colors" />
+                    <div className="w-[60px] h-[60px] rounded-full bg-[#f0f0f0] flex items-center justify-center group-hover:bg-ruby/10 transition-colors overflow-hidden">
+                      {cat.image ? (
+                        <img 
+                          src={cat.image} 
+                          alt={cat.name} 
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" 
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <Icon size={26} className="text-[#222] group-hover:text-ruby transition-colors" />
+                      )}
                     </div>
-                    <span className="text-[12px] font-medium text-[#333]">{cat.name}</span>
+                    <span className="text-[12px] font-medium text-[#333] tracking-tight">{cat.name}</span>
                   </Link>
                 );
               })

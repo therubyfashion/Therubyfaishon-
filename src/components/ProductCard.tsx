@@ -91,7 +91,9 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
       </div>
       
       <div className="product-info p-4">
-        <p className="product-brand text-[11px] text-gray-400 font-bold uppercase tracking-widest mb-1">{product.category}</p>
+        <p className="product-brand text-[11px] text-gray-400 font-bold uppercase tracking-widest mb-1 truncate">
+          {Array.isArray(product.category) ? product.category.join(', ') : product.category}
+        </p>
         <h3 className="product-name text-sm font-medium text-[#1A2C54] mb-1.5 line-clamp-1 group-hover:text-ruby transition-colors">{product.name}</h3>
         
         <div className="product-price-row flex items-center gap-2">

@@ -36,7 +36,9 @@ export default function Search() {
     } else {
       const filtered = products.filter(product => 
         product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (Array.isArray(product.category) 
+          ? product.category.some(c => c.toLowerCase().includes(searchTerm.toLowerCase()))
+          : product.category.toLowerCase().includes(searchTerm.toLowerCase())) ||
         product.description.toLowerCase().includes(searchTerm.toLowerCase())
       );
       setFilteredProducts(filtered);
@@ -119,7 +121,9 @@ export default function Search() {
                       </div>
                       <div className="flex-grow min-w-0">
                         <h3 className="text-sm font-bold text-[#1A2C54] truncate">{product.name}</h3>
-                        <p className="text-xs text-gray-400 font-medium">{product.category}</p>
+                        <p className="text-xs text-gray-400 font-medium">
+                          {Array.isArray(product.category) ? product.category.join(', ') : product.category}
+                        </p>
                         <p className="text-sm font-bold text-ruby mt-1">₹{product.price.toLocaleString()}</p>
                       </div>
                       <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-ruby group-hover:text-white transition-all">

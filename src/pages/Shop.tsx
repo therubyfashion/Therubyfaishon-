@@ -29,7 +29,7 @@ export default function Shop() {
       setLoading(true);
       try {
         const productsQuery = activeCategory !== 'All' 
-          ? query(collection(db, 'products'), where('category', '==', activeCategory), limit(24))
+          ? query(collection(db, 'products'), where('category', 'array-contains', activeCategory), limit(24))
           : query(collection(db, 'products'), limit(24));
 
         const [productsSnap, categoriesSnap] = await Promise.all([

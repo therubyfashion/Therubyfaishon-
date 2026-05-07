@@ -524,25 +524,57 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Category</label>
-                  <select 
-                    value={formData.category || 'Women'}
-                    onChange={e => setFormData({...formData, category: e.target.value})}
-                    className="w-full border-b border-gray-100 py-3 text-sm font-bold text-[#1A2C54] focus:outline-none focus:border-ruby transition-colors bg-transparent appearance-none"
-                  >
+                <div className="space-y-3">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Categories (Select Multiple)</label>
+                  <div className="grid grid-cols-2 gap-2 max-h-[150px] overflow-y-auto pr-2 custom-scrollbar">
                     {categories.length > 0 ? (
                       categories.map((cat: any) => (
-                        <option key={cat.id} value={cat.name}>{cat.name}</option>
+                        <button
+                          key={cat.id}
+                          type="button"
+                          onClick={() => {
+                            const current = formData.category || [];
+                            const updated = current.includes(cat.name)
+                              ? current.filter((c: string) => c !== cat.name)
+                              : [...current, cat.name];
+                            setFormData({ ...formData, category: updated });
+                          }}
+                          className={cn(
+                            "px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest border transition-all flex items-center justify-between text-left",
+                            formData.category?.includes(cat.name)
+                              ? "bg-ruby/5 border-ruby text-ruby shadow-sm"
+                              : "bg-white border-gray-100 text-gray-400 hover:border-gray-200"
+                          )}
+                        >
+                          <span className="truncate">{cat.name}</span>
+                          {formData.category?.includes(cat.name) && <Check size={12} className="shrink-0 ml-2" />}
+                        </button>
                       ))
                     ) : (
-                      <>
-                        <option value="Women">Women</option>
-                        <option value="Men">Men</option>
-                        <option value="New Arrivals">New Arrivals</option>
-                      </>
+                      ['Women', 'Men', 'New Arrivals'].map((name) => (
+                        <button
+                          key={name}
+                          type="button"
+                          onClick={() => {
+                            const current = formData.category || [];
+                            const updated = current.includes(name)
+                              ? current.filter((c: string) => c !== name)
+                              : [...current, name];
+                            setFormData({ ...formData, category: updated });
+                          }}
+                          className={cn(
+                            "px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest border transition-all flex items-center justify-between text-left",
+                            formData.category?.includes(name)
+                              ? "bg-ruby/5 border-ruby text-ruby shadow-sm"
+                              : "bg-white border-gray-100 text-gray-400 hover:border-gray-200"
+                          )}
+                        >
+                          <span className="truncate">{name}</span>
+                          {formData.category?.includes(name) && <Check size={12} className="shrink-0 ml-2" />}
+                        </button>
+                      ))
                     )}
-                  </select>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -2087,7 +2119,7 @@ export default function AdminDashboard() {
     name: string;
     description: string;
     price: number;
-    category: Category;
+    category: string[];
     sizes: string[];
     images: string[];
     stock: number;
@@ -2106,7 +2138,7 @@ export default function AdminDashboard() {
     name: '',
     description: '',
     price: 0,
-    category: 'Women' as Category,
+    category: [],
     sizes: ['S', 'M', 'L', 'XL'],
     images: [''],
     stock: 10,
@@ -2547,8 +2579,8 @@ export default function AdminDashboard() {
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.name || formData.price < 0 || !formData.category) {
-      toast.error("Name, Price, and Category are required!");
+    if (!formData.name || formData.price < 0 || !formData.category || (Array.isArray(formData.category) && formData.category.length === 0)) {
+      toast.error("Name, Price, and at least one Category are required!");
       return;
     }
 
@@ -2628,7 +2660,7 @@ export default function AdminDashboard() {
         name: '', 
         description: '', 
         price: 0, 
-        category: 'Women', 
+        category: [], 
         sizes: sizes.length > 0 ? sizes.map((s: any) => s.name) : ['S', 'M', 'L', 'XL'], 
         images: [''], 
         stock: 10,
@@ -4073,7 +4105,7 @@ export default function AdminDashboard() {
                             )}
                             <span className="font-bold text-gray-800">{p.name}</span>
                           </td>
-                          <td className="py-4 px-8 text-gray-500">{p.category}</td>
+                          <td className="py-4 px-8 text-gray-500">{Array.isArray(p.category) ? p.category.join(', ') : p.category}</td>
                           <td className="py-4 px-8 font-bold text-gray-800">₹{p.price.toFixed(2)}</td>
                           <td className="py-4 px-8">
                             <span className={`px-2 py-1 rounded-md text-[10px] font-bold ${p.stock < 5 ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
@@ -4088,7 +4120,7 @@ export default function AdminDashboard() {
                                   name: p.name,
                                   description: p.description,
                                   price: p.price,
-                                  category: p.category,
+                                  category: Array.isArray(p.category) ? p.category : (p.category ? [p.category] : []),
                                   sizes: p.sizes,
                                   images: p.images,
                                   stock: p.stock,
@@ -4139,7 +4171,9 @@ export default function AdminDashboard() {
                     <div className="flex-grow min-w-0">
                       <h3 className="text-[13px] font-[800] text-gray-900 leading-tight truncate">{p.name}</h3>
                       <div className="flex items-center gap-2 mt-1">
-                        <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">{p.category}</p>
+                        <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest leading-tight truncate">
+                          {Array.isArray(p.category) ? p.category.join(', ') : p.category}
+                        </p>
                         <span className="text-gray-300">•</span>
                         <span className={cn(
                           "text-[9px] font-bold uppercase",
@@ -4158,7 +4192,7 @@ export default function AdminDashboard() {
                                 name: p.name,
                                 description: p.description,
                                 price: p.price,
-                                category: p.category,
+                                category: Array.isArray(p.category) ? p.category : (p.category ? [p.category] : []),
                                 sizes: p.sizes,
                                 images: p.images,
                                 stock: p.stock,
