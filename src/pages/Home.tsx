@@ -4,9 +4,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   ShoppingBag, ArrowRight, Star, ShieldCheck, Truck, RotateCcw, 
   Search, Bell, Heart, User, Filter, ChevronRight, Package,
-  Shirt, Smartphone, Watch, Laptop, ShoppingCart, Gem, Utensils, ToyBrick
+  Shirt, Smartphone, Watch, Laptop, ShoppingCart, Gem, Utensils, ToyBrick,
+  Plus, ThumbsUp, ThumbsDown, X
 } from 'lucide-react';
-import { collection, getDocs, query, where, limit, orderBy, addDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, limit, orderBy, addDoc, doc, updateDoc, increment } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Product, Category } from '../types';
 import ProductCard from '../components/ProductCard';
@@ -17,7 +18,7 @@ import { Capacitor } from '@capacitor/core';
 import { useNotifications } from '../contexts/NotificationContext';
 
 export default function Home() {
-  const { unreadCount } = useNotifications();
+  const [unreadCount] = useState(0); // Notifications context fallback if needed
   const [trendingProducts, setTrendingProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
@@ -26,60 +27,54 @@ export default function Home() {
   const [currentReview, setCurrentReview] = useState(0);
   const [currentBanner, setCurrentBanner] = useState(0);
   const [email, setEmail] = useState('');
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [newReview, setNewReview] = useState({ rating: 5, text: '', tag: 'Fabric' });
+  const [reviews, setReviews] = useState<any[]>([]);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    // Scroll to top
-    window.scrollTo(0, 0);
-  }, []);
-
-  const reviews = [
+  const fallbackReviews = [
     {
-      id: 1,
+      id: "f1",
       name: "Priya R.",
       initials: "PR",
       color: "#5a4fcf",
       rating: 5,
       text: "The fabric quality is absolutely amazing. The cotton feels so soft and breathable — wore it all day and stayed comfortable throughout!",
-      tag: "Fabric quality"
+      tag: "Fabric quality",
+      date: "May 2, 2024",
+      likes: 12,
+      dislikes: 0
     },
     {
-      id: 2,
+      id: "f2",
       name: "Arjun M.",
       initials: "AM",
       color: "#d85a30",
       rating: 4,
       text: "Doesn't fade after multiple washes. The stitching is solid and the fabric holds shape well. Great durability for the price!",
-      tag: "Durability"
+      tag: "Durability",
+      date: "Apr 28, 2024",
+      likes: 8,
+      dislikes: 1
     },
     {
-      id: 3,
+      id: "f3",
       name: "Sneha K.",
       initials: "SK",
       color: "#0f6e56",
       rating: 5,
       text: "Loved the premium linen blend. Lightweight yet sturdy — perfect for Indian summers. Will definitely order more from this store!",
-      tag: "Summer comfort"
-    },
-    {
-      id: 4,
-      name: "Rahul V.",
-      initials: "RV",
-      color: "#993c1d",
-      rating: 4,
-      text: "The fabric feels genuinely premium. No synthetic smell, drapes beautifully. You can tell it's good quality the moment you touch it.",
-      tag: "Premium feel"
-    },
-    {
-      id: 5,
-      name: "Neha K.",
-      initials: "NK",
-      color: "#185fa5",
-      rating: 5,
-      text: "Skeptical about buying online but the fabric exceeded expectations. Texture is smooth, colors are vibrant and didn't bleed at all!",
-      tag: "Color retention"
+      tag: "Summer comfort",
+      date: "Apr 25, 2024",
+      likes: 15,
+      dislikes: 0
     }
   ];
+
+  useEffect(() => {
+    // Scroll to top
+    window.scrollTo(0, 0);
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -91,32 +86,44 @@ export default function Home() {
           limit(8)
         );
 
-        const [productsSnap, categoriesSnap, bannersSnap] = await Promise.all([
+        const reviewsQuery = query(
+          collection(db, 'fabric_reviews'),
+          orderBy('createdAt', 'desc'),
+          limit(10)
+        );
+
+        const [productsSnap, categoriesSnap, bannersSnap, reviewsSnap] = await Promise.all([
           getDocs(productsQuery),
           getDocs(collection(db, 'categories')),
-          getDocs(collection(db, 'banners'))
+          getDocs(collection(db, 'banners')),
+          getDocs(reviewsQuery)
         ]);
 
         // Handle products with fallback
         let productsData = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
         if (productsData.length === 0) {
-          const fallbackQuery = query(collection(db, 'products'), limit(8));
-          const fallbackSnap = await getDocs(fallbackQuery);
-          productsData = fallbackSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+          const fallbackProductsQuery = query(collection(db, 'products'), limit(8));
+          const fallbackProductsSnap = await getDocs(fallbackProductsQuery);
+          productsData = fallbackProductsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
         }
         setTrendingProducts(productsData);
         setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         
         const bannerData = bannersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        // Be very permissive with banners - show if active is true or not explicitly false
         const activeBanners = bannerData.filter((b: any) => b.active !== false && b.active !== 'false');
         setBanners(activeBanners);
+
+        // Handle reviews with fallback
+        const firestoreReviews = reviewsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setReviews(firestoreReviews.length > 0 ? firestoreReviews : fallbackReviews);
+
       } catch (error: any) {
         if (error.code === 'resource-exhausted') {
           console.warn("Home Data: Firestore Quota reached. Content will load after reset.");
         } else {
           console.error("Error fetching home data:", error);
         }
+        setReviews(fallbackReviews);
       } finally {
         setLoading(false);
       }
@@ -125,11 +132,78 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (reviews.length <= 1) return;
     const timer = setInterval(() => {
       setCurrentReview((prev) => (prev + 1) % reviews.length);
-    }, 3000);
+    }, 5000);
     return () => clearInterval(timer);
   }, [reviews.length]);
+
+  const handleAddReview = async () => {
+    if (!auth.currentUser) {
+      toast.error("Please login to share your experience", {
+        action: { label: "Login", onClick: () => navigate('/login') }
+      });
+      return;
+    }
+
+    if (!newReview.text.trim()) {
+      toast.error("Please write something about your experience");
+      return;
+    }
+
+    try {
+      const colors = ['#5a4fcf', '#d85a30', '#0f6e56', '#993c1d', '#185fa5'];
+      const randomColor = colors[Math.floor(Math.random() * colors.length)];
+      
+      const reviewData = {
+        name: auth.currentUser.displayName || 'Anonymous User',
+        initials: (auth.currentUser.displayName || 'U').charAt(0).toUpperCase(),
+        color: randomColor,
+        rating: newReview.rating,
+        text: newReview.text,
+        tag: newReview.tag || 'Fabric',
+        date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        likes: 0,
+        dislikes: 0,
+        userId: auth.currentUser.uid,
+        createdAt: new Date().toISOString()
+      };
+
+      const docRef = await addDoc(collection(db, 'fabric_reviews'), reviewData);
+      
+      setReviews([{ id: docRef.id, ...reviewData }, ...reviews.filter(r => !r.id.startsWith('f'))]);
+      setIsReviewModalOpen(false);
+      setNewReview({ rating: 5, text: '', tag: 'Fabric' });
+      toast.success("Thank you for sharing your experience! ✨");
+    } catch (error) {
+      console.error("Error adding review:", error);
+      toast.error("Failed to post review. Please try again.");
+    }
+  };
+
+  const handleLike = async (id: string, isLike: boolean) => {
+    // Optimistic UI update
+    setReviews(prev => prev.map(r => {
+      if (r.id === id) {
+        return {
+          ...r,
+          likes: isLike ? (r.likes || 0) + 1 : (r.likes || 0),
+          dislikes: !isLike ? (r.dislikes || 0) + 1 : (r.dislikes || 0)
+        };
+      }
+      return r;
+    }));
+    
+    try {
+      const reviewRef = doc(db, 'fabric_reviews', id);
+      await updateDoc(reviewRef, {
+        [isLike ? 'likes' : 'dislikes']: increment(1)
+      });
+    } catch (error) {
+      console.error("Error updating reaction:", error);
+    }
+  };
 
   useEffect(() => {
     if (banners.length <= 1) return;
@@ -355,59 +429,197 @@ export default function Home() {
 
         {/* Testimonials */}
         <div className="space-y-4">
-          <h3 className="text-[17px] font-bold text-[#111]">What customers say about our fabric</h3>
-          <div className="relative overflow-hidden rounded-2xl bg-[#f8f8f8] p-5 min-h-[160px]">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={currentReview}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.5 }}
-                className="space-y-4"
-              >
-                <div className="flex items-center space-x-3">
-                  <div 
-                    className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm"
-                    style={{ backgroundColor: reviews[currentReview].color }}
-                  >
-                    {reviews[currentReview].initials}
+          <div className="flex items-center justify-between">
+            <h3 className="text-[17px] font-bold text-[#111] max-w-[70%]">What customers say about our fabric</h3>
+            <button 
+              onClick={() => setIsReviewModalOpen(true)}
+              className="flex items-center space-x-1.5 bg-white border border-gray-200 px-3 py-1.5 rounded-full text-[12px] font-bold text-ruby hover:bg-ruby/5 active:scale-95 transition-all shadow-sm"
+            >
+              <Plus size={14} />
+              <span>Add Review</span>
+            </button>
+          </div>
+          
+          <div className="relative overflow-hidden rounded-2xl bg-white border border-gray-100 p-5 min-h-[180px] shadow-sm">
+            {reviews.length > 0 ? (
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={currentReview}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.4 }}
+                  className="space-y-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div 
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm"
+                        style={{ backgroundColor: reviews[currentReview].color || '#111' }}
+                      >
+                        {reviews[currentReview].initials}
+                      </div>
+                      <div>
+                        <p className="text-[13px] font-semibold text-[#111]">{reviews[currentReview].name}</p>
+                        <div className="flex text-yellow-400">
+                          {[...Array(5)].map((_, i) => (
+                            <Star 
+                              key={i} 
+                              size={12} 
+                              fill={i < reviews[currentReview].rating ? "currentColor" : "none"} 
+                              className={i < reviews[currentReview].rating ? "" : "text-gray-300"}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="text-[11px] text-gray-400 font-medium">
+                      {reviews[currentReview].date || 'Just now'}
+                    </span>
                   </div>
-                  <div>
-                    <p className="text-[13px] font-semibold text-[#111]">{reviews[currentReview].name}</p>
-                    <div className="flex text-yellow-400">
-                      {[...Array(5)].map((_, i) => (
-                        <Star 
-                          key={i} 
-                          size={12} 
-                          fill={i < reviews[currentReview].rating ? "currentColor" : "none"} 
-                          className={i < reviews[currentReview].rating ? "" : "text-gray-300"}
-                        />
+
+                  <p className="text-[13px] text-gray-600 leading-relaxed italic">
+                    "{reviews[currentReview].text}"
+                  </p>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <div className="flex items-center space-x-2">
+                      <span className="bg-ruby/10 text-ruby text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider">
+                        {reviews[currentReview].tag}
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center space-x-4">
+                      <button 
+                        onClick={() => handleLike(reviews[currentReview].id, true)}
+                        className="flex items-center space-x-1 text-gray-400 hover:text-green-500 transition-colors"
+                      >
+                        <ThumbsUp size={14} />
+                        <span className="text-[11px] font-bold">{reviews[currentReview].likes || 0}</span>
+                      </button>
+                      <button 
+                        onClick={() => handleLike(reviews[currentReview].id, false)}
+                        className="flex items-center space-x-1 text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        <ThumbsDown size={14} />
+                        <span className="text-[11px] font-bold">{reviews[currentReview].dislikes || 0}</span>
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              </AnimatePresence>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-[140px] text-gray-400 space-y-2">
+                <Star size={24} className="opacity-20" />
+                <p className="text-sm italic">Be the first to share your experience!</p>
+              </div>
+            )}
+          </div>
+
+          {reviews.length > 1 && (
+            <div className="flex justify-center space-x-1.5">
+              {reviews.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setCurrentReview(i)}
+                  className={`h-1.5 rounded-full transition-all ${
+                    currentReview === i ? 'w-5 bg-ruby' : 'w-1.5 bg-gray-300'
+                  }`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Review Modal */}
+        <AnimatePresence>
+          {isReviewModalOpen && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsReviewModalOpen(false)}
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="bg-white w-full max-w-sm rounded-[2rem] overflow-hidden relative z-10 flex flex-col shadow-2xl"
+              >
+                <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-white sticky top-0">
+                  <h3 className="font-bold text-lg text-[#111]">Share Experience</h3>
+                  <button onClick={() => setIsReviewModalOpen(false)} className="bg-gray-100 p-2 rounded-full hover:bg-gray-200 transition-colors">
+                    <X size={18} className="text-gray-600" />
+                  </button>
+                </div>
+                
+                <div className="p-6 space-y-6">
+                  {/* Rating Selector */}
+                  <div className="space-y-2 text-center">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Rate the Fabric</p>
+                    <div className="flex justify-center space-x-2">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          onClick={() => setNewReview({ ...newReview, rating: star })}
+                          className={`p-1 transition-all ${star <= newReview.rating ? 'scale-110' : 'opacity-30 grayscale'}`}
+                        >
+                          <Star 
+                            size={32} 
+                            fill={star <= newReview.rating ? "#ef4444" : "none"} 
+                            className={star <= newReview.rating ? "text-ruby" : "text-gray-400"} 
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Text Input */}
+                  <div className="space-y-3">
+                    <label className="text-[11px] font-bold text-gray-400 uppercase tracking-widest pl-1">Your Thoughts</label>
+                    <textarea 
+                      placeholder="Tell us about the fabric quality, color, or fit..."
+                      value={newReview.text}
+                      onChange={(e) => setNewReview({ ...newReview, text: e.target.value })}
+                      className="w-full bg-gray-50 border border-gray-100 rounded-2xl p-4 text-sm min-h-[120px] focus:outline-none focus:ring-2 focus:ring-ruby/30 transition-all placeholder:text-gray-400 resize-none"
+                    />
+                  </div>
+
+                  {/* Tag Selection */}
+                  <div className="space-y-3">
+                    <label className="text-[11px] font-bold text-gray-400 uppercase tracking-widest pl-1">Highlight</label>
+                    <div className="flex flex-wrap gap-2">
+                      {['Fabric', 'Color', 'Fit', 'Comfort', 'Quality'].map((tag) => (
+                        <button
+                          key={tag}
+                          onClick={() => setNewReview({ ...newReview, tag })}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                            newReview.tag === tag 
+                              ? 'bg-ruby text-white' 
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          {tag}
+                        </button>
                       ))}
                     </div>
                   </div>
                 </div>
-                <p className="text-[13px] text-gray-600 leading-relaxed italic">
-                  "{reviews[currentReview].text}"
-                </p>
-                <span className="inline-block bg-[#ebe9ff] text-[#5a4fcf] text-[11px] font-semibold px-3 py-1 rounded-full">
-                  {reviews[currentReview].tag}
-                </span>
+
+                <div className="p-6 pt-0 mt-auto">
+                  <button
+                    onClick={handleAddReview}
+                    className="w-full bg-ruby text-white py-4 rounded-2xl text-sm font-black uppercase tracking-[0.2em] shadow-lg shadow-ruby/20 active:scale-95 transition-all"
+                  >
+                    Post Review
+                  </button>
+                </div>
               </motion.div>
-            </AnimatePresence>
-          </div>
-          <div className="flex justify-center space-x-1.5">
-            {reviews.map((_, i) => (
-              <button
-                key={i}
-                onClick={() => setCurrentReview(i)}
-                className={`h-2 rounded-full transition-all ${
-                  currentReview === i ? 'w-5 bg-[#111]' : 'w-2 bg-gray-300'
-                }`}
-              />
-            ))}
-          </div>
-        </div>
+            </div>
+          )}
+        </AnimatePresence>
 
         {/* Join the Ruby Circle */}
         <div className="bg-[#111] rounded-[2.5rem] p-8 space-y-6 relative overflow-hidden">

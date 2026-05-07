@@ -191,6 +191,8 @@ function SizeChartModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
   );
 }
 
+const SWIPER_ZOOM_MODULES = [Navigation, Pagination, Zoom];
+
 function FullScreenViewer({ 
   isOpen, 
   onClose, 
@@ -239,7 +241,7 @@ function FullScreenViewer({
         {/* Swiper */}
         <div className="flex-grow flex items-center justify-center">
           <Swiper
-            modules={[Navigation, Pagination, Zoom]}
+            modules={SWIPER_ZOOM_MODULES}
             navigation
             pagination={{ clickable: true, dynamicBullets: true }}
             zoom={true}
@@ -279,6 +281,11 @@ export default function ProductDetail() {
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [starFilter, setStarFilter] = useState<number | null>(null);
   const [sortBy, setSortBy] = useState<'newest' | 'highest' | 'lowest'>('newest');
+
+  // Stable modules to prevent Swiper re-initialization loops
+  const mainModules = React.useMemo(() => [Navigation, Pagination, Thumbs], []);
+  const thumbModules = React.useMemo(() => [Navigation, Thumbs], []);
+  const zoomModules = React.useMemo(() => [Navigation, Pagination, Zoom], []);
 
   useEffect(() => {
     const fetchProduct = async () => {
@@ -447,8 +454,8 @@ export default function ProductDetail() {
           <div className="relative group">
             <div className="w-full aspect-[3/4] bg-gradient-to-br from-[#fef5f7] to-[#fde8ed] rounded-[24px] overflow-hidden shadow-2xl shadow-ruby/5">
               <Swiper
-                modules={[Navigation, Pagination, Thumbs]}
-                thumbs={{ swiper: thumbsSwiper && !thumbsSwiper.destroyed ? thumbsSwiper : null }}
+                modules={mainModules}
+                thumbs={{ swiper: thumbsSwiper && !thumbsSwiper.destroyed ? thumbsSwiper : undefined }}
                 pagination={{ clickable: true, dynamicBullets: true }}
                 onSlideChange={(swiper) => setActiveImage(swiper.activeIndex)}
                 className="w-full h-full"
@@ -495,7 +502,7 @@ export default function ProductDetail() {
                 spaceBetween={12}
                 slidesPerView={4}
                 watchSlidesProgress={true}
-                modules={[Navigation, Thumbs]}
+                modules={thumbModules}
                 className="thumbs-swiper"
               >
                 {product.images.map((img, idx) => (

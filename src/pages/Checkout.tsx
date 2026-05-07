@@ -159,8 +159,8 @@ export default function Checkout() {
 
   const shippingOptions = [
     { id: 'standard', label: 'Free Delivery', time: 'Guaranteed in 25 days', price: 'FREE', icon: '🚚', cost: 0 },
-    { id: 'express', label: '7 Day Delivery', time: 'Guaranteed in 7 days', price: '₹120', icon: '⚡', cost: 120 },
-    { id: 'economy', label: '15 Day Delivery', time: 'Guaranteed in 15 days', price: '₹50', icon: '📦', cost: 50 },
+    { id: 'economy', label: '18 Day Delivery', time: 'Guaranteed in 18 days', price: '₹50', icon: '📦', cost: 50 },
+    { id: 'express', label: '10 Day Delivery', time: 'Guaranteed in 10 days', price: '₹120', icon: '⚡', cost: 120 },
   ];
 
   const selectedAddrObj = addresses.find(a => a.id === selectedAddress);
@@ -494,7 +494,7 @@ export default function Checkout() {
           navigate('/order-success', {
             state: {
               ...finalOrderData,
-              deliveryDate: `Apr ${new Date().getDate() + (selectedShipping === 'standard' ? 25 : selectedShipping === 'express' ? 7 : 15)}, 2025`
+              deliveryDate: `${new Date().toLocaleDateString('en-US', { month: 'short' })} ${new Date().getDate() + (selectedShipping === 'standard' ? 25 : selectedShipping === 'express' ? 10 : 18)}, ${new Date().getFullYear()}`
             }
           });
           toast.success('Order placed successfully!');

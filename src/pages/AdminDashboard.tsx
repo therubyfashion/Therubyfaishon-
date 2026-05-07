@@ -1011,6 +1011,21 @@ export default function AdminDashboard() {
   const [bannerForm, setBannerForm] = useState({ image: '', link: '', active: true });
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteCategoryModalOpen, setDeleteCategoryModalOpen] = useState(false);
+  const [deletePromotionModalOpen, setDeletePromotionModalOpen] = useState(false);
+  const [genericDeleteModal, setGenericDeleteModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
+  const [promotionToDelete, setPromotionToDelete] = useState<string | null>(null);
+  const [categoryToDelete, setCategoryToDelete] = useState<string | null>(null);
   const [productToDelete, setProductToDelete] = useState<string | null>(null);
   const [orderToDelete, setOrderToDelete] = useState<string | null>(null);
   const [deleteOrderModalOpen, setDeleteOrderModalOpen] = useState(false);
@@ -2242,7 +2257,7 @@ export default function AdminDashboard() {
       setLiveSessions(sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setPromotions(promotionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     } catch (error) {
-      console.error("Error fetching dashboard data:", error);
+      handleFirestoreError(error, OperationType.LIST, 'Multiple Collections (Bulk Fetch)');
     } finally {
       setLoading(false);
     }
@@ -2701,12 +2716,17 @@ export default function AdminDashboard() {
 
   const confirmDeleteProduct = async () => {
     if (!productToDelete) return;
+    console.log("Attempting to delete product:", productToDelete);
+    const deleteToast = toast.loading("Deleting product...");
     try {
       await deleteDoc(doc(db, 'products', productToDelete));
-      toast.success("Product deleted");
+      console.log("Delete successful for:", productToDelete);
+      toast.success("Product deleted", { id: deleteToast });
       fetchDashboardData();
     } catch (error) {
-      toast.error("Failed to delete product");
+      console.error("Delete error for ID:", productToDelete, error);
+      handleFirestoreError(error, OperationType.DELETE, `products/${productToDelete}`);
+      toast.error("Failed to delete product", { id: deleteToast });
     } finally {
       setDeleteModalOpen(false);
       setProductToDelete(null);
@@ -2925,13 +2945,21 @@ export default function AdminDashboard() {
   };
 
   const handleDeletePromotion = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this offer? This cannot be undone!")) return;
+    setPromotionToDelete(id);
+    setDeletePromotionModalOpen(true);
+  };
+
+  const confirmDeletePromotion = async () => {
+    if (!promotionToDelete) return;
     try {
-      await deleteDoc(doc(db, 'promotions', id));
+      await deleteDoc(doc(db, 'promotions', promotionToDelete));
       toast.success("Offer deleted permanently");
       fetchDashboardData();
     } catch (error) {
       toast.error("Failed to delete promotion");
+    } finally {
+      setDeletePromotionModalOpen(false);
+      setPromotionToDelete(null);
     }
   };
 
@@ -2943,6 +2971,9 @@ export default function AdminDashboard() {
   const handleSaveCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!categoryForm.name) return;
+    
+    const saveToast = toast.loading("Adding category...");
+    setLoading(true);
     try {
       const slug = categoryForm.name.toLowerCase().replace(/ /g, '-');
       await addDoc(collection(db, 'categories'), { 
@@ -2950,22 +2981,45 @@ export default function AdminDashboard() {
         slug, 
         createdAt: new Date().toISOString() 
       });
-      toast.success('Category added');
+      toast.success('Category added', { id: saveToast });
       setIsCategoryModalOpen(false);
       fetchDashboardData();
-    } catch (error) {
-      toast.error('Failed to add category');
+    } catch (error: any) {
+      console.error("Save category error:", error);
+      handleFirestoreError(error, OperationType.WRITE, 'categories');
+      
+      let errorMsg = 'Failed to add category';
+      if (error.code === 'permission-denied') {
+        errorMsg = 'Permission denied. Only admins can add categories.';
+      } else if (error.message && error.message.includes('too large')) {
+        errorMsg = 'Category image is too large. Please use a smaller image.';
+      }
+      
+      toast.error(errorMsg, { id: saveToast });
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleDeleteCategory = async (id: string) => {
-    if (!window.confirm('Delete this category?')) return;
+    setCategoryToDelete(id);
+    setDeleteCategoryModalOpen(true);
+  };
+
+  const confirmDeleteCategory = async () => {
+    if (!categoryToDelete) return;
+    const deleteToast = toast.loading("Deleting category...");
     try {
-      await deleteDoc(doc(db, 'categories', id));
-      toast.success('Category deleted');
+      await deleteDoc(doc(db, 'categories', categoryToDelete));
+      toast.success('Category deleted', { id: deleteToast });
       fetchDashboardData();
     } catch (error) {
-      toast.error('Failed to delete category');
+      console.error("Delete category error:", error);
+      handleFirestoreError(error, OperationType.DELETE, `categories/${categoryToDelete}`);
+      toast.error('Failed to delete category', { id: deleteToast });
+    } finally {
+      setDeleteCategoryModalOpen(false);
+      setCategoryToDelete(null);
     }
   };
 
@@ -2991,14 +3045,22 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteColor = async (id: string) => {
-    if (!window.confirm('Delete this color?')) return;
-    try {
-      await deleteDoc(doc(db, 'colors', id));
-      toast.success('Color deleted');
-      fetchDashboardData();
-    } catch (error) {
-      toast.error('Failed to delete color');
-    }
+    setGenericDeleteModal({
+      isOpen: true,
+      title: 'Delete Color',
+      message: 'Are you sure you want to delete this color option?',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'colors', id));
+          toast.success('Color deleted');
+          fetchDashboardData();
+        } catch (error) {
+          toast.error('Failed to delete color');
+        } finally {
+          setGenericDeleteModal(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
   };
 
   const handleAddSize = () => {
@@ -3023,14 +3085,22 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteSize = async (id: string) => {
-    if (!window.confirm('Delete this size?')) return;
-    try {
-      await deleteDoc(doc(db, 'sizes', id));
-      toast.success('Size deleted');
-      fetchDashboardData();
-    } catch (error) {
-      toast.error('Failed to delete size');
-    }
+    setGenericDeleteModal({
+      isOpen: true,
+      title: 'Delete Size',
+      message: 'Are you sure you want to delete this size option?',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'sizes', id));
+          toast.success('Size deleted');
+          fetchDashboardData();
+        } catch (error) {
+          toast.error('Failed to delete size');
+        } finally {
+          setGenericDeleteModal(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
   };
 
   const handleAddCoupon = () => {
@@ -3108,14 +3178,22 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteCoupon = async (id: string) => {
-    if (!window.confirm('Delete this coupon?')) return;
-    try {
-      await deleteDoc(doc(db, 'coupons', id));
-      toast.success('Coupon deleted');
-      fetchDashboardData();
-    } catch (error) {
-      toast.error('Failed to delete coupon');
-    }
+    setGenericDeleteModal({
+      isOpen: true,
+      title: 'Delete Coupon',
+      message: 'Are you sure you want to delete this discount coupon?',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'coupons', id));
+          toast.success('Coupon deleted');
+          fetchDashboardData();
+        } catch (error) {
+          toast.error('Failed to delete coupon');
+        } finally {
+          setGenericDeleteModal(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
   };
 
   const handleDeleteCustomer = async () => {
@@ -3215,14 +3293,22 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteBanner = async (id: string) => {
-    if (!window.confirm('Delete this banner?')) return;
-    try {
-      await deleteDoc(doc(db, 'banners', id));
-      toast.success('Banner deleted');
-      fetchDashboardData();
-    } catch (error) {
-      toast.error('Failed to delete banner');
-    }
+    setGenericDeleteModal({
+      isOpen: true,
+      title: 'Delete Banner',
+      message: 'Are you sure you want to delete this banner?',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'banners', id));
+          toast.success('Banner deleted');
+          fetchDashboardData();
+        } catch (error) {
+          toast.error('Failed to delete banner');
+        } finally {
+          setGenericDeleteModal(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
   };
 
   const handleToggleBanner = async (id: string, currentStatus: boolean) => {
@@ -4057,11 +4143,7 @@ export default function AdminDashboard() {
                               <Edit2 size={16} />
                             </button>
                             <button 
-                              onClick={() => {
-                                if (confirm('Are you sure you want to delete this product?')) {
-                                  handleDeleteProduct(p.id);
-                                }
-                              }}
+                              onClick={() => handleDeleteProduct(p.id)}
                               className="p-2 text-gray-400 hover:text-ruby transition-colors"
                             >
                               <Trash2 size={16} />
@@ -4131,11 +4213,7 @@ export default function AdminDashboard() {
                             <Edit2 size={14} />
                           </button>
                           <button 
-                            onClick={() => {
-                              if (confirm('Are you sure you want to delete this product?')) {
-                                handleDeleteProduct(p.id);
-                              }
-                            }}
+                            onClick={() => handleDeleteProduct(p.id)}
                             className="w-8 h-8 bg-gray-50 rounded-lg flex items-center justify-center text-gray-500 hover:text-ruby transition-colors"
                           >
                             <Trash2 size={14} />
@@ -8189,8 +8267,9 @@ export default function AdminDashboard() {
                             return;
                           }
                           const reader = new FileReader();
-                          reader.onloadend = () => {
-                            setCategoryForm({...categoryForm, image: reader.result as string});
+                          reader.onloadend = async () => {
+                            const compressed = await compressImage(reader.result as string, 400, 400, 0.6);
+                            setCategoryForm({...categoryForm, image: compressed});
                           };
                           reader.readAsDataURL(file);
                         }
@@ -8199,8 +8278,12 @@ export default function AdminDashboard() {
                     />
                   </div>
                 </div>
-                <button type="submit" className="w-full py-4 bg-ruby text-white rounded-2xl text-sm font-bold uppercase tracking-widest shadow-lg shadow-ruby/20 hover:bg-ruby-dark transition-all active:scale-95">
-                  Save Category
+                <button 
+                  type="submit" 
+                  disabled={loading}
+                  className="w-full py-4 bg-ruby text-white rounded-2xl text-sm font-bold uppercase tracking-widest shadow-lg shadow-ruby/20 hover:bg-ruby-dark transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {loading ? 'Saving...' : 'Save Category'}
                 </button>
               </form>
             </motion.div>
@@ -8466,6 +8549,30 @@ export default function AdminDashboard() {
         onConfirm={confirmDeleteProduct}
         title="Delete Product"
         message="Are you sure you want to delete this product? This action cannot be undone."
+      />
+
+      <DeleteConfirmationModal 
+        isOpen={deleteCategoryModalOpen}
+        onCancel={() => setDeleteCategoryModalOpen(false)}
+        onConfirm={confirmDeleteCategory}
+        title="Delete Category"
+        message="Are you sure you want to delete this category? This will not delete products in this category but will remove the category organization. This action cannot be undone."
+      />
+
+      <DeleteConfirmationModal 
+        isOpen={deletePromotionModalOpen}
+        onCancel={() => setDeletePromotionModalOpen(false)}
+        onConfirm={confirmDeletePromotion}
+        title="Delete Offer"
+        message="Are you sure you want to delete this promotional offer? This action cannot be undone."
+      />
+
+      <DeleteConfirmationModal 
+        isOpen={genericDeleteModal.isOpen}
+        onCancel={() => setGenericDeleteModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={genericDeleteModal.onConfirm}
+        title={genericDeleteModal.title}
+        message={genericDeleteModal.message}
       />
 
       <DeleteConfirmationModal 

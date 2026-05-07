@@ -26,7 +26,7 @@ export default defineConfig(({ mode }) => {
       dedupe: ['react', 'react-dom']
     },
     optimizeDeps: {
-      include: ['react', 'react-dom', 'recharts'],
+      include: ['react', 'react-dom', 'recharts', 'swiper/react', 'swiper/modules', 'motion'],
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
