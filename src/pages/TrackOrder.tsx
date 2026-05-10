@@ -14,7 +14,7 @@ import {
   Info,
   MapPin as MapIcon
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { Html5Qrcode } from 'html5-qrcode';
 import { db } from '../firebase';

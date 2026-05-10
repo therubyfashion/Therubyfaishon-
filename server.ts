@@ -317,16 +317,16 @@ async function startServer() {
         lastSeenDate = today;
       }
 
-      const clientIp = requestIp.getClientIp(socket.request) || '';
+      const clientIp = requestIp.getClientIp(socket.request) || socket.handshake.address || '';
       const geo = geoip.lookup(clientIp);
 
       const session = {
         id: socket.id,
-        sessionId: data.sessionId,
+        sessionId: data.sessionId || socket.id,
         userId: data.userId || null,
-        city: data.city || geo?.city || "Unknown",
-        region: data.region || geo?.region || "Unknown",
-        country: data.country || geo?.country || "Unknown",
+        city: data.city && data.city !== 'Unknown' ? data.city : (geo?.city || "Unknown"),
+        region: data.region && data.region !== 'Unknown' ? data.region : (geo?.region || "Unknown"),
+        country: data.country && data.country !== 'Unknown' ? data.country : (geo?.country || "Unknown"),
         lat: data.lat || geo?.ll?.[0] || 0,
         lng: data.lng || geo?.ll?.[1] || 0,
         path: data.path || "/",
@@ -338,12 +338,12 @@ async function startServer() {
       activeVisitors.set(socket.id, session);
       
       // Update Firestore active_sessions for a persistent view in Admin Dashboard
-      if (db && data.sessionId) {
+      if (db && session.sessionId) {
         try {
-          await db.collection('active_sessions').doc(socket.id).set({
+          await db.collection('active_sessions').doc(session.sessionId).set({
             ...session,
             lastSeen: admin.firestore.FieldValue.serverTimestamp()
-          });
+          }, { merge: true });
         } catch (e) {
           console.error("Firestore active_sessions write error:", e);
         }
@@ -391,7 +391,8 @@ async function startServer() {
         
         // Update Firestore as well
         if (db) {
-          db.collection('active_sessions').doc(sid).update({
+          const docId = visitor.sessionId || sid;
+          db.collection('active_sessions').doc(docId).update({
             lastCheckpoint: data.type,
             lastSeen: admin.firestore.FieldValue.serverTimestamp()
           }).catch(() => {});
@@ -423,12 +424,14 @@ async function startServer() {
 
     socket.on("disconnect", async () => {
       console.log(`🔌 Client disconnected: ${socket.id}`);
+      const session = activeVisitors.get(socket.id);
       activeVisitors.delete(socket.id);
       
-      // Remove from Firestore active_sessions
+      // Remove from Firestore active_sessions if we can identify it
       if (db) {
         try {
-          await db.collection('active_sessions').doc(socket.id).delete().catch(() => {});
+          const docId = session?.sessionId || socket.id;
+          await db.collection('active_sessions').doc(docId).delete().catch(() => {});
         } catch (e) {
           console.error("Firestore active_sessions delete error:", e);
         }
@@ -468,9 +471,97 @@ async function startServer() {
   }
 
   console.log("⚙️  Applying middleware...");
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ limit: '10mb', extended: true }));
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  
+  // Debug Middleware
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      console.log(`📡 [API REQUEST] ${req.method} ${req.path}`);
+    }
+    next();
+  });
+  
   console.log("✅ Middleware applied.");
+
+  // CRITICAL: Cleanup Route placed early and using a very specific handler to avoid SPA fallback
+  app.post("/api/admin/cleanup", async (req, res) => {
+    console.log("🧹 [SERVER-CLEANUP] Request received");
+    res.setHeader('Content-Type', 'application/json');
+    const { password } = req.body || {};
+    
+    if (password !== "RESET_THE_RUBY_Launch_2026") {
+      console.warn("❌ [SERVER-CLEANUP] Invalid password");
+      return res.status(403).json({ error: "Invalid password." });
+    }
+
+    try {
+      console.log("🧹 [SERVER-CLEANUP] Reading config...");
+      const config = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
+      const targetProj = config.projectId;
+      const targetDb = config.firestoreDatabaseId;
+      console.log(`🧹 [SERVER-CLEANUP] Target: ${targetProj} / ${targetDb}`);
+
+      let activeDb = db;
+      if (!activeDb) {
+        console.log("🧹 [SERVER-CLEANUP] Global DB not ready, initializing local...");
+        if (!admin.apps.length) {
+          admin.initializeApp({ projectId: targetProj });
+        }
+        try {
+          activeDb = getFirestore(admin.app(), targetDb);
+        } catch (e) {
+          activeDb = getFirestore(admin.app(), '(default)');
+        }
+      }
+      
+      console.log("🧹 [SERVER-CLEANUP] Listing collections...");
+      const collections = await activeDb.listCollections();
+      console.log(`🧹 [SERVER-CLEANUP] Found ${collections.length} collections.`);
+      
+      const results: any = {};
+      for (const coll of collections) {
+        console.log(`🧹 [SERVER-CLEANUP] Processing ${coll.id}...`);
+        const snap = await coll.limit(500).get(); // Limit to 500 for safety in one go
+        if (!snap.empty) {
+          const docs = snap.docs;
+          let delCount = 0;
+          const batch = activeDb.batch();
+          
+          docs.forEach(d => {
+            if (coll.id === 'users') {
+              const data = d.data();
+              if (data.email !== 'mdsagaransari65670@gmail.com' && data.role !== 'admin') {
+                batch.delete(d.ref);
+                delCount++;
+              }
+            } else if (!['banners', 'products', 'categories', 'sizes', 'colors', 'coupons', 'settings', 'admins'].includes(coll.id)) {
+              batch.delete(d.ref);
+              delCount++;
+            }
+          });
+          
+          await batch.commit();
+          results[coll.id] = delCount;
+          console.log(`✅ [SERVER-CLEANUP] Deleted ${delCount} from ${coll.id}`);
+        } else {
+          results[coll.id] = 0;
+        }
+      }
+      console.log("✅ [SERVER-CLEANUP] DONE");
+      res.json({ success: true, message: "Storage wiped successfully.", results });
+    } catch (err: any) {
+      console.error("❌ [SERVER-CLEANUP] FATAL:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Backward compatibility handled directly without redirect
+  app.post("/api/clear-production-data", async (req, res) => {
+     // Just forward to the same logic
+     req.url = "/api/admin/cleanup";
+     return app._router.handle(req, res, () => {});
+  });
 
   // Root route for Health Checks & Production Serving
   app.get("/", (req, res, next) => {
@@ -792,64 +883,6 @@ async function startServer() {
     res.json(healthReport);
   });
 
-  // PRODUCTION RESET ENDPOINT
-  app.post("/api/clear-production-data", async (req, res) => {
-    const { password, adminUid } = req.body;
-    
-    // Very basic safety: In production you'd check better, but here we require a specific confirmation
-    if (password !== "RESET_THE_RUBY_2026") {
-      return res.status(403).json({ error: "Invalid Reset Password! This is a dangerous action." });
-    }
-
-    if (!db) {
-      return res.status(503).json({ error: "Database not connected. Cleanup failed." });
-    }
-
-    try {
-      console.log("🧹 PROD CLEANUP STARTED...");
-      const collectionsToClear = [
-        'orders', 'notifications', 'abandoned_carts', 'reviews', 
-        'chat_sessions', 'wishlists', 'active_sessions', 
-        'newsletter_subscribers', 'trackings', 'cart_items'
-      ];
-
-      const results: any = {};
-
-      for (const collName of collectionsToClear) {
-        const snapshot = await db.collection(collName).get();
-        const batch = db.batch();
-        snapshot.docs.forEach((doc: any) => batch.delete(doc.ref));
-        await batch.commit();
-        results[collName] = snapshot.size;
-        console.log(`- Cleared ${snapshot.size} docs from ${collName}`);
-      }
-
-      // Special cleanup for users: Delete all users except current admin if possible
-      // Note: We don't delete from Firebase Auth directly here to avoid locking out the admin,
-      // but we can delete the 'profiles' documents
-      const profilesSnap = await db.collection('profiles').get();
-      const profileBatch = db.batch();
-      let profilesCount = 0;
-      profilesSnap.docs.forEach((doc: any) => {
-        if (doc.id !== adminUid) { // Keep the current admin
-          profileBatch.delete(doc.ref);
-          profilesCount++;
-        }
-      });
-      await profileBatch.commit();
-      results['profiles'] = profilesCount;
-
-      console.log("✅ PROD CLEANUP FINISHED.");
-      res.json({ 
-        success: true, 
-        message: "All data has been cleared! You can now start fresh. 💎",
-        results
-      });
-    } catch (error: any) {
-      console.error("Cleanup error:", error);
-      res.status(500).json({ error: error.message || "Failed to clear data." });
-    }
-  });
 
   app.get("/api/payment-config", async (req, res) => {
     const vId = process.env.VITE_RAZORPAY_KEY_ID;
@@ -1433,8 +1466,51 @@ async function startServer() {
   });
 
   console.log(`📡 Attempting to listen on port ${PORT}...`);
-  httpServer.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", async () => {
     console.log(`✅ SERVER IS LIVE: http://localhost:${PORT}`);
+    
+    // AUTO-CLEANUP LOGIC FOR MANUAL REQUEST
+    const cleanupFlag = path.join(process.cwd(), 'DO_CLEANUP');
+    if (fs.existsSync(cleanupFlag)) {
+      console.log("🧹 [AUTO-CLEANUP] Flag found! Starting manual data purge...");
+      try {
+        const config = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
+        if (!admin.apps.length) {
+          admin.initializeApp({ projectId: config.projectId });
+        }
+        const activeDb = getFirestore(admin.app(), config.firestoreDatabaseId);
+        
+        const collections = await activeDb.listCollections();
+        console.log(`🧹 [AUTO-CLEANUP] Found ${collections.length} collections.`);
+        
+        for (const coll of collections) {
+          const snap = await coll.get();
+          if (!snap.empty) {
+            const docs = snap.docs;
+            console.log(`🧹 [AUTO-CLEANUP] Clearing ${docs.length} docs from ${coll.id}`);
+            for (let i = 0; i < docs.length; i += 400) {
+              const batch = activeDb.batch();
+              docs.slice(i, i + 400).forEach(d => {
+                if (coll.id === 'users') {
+                  const data = d.data();
+                  if (data.email !== 'mdsagaransari65670@gmail.com' && data.role !== 'admin') {
+                    batch.delete(d.ref);
+                  }
+                } else {
+                  batch.delete(d.ref);
+                }
+              });
+              await batch.commit();
+            }
+          }
+        }
+        
+        fs.unlinkSync(cleanupFlag);
+        console.log("✅ [AUTO-CLEANUP] Finished perfectly.");
+      } catch (e: any) {
+        console.error("❌ [AUTO-CLEANUP] Failed deeply:", e.message);
+      }
+    }
   });
 }
 

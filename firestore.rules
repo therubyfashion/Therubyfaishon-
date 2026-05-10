@@ -72,7 +72,9 @@ service cloud.firestore {
     // ===============================================================
 
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if request.auth != null && 
+        (request.auth.token.email == "mdsagaransari65670@gmail.com" || 
+         request.auth.token.email_verified == true && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
     }
 
     // Helper Functions
@@ -87,11 +89,8 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && 
         (
-          (request.auth.token.email != null && (
-            request.auth.token.email == "mdsagaransari65670@gmail.com" ||
-            request.auth.token.email.lower() == "mdsagaransari65670@gmail.com" ||
-            request.auth.token.email.lower().matches(".*rubi.*")
-          )) ||
+          (request.auth.token.email != null && request.auth.token.email.lower() == "mdsagaransari65670@gmail.com") ||
+          (request.auth.token.email != null && request.auth.token.email.lower().matches(".*rubi.*")) ||
           (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
         );
@@ -152,19 +151,27 @@ service cloud.firestore {
 
     function isValidSession(data) {
       return data.keys().hasAll(['id', 'lastSeen']) &&
-             data.id is string && data.id.size() > 0 && data.id.size() < 50 &&
+             data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
              data.lastSeen is timestamp &&
-             (!('city' in data) || (data.city is string && data.city.size() < 100)) &&
-             (!('country' in data) || (data.country is string && data.country.size() < 100)) &&
-             (!('path' in data) || (data.path is string && data.path.size() < 500));
+             (!('city' in data) || data.city == null || (data.city is string && data.city.size() < 200)) &&
+             (!('country' in data) || data.country == null || (data.country is string && data.country.size() < 200)) &&
+             (!('path' in data) || data.path == null || (data.path is string && data.path.size() < 1000)) &&
+             (!('userId' in data) || data.userId == null || data.userId is string) &&
+             (!('userEmail' in data) || data.userEmail == null || data.userEmail is string) &&
+             (!('lat' in data) || data.lat == null || data.lat is number) &&
+             (!('lng' in data) || data.lng == null || data.lng is number) &&
+             (!('region' in data) || data.region == null || data.region is string);
     }
 
     function isValidNotification(data) {
-      return data.keys().hasAll(['title', 'body', 'type', 'createdAt']) &&
+      return data.keys().hasAll(['title', 'message', 'type', 'createdAt']) &&
              data.title is string && data.title.size() > 0 && data.title.size() < 500 &&
-             data.body is string && data.body.size() > 0 && data.body.size() < 2000 &&
-             data.type in ['all', 'active', 'new', 'customer'] &&
-             data.createdAt is string &&
+             data.message is string && data.message.size() > 0 && data.message.size() < 2000 &&
+             data.type in ['all', 'active', 'new', 'customer', 'order'] &&
+             (data.createdAt is string || data.createdAt is timestamp) &&
+             (!('userId' in data) || data.userId is string) &&
+             (!('isRead' in data) || data.isRead is bool) &&
+             (!('link' in data) || data.link is string) &&
              (!('sentBy' in data) || data.sentBy == null || data.sentBy is string) &&
              (!('status' in data) || data.status == null || data.status is string);
     }
@@ -275,18 +282,66 @@ service cloud.firestore {
     }
 
     match /notifications/{notificationId} {
-      allow read: if isAdmin();
+      allow read: if isAdmin() || (isAuthenticated() && (resource.data.userId == request.auth.uid || resource.data.type == 'all'));
       allow create: if isAdmin() && isValidNotification(request.resource.data);
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']));
+      allow delete: if isAdmin();
+    }
+
+    match /wishlists/{docId} {
+      allow read, write: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow delete: if isAdmin();
     }
 
     match /analytics_daily/{docId} {
       allow read, write: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /active_sessions/{sessionId} {
+      allow read: if isAdmin();
+      allow create, update: if isValidSession(request.resource.data);
+      allow delete: if true;
     }
 
     match /newsletter/{docId} {
       allow read: if isAdmin();
       allow create: if true;
+      allow delete: if isAdmin();
+    }
+
+    match /search_history/{docId} {
+      allow read, write: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /contacts/{docId} {
+      allow read, write: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /tickets/{docId} {
+      allow read, write: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /referrals/{docId} {
+      allow read, write: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /coupons_usage/{docId} {
+      allow read, write: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /logs/{docId} {
+      allow read, write: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /trackings/{docId} {
+      allow read, write: if isAdmin();
       allow delete: if isAdmin();
     }
 

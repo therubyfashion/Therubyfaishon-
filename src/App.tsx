@@ -12,7 +12,7 @@ import Footer from './components/Footer';
 import BottomNav from './components/BottomNav';
 import ChatWidget from './components/ChatWidget';
 import SplashScreen from './components/SplashScreen';
-import { AnimatePresence } from 'motion/react';
+import { AnimatePresence } from 'framer-motion';
 import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
 

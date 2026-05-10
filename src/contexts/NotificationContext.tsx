@@ -70,8 +70,15 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     let globalData: Notification[] = [];
 
     const updateCombined = () => {
+      const getTimestamp = (val: any) => {
+        if (val && typeof val === 'object' && 'toDate' in val) {
+          return val.toDate().getTime();
+        }
+        return new Date(val).getTime();
+      };
+
       const combined = [...userData, ...globalData].sort((a, b) => 
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        getTimestamp(b.createdAt) - getTimestamp(a.createdAt)
       );
       setNotifications(combined);
       setLoading(false);

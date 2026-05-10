@@ -5,8 +5,9 @@ import { db, auth, storage } from '../firebase';
 import { signOut, updateProfile } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { toast } from 'sonner';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
+  History,
   Bell,
   Pencil,
   Camera,
@@ -23,7 +24,8 @@ import {
   Phone,
   Calendar,
   MessageCircle,
-  MapPin
+  MapPin,
+  Tag
 } from 'lucide-react';
 import { collection, doc, updateDoc } from 'firebase/firestore';
 import { cn } from '../lib/utils';
@@ -43,6 +45,8 @@ export default function Profile() {
     email: ''
   });
 
+  const [recentlyViewed, setRecentlyViewed] = React.useState<any[]>([]);
+
   React.useEffect(() => {
     if (user && profile) {
       setEditForm({
@@ -51,6 +55,14 @@ export default function Profile() {
         phoneNumber: profile.phoneNumber || '',
         email: user.email || ''
       });
+      
+      // Load recently viewed
+      try {
+        const stored = JSON.parse(localStorage.getItem('recentlyViewed') || '[]');
+        setRecentlyViewed(stored);
+      } catch (e) {
+        console.error("Error loading recently viewed:", e);
+      }
     }
   }, [user, profile]);
 
@@ -160,6 +172,7 @@ export default function Profile() {
   const menuItems = [
     { icon: ShoppingBag, label: 'My Orders', path: '/my-orders', color: 'text-blue-500', bg: 'bg-blue-50' },
     { icon: Bell, label: 'Notifications', path: '/notifications', color: 'text-ruby', bg: 'bg-ruby/5' },
+    { icon: Tag, label: 'My Coupons & Rewards', path: '/settings?tab=coupons', color: 'text-amber-500', bg: 'bg-amber-50' },
     { icon: MapPin, label: 'Saved Addresses', path: '/addresses', color: 'text-green-500', bg: 'bg-green-50' },
     { icon: Heart, label: 'Wishlist', path: '/wishlist', color: 'text-ruby', bg: 'bg-ruby/5' },
     { icon: MessageCircle, label: 'Chat with Support', onClick: () => window.dispatchEvent(new CustomEvent('open-ruby-chat')), color: 'text-ruby', bg: 'bg-ruby/5' },
@@ -410,6 +423,55 @@ export default function Profile() {
               <ChevronRight size={18} className="text-ruby/30 group-hover:translate-x-1 transition-all" />
             </button>
           </div>
+
+          {/* Recently Viewed */}
+          {recentlyViewed.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between px-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-ruby/10 text-ruby flex items-center justify-center">
+                    <History size={16} />
+                  </div>
+                  <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#1A2C54]">Recently Viewed</h3>
+                </div>
+                <button 
+                  onClick={() => {
+                    localStorage.removeItem('recentlyViewed');
+                    setRecentlyViewed([]);
+                  }}
+                  className="text-[9px] font-bold uppercase tracking-widest text-gray-400 hover:text-ruby"
+                >
+                  Clear All
+                </button>
+              </div>
+              
+              <div className="flex gap-4 overflow-x-auto pb-4 px-2 scrollbar-none snap-x h-[160px]">
+                {recentlyViewed.map((prod) => (
+                  <Link 
+                    key={prod.id} 
+                    to={`/product/${prod.id}`}
+                    className="flex-shrink-0 w-[110px] space-y-2 snap-start group"
+                  >
+                    <div className="aspect-[3/4] rounded-2xl overflow-hidden bg-gray-100 border border-gray-50 relative">
+                      <img 
+                        src={prod.images[0]} 
+                        alt={prod.name} 
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-white/90 backdrop-blur-md rounded-full flex items-center justify-center shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                        <ChevronRight size={10} className="text-[#1A2C54]" />
+                      </div>
+                    </div>
+                    <div className="space-y-0.5">
+                      <p className="text-[10px] font-bold text-[#1A2C54] truncate pr-2 group-hover:text-ruby transition-colors">{prod.name}</p>
+                      <p className="text-[10px] font-bold text-ruby">₹{prod.price.toLocaleString()}</p>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <p className="text-[10px] text-center text-gray-300 uppercase tracking-[0.3em] font-bold pt-4">

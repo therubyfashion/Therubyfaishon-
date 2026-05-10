@@ -13,7 +13,7 @@ import {
   Package,
   Calendar
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useNotifications } from '../contexts/NotificationContext';
 import { format, isToday, isYesterday, parseISO } from 'date-fns';
 
@@ -45,7 +45,15 @@ const Notifications: React.FC = () => {
     const older: any[] = [];
 
     notifications.forEach(n => {
-      const date = parseISO(n.createdAt);
+      let date: Date;
+      if (n.createdAt && typeof n.createdAt === 'object' && 'toDate' in n.createdAt) {
+        date = (n.createdAt as any).toDate();
+      } else if (typeof n.createdAt === 'string') {
+        date = parseISO(n.createdAt);
+      } else {
+        date = new Date();
+      }
+
       if (isToday(date)) {
         today.push(n);
       } else if (isYesterday(date)) {
@@ -63,6 +71,18 @@ const Notifications: React.FC = () => {
   const renderNotificationItem = (notification: any) => {
     const Icon = iconMap[notification.iconType?.toLowerCase()] || iconMap[notification.type?.toLowerCase()] || <Bell size={20} className="text-red-500" />;
     
+    const displayDate = (dateVal: any) => {
+      let date: Date;
+      if (dateVal && typeof dateVal === 'object' && 'toDate' in dateVal) {
+        date = dateVal.toDate();
+      } else if (typeof dateVal === 'string') {
+        date = parseISO(dateVal);
+      } else {
+        date = new Date();
+      }
+      return format(date, 'h a');
+    };
+
     return (
       <motion.div
         key={notification.id}
@@ -85,11 +105,11 @@ const Notifications: React.FC = () => {
               {notification.title}
             </h3>
             <span className="text-[10px] text-gray-400 font-medium">
-              {format(parseISO(notification.createdAt), 'h a')}
+              {displayDate(notification.createdAt)}
             </span>
           </div>
           <p className="text-xs text-gray-500 leading-relaxed line-clamp-2">
-            {notification.body}
+            {notification.body || notification.message}
           </p>
         </div>
       </motion.div>

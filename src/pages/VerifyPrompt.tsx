@@ -3,7 +3,7 @@ import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { auth, db } from '../firebase';
 import { doc, getDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { toast } from 'sonner';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { Mail, ArrowRight, ArrowLeft, RefreshCw, LogOut, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export default function VerifyPrompt() {

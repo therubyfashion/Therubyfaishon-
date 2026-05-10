@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
+import { collection, query, onSnapshot, where, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { db } from '../firebase';
 
 interface Visitor {
   id: string;
@@ -21,7 +23,9 @@ interface Visitor {
   lng: number;
   path: string;
   lastCheckpoint?: string;
-  lastSeen: string;
+  lastSeen: any;
+  startTime?: string;
+  userEmail?: string;
 }
 
 interface LiveViewProps {
@@ -41,23 +45,48 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
+  // 1. Real-time Firestore Listener (Robust across all devices)
   useEffect(() => {
-    // Connect to Socket.io
+    // Show users active in the last 5 minutes
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const q = query(
+      collection(db, 'active_sessions'),
+      where('lastSeen', '>=', Timestamp.fromDate(fiveMinutesAgo)),
+      limit(100)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const visitors = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visitor));
+      
+      // Sort by lastSeen descending
+      const sortedVisitors = visitors.sort((a, b) => {
+        const timeA = a.lastSeen?.toMillis?.() || 0;
+        const timeB = b.lastSeen?.toMillis?.() || 0;
+        return timeB - timeA;
+      });
+
+      setActiveVisitors(sortedVisitors);
+      
+      // Calculate behavior stats
+      const activeCarts = visitors.filter(v => v.lastCheckpoint === 'cart' || v.path.includes('/cart')).length;
+      const checkingOut = visitors.filter(v => v.lastCheckpoint === 'checkout' || v.path.includes('/checkout')).length;
+      setBehavior({ activeCarts, checkingOut });
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // 2. Socket.io for Real-time Activity Feed (Fast events)
+  useEffect(() => {
     const socket = io(window.location.origin);
     socketRef.current = socket;
 
-    socket.on('live_analytics_update', (data) => {
-      setActiveVisitors(data.visitors || []);
-      if (data.behavior) setBehavior(data.behavior);
-    });
-
     socket.on('live_activity_event', (event) => {
-      setActivities(prev => [{ id: Math.random(), ...event }, ...prev].slice(0, 10));
-      
-      // If it's a purchase/order, we could trigger a special map effect
-      if (event.type === 'order' || event.type === 'purchase') {
-         // Special handling if needed
-      }
+      setActivities(prev => [{ 
+        id: Math.random(), 
+        ...event,
+        timestamp: event.timestamp || new Date().toISOString() 
+      }, ...prev].slice(0, 15));
     });
 
     return () => {

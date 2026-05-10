@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ShoppingBag, ArrowRight, Star, ShieldCheck, Truck, RotateCcw, 
   Search, Bell, Heart, User, Filter, ChevronRight, Package,
@@ -415,7 +415,6 @@ export default function Home() {
                           src={cat.image} 
                           alt={cat.name} 
                           className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" 
-                          referrerPolicy="no-referrer"
                         />
                       ) : (
                         <Icon size={26} className="text-[#222] group-hover:text-ruby transition-colors" />

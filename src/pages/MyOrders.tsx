@@ -3,7 +3,7 @@ import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { ShoppingBag, AlertTriangle, TrendingUp, Package, ChevronRight, Search } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { OrderItemSkeleton, Skeleton } from '../components/Skeleton';
 
 export default function MyOrders() {

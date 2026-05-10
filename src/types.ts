@@ -1,4 +1,10 @@
-export type Category = string;
+export interface Category {
+  id: string;
+  name: string;
+  image?: string;
+  slug?: string;
+  createdAt?: string;
+}
 
 export interface Product {
   id: string;

@@ -1,14 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useLocation } from 'react-router-dom';
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
+import { doc, setDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 
 export const useVisitorTracking = () => {
   const location = useLocation();
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    // Connect to Socket.io
+    // Connect to Socket.io (Keep for socket-based events if needed)
     const socket = io(window.location.origin, {
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
@@ -21,8 +22,6 @@ export const useVisitorTracking = () => {
   }, []);
 
   useEffect(() => {
-    if (!socketRef.current) return;
-
     // Generate or get session ID
     let sessionId = sessionStorage.getItem('visitor_session_id');
     if (!sessionId) {
@@ -32,33 +31,82 @@ export const useVisitorTracking = () => {
 
     const track = async () => {
       try {
-        let city = 'Platform Session';
-        let country = 'Online';
-        let lat = undefined;
-        let lng = undefined;
+        // Try to get location via public API if not already in session
+        let locationData = JSON.parse(sessionStorage.getItem('visitor_location') || 'null');
+        
+        if (!locationData) {
+          try {
+            const res = await fetch('https://ipapi.co/json/');
+            const data = await res.json();
+            locationData = {
+              city: data.city || 'Unknown',
+              country: data.country_name || 'Online',
+              lat: data.latitude || 0,
+              lng: data.longitude || 0,
+              region: data.region || ''
+            };
+            sessionStorage.setItem('visitor_location', JSON.stringify(locationData));
+          } catch (e) {
+            locationData = { city: 'Online', country: 'Store', lat: 20, lng: 77 }; // Default India-ish for demo
+          }
+        }
 
-        socketRef.current?.emit('visitor_tracking', {
+        const trackingData = {
+          id: sessionId,
           sessionId,
-          userId: auth.currentUser?.uid,
+          userId: auth.currentUser?.uid || null,
+          userEmail: auth.currentUser?.email || null,
           path: location.pathname,
-          lat,
-          lng,
-          city,
-          country
-        });
+          lastSeen: serverTimestamp(),
+          startTime: sessionStorage.getItem('session_start_time') || new Date().toISOString(),
+          ...locationData
+        };
+
+        if (!sessionStorage.getItem('session_start_time')) {
+          sessionStorage.setItem('session_start_time', trackingData.startTime);
+        }
+
+        // 1. Send via Socket (for immediate server-side side-effects)
+        socketRef.current?.emit('visitor_tracking', trackingData);
+
+        // 2. Direct Firestore update for robust Admin view
+        await setDoc(doc(db, 'active_sessions', sessionId), trackingData, { merge: true });
+
       } catch (e) {
         console.error("Tracking failed", e);
       }
     };
 
-    if (socketRef.current.connected) {
-      track();
-    } else {
-      socketRef.current.on('connect', track);
+    track();
+    
+    // Heartbeat every 30 seconds
+    const heartbeat = setInterval(track, 30000);
+
+    // Initial setup on navigation
+    if (socketRef.current) {
+      if (socketRef.current.connected) {
+        track();
+      } else {
+        socketRef.current.on('connect', track);
+      }
     }
 
     return () => {
+      clearInterval(heartbeat);
       socketRef.current?.off('connect', track);
     };
-  }, [location.pathname]);
+  }, [location.pathname, auth.currentUser]);
+
+  // Clean up session on tab close (optional, but good for accuracy)
+  useEffect(() => {
+    const handleUnload = () => {
+      const sessionId = sessionStorage.getItem('visitor_session_id');
+      if (sessionId) {
+        // Note: Navigator.sendBeacon or deleteDoc might not finish on unmount/unload
+        // but we rely on the Admin view filtering by lastSeen for accuracy.
+      }
+    };
+    window.addEventListener('beforeunload', handleUnload);
+    return () => window.removeEventListener('beforeunload', handleUnload);
+  }, []);
 };

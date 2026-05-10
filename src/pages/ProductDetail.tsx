@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
 import { ShoppingBag, Heart, Share2, ChevronRight, Truck, ShieldCheck, RefreshCw, X, Ruler, Star, MessageSquare, ThumbsUp, User, Minus, Plus, Send, ChevronDown, Maximize2, Camera, Image as ImageIcon } from 'lucide-react';
-import { motion, AnimatePresence, useScroll, useTransform } from 'motion/react';
+import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import { Navigation, Pagination, Zoom, Thumbs } from 'swiper/modules';
 import type { Swiper as SwiperType } from 'swiper';
@@ -351,6 +351,25 @@ export default function ProductDetail() {
             .filter(p => p.id !== id)
             .slice(0, 4);
           setRelatedProducts(related);
+
+          // Track Recently Viewed
+          try {
+            const recentlyViewed = JSON.parse(localStorage.getItem('recentlyViewed') || '[]');
+            const updatedRecentlyViewed = [
+              {
+                id: data.id,
+                name: data.name,
+                price: data.price,
+                comparePrice: data.comparePrice,
+                images: data.images,
+                category: data.category
+              },
+              ...recentlyViewed.filter((p: any) => p.id !== data.id)
+            ].slice(0, 10);
+            localStorage.setItem('recentlyViewed', JSON.stringify(updatedRecentlyViewed));
+          } catch (e) {
+            console.error("Error updating recently viewed:", e);
+          }
         } else {
           toast.error("Product not found");
           navigate('/shop');

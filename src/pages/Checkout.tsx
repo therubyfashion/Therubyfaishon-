@@ -2,13 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
-import { collection, addDoc, getDocs, doc, runTransaction, getDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, runTransaction, getDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { toast } from 'sonner';
 import { cn, syncToGoogleSheets } from '../lib/utils';
 import { sendNotification } from '../lib/notifications';
 import { ChevronLeft, ShoppingBag, MapPin, Home, Briefcase, Plus, CheckCircle2, Lock, Smartphone, Building2, Handshake, Check } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { io } from 'socket.io-client';
 import { LoadingSpinner } from '../components/Skeleton';
 import SwipeButton from '../components/SwipeButton';
@@ -362,6 +362,15 @@ export default function Checkout() {
           // Clear checkout state
           localStorage.removeItem('checkout_step');
           localStorage.removeItem('selected_address_id');
+
+          // Clear Abandoned Cart
+          if (user) {
+            try {
+              await deleteDoc(doc(db, 'carts', user.uid));
+            } catch (e) {
+              console.error("Error clearing abandoned cart:", e);
+            }
+          }
 
           // Send Email Notification
           try {

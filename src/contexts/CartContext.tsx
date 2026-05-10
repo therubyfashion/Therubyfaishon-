@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, setDoc, doc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { CartItem, Product, Promotion } from '../types';
 import { useSettings } from './SettingsContext';
+import { useAuth } from './AuthContext';
 
 interface CartContextType {
   items: CartItem[];
@@ -23,6 +24,7 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
   const [items, setItems] = useState<CartItem[]>(() => {
     const saved = localStorage.getItem('ruby_cart');
     return saved ? JSON.parse(saved) : [];
@@ -32,7 +34,43 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     localStorage.setItem('ruby_cart', JSON.stringify(items));
-  }, [items]);
+    
+    // Abandoned Cart Tracking Logic
+    if (user) {
+      const syncCartToFirestore = async () => {
+        try {
+          if (items.length > 0) {
+            await setDoc(doc(db, 'carts', user.uid), {
+              userId: user.uid,
+              userName: user.displayName || 'Guest',
+              userEmail: user.email,
+              items: items.map(item => ({
+                id: item.id,
+                name: item.name,
+                price: item.price,
+                quantity: item.quantity,
+                selectedSize: item.selectedSize,
+                selectedColor: item.selectedColor,
+                image: item.images[0]
+              })),
+              total: items.reduce((sum, i) => sum + (i.price * i.quantity), 0),
+              updatedAt: serverTimestamp(),
+              status: 'active'
+            });
+          } else {
+            // If cart becomes empty, remove from Firestore
+            await deleteDoc(doc(db, 'carts', user.uid));
+          }
+        } catch (e) {
+          console.error("Error syncing cart to Firestore:", e);
+        }
+      };
+      
+      // Debounce sync slightly
+      const timer = setTimeout(syncCartToFirestore, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [items, user]);
 
   useEffect(() => {
     const fetchActivePromotions = async () => {

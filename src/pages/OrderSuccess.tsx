@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { CheckCircle2, Package, Truck, Home, ShoppingBag, ArrowRight, MapPin, CreditCard } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 
 import { generateInvoice } from '../utils/invoiceGenerator';
 import { io } from 'socket.io-client';

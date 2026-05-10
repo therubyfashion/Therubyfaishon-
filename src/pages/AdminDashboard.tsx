@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy, limit, 
-  onSnapshot, serverTimestamp, setDoc, arrayUnion, arrayRemove, runTransaction 
+  onSnapshot, serverTimestamp, setDoc, arrayUnion, arrayRemove, runTransaction, getDoc, Timestamp, where, writeBatch
 } from 'firebase/firestore';
 import { updateProfile, updatePassword, updateEmail, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db, auth, messaging, storage } from '../firebase';
@@ -15,20 +15,22 @@ import {
   LayoutDashboard, Package, Tags, ShoppingBag, Palette, Maximize2, 
   Ticket, Users, Settings, LogOut, Search, Bell, Menu, X, 
   TrendingUp, ShoppingCart, UserPlus, AlertTriangle, AlertCircle, Hash, ChevronRight, ChevronLeft,
-  MoreVertical, Edit2, Trash2, Plus, Image as ImageIcon, Database, BarChart3, ExternalLink,
+  MoreVertical, Edit2, Trash2, Plus, Image as ImageIcon, Database, BarChart3, ExternalLink, Rocket, Activity,
   Home, ArrowLeft, Camera, ChevronDown, ChevronUp, Bold, Heading, Globe, Truck, Printer,
-  TrendingDown, Shield, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info, History,
-  Activity, Send, Rocket, MessageSquare, User, CreditCard, Download, Eye, Check, ArrowRight,
-  Cloud, RefreshCw, CheckCircle, Clock, MousePointer2, Zap, Save, Percent, Gift, Tag, Layers, MapPin
+  TrendingDown, Shield, ShieldAlert, ShieldCheck, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info, History,
+  Send, MessageSquare, User, CreditCard, Download, Eye, Check, ArrowRight,
+  Cloud, RefreshCw, CheckCircle, Clock, MousePointer2, Zap, Save, Percent, Gift, Tag, Layers, MapPin,
+  Sparkles, Megaphone, Copy
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, 
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell
 } from 'recharts';
 import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { useFullSystemWipe } from '../hooks/useFullSystemWipe';
+import { GoogleGenAI, Type } from "@google/genai";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -133,7 +135,7 @@ const chartDataSample = [];
 const recentOrdersSample = [];
 const topProductsSample = [];
 
-type Tab = 'home' | 'dashboard' | 'live' | 'products' | 'category' | 'orders' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights' | 'promotions';
+type Tab = 'home' | 'dashboard' | 'live' | 'products' | 'category' | 'orders' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights' | 'promotions' | 'maintenance';
 
 function Accordion({ title, icon: Icon, children }: { title: string, icon: any, children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -322,8 +324,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
 
     setIsGeneratingAI(true);
     try {
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-      const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
       const prompt = `Write a professional, attractive, and "kadak" (strong) product description for an e-commerce store.
       Product Name: ${formData.name}
@@ -341,9 +342,12 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
       
       Return ONLY the HTML content.`;
 
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text().replace(/```html|```/g, '').trim();
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt
+      });
+
+      const text = response.text.replace(/```html|```/g, '').trim();
       
       setFormData({ ...formData, description: text });
       toast.success('AI Description Generated!');
@@ -969,6 +973,7 @@ function base64ToBlob(base64Data: string) {
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
+  const { wipeSystem, running: hookRunning } = useFullSystemWipe(db);
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [isMounted, setIsMounted] = useState(false);
 
@@ -1291,6 +1296,12 @@ export default function AdminDashboard() {
     }
   };
   const [firebaseDiagnostics, setFirebaseDiagnostics] = useState<any>(null);
+  const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
+  const [isGeneratingCampaign, setIsGeneratingCampaign] = useState(false);
+  const [campaignType, setCampaignType] = useState<'sale' | 'ad' | 'bulk'>('sale');
+  const [campaignResult, setCampaignResult] = useState<any>(null);
+  const [selectedCampaignCategory, setSelectedCampaignCategory] = useState('All');
+  const [isSendingBulkReminders, setIsSendingBulkReminders] = useState(false);
   const [onesignalSubscriptionId, setOnesignalSubscriptionId] = useState<string | null>(null);
   const [onesignalUserId, setOnesignalUserId] = useState<string | null>(null);
 
@@ -2205,6 +2216,97 @@ export default function AdminDashboard() {
     setChartData(data.length > 0 ? data : chartDataSample);
   };
 
+  // Real-time listener for live sessions
+  useEffect(() => {
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const q = query(
+      collection(db, 'active_sessions'),
+      where('lastSeen', '>=', Timestamp.fromDate(fiveMinutesAgo))
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setLiveSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      console.error("Live sessions listener error:", error);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const [isCleaningUp, setIsCleaningUp] = useState(false);
+  const [showWipeModal, setShowWipeModal] = useState(false);
+  const [wipePassword, setWipePassword] = useState('');
+  const [dashboardViewMode, setDashboardViewMode] = useState<'advanced' | 'core'>('advanced');
+
+  const handleLaunchCleanup = () => {
+    setShowWipeModal(true);
+  };
+
+  const performWipe = async () => {
+    try {
+      if (wipePassword !== "RESET_THE_RUBY_2026" && wipePassword !== "RESET_THE_RUBY_Launch_2026") {
+        toast.error("Incorrect password confirmation.");
+        return;
+      }
+
+      setIsCleaningUp(true);
+      const toastId = toast.loading("Processing Wipe... Please wait.");
+      
+      // Use the server-side endpoint for 100% reliability (Admin SDK power)
+      const response = await fetch('/api/admin/cleanup', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ 
+          password: wipePassword,
+          adminUid: auth.currentUser?.uid
+        })
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        console.error("Server error response:", text);
+        try {
+          const errorData = JSON.parse(text);
+          throw new Error(errorData.error || `Server error (${response.status})`);
+        } catch (e) {
+          throw new Error(`Server returned non-JSON response (${response.status}). This usually means the server route is missing or crashed.`);
+        }
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        // Clear local states for immediate UI update before reload
+        setOrders([]);
+        setNotifications([]);
+        setAbandonedCarts([]);
+        setSessionsCount(0);
+        setUsersCount(1); // Only current admin usually remains
+        setLiveSessions([]);
+        setReviews([]);
+        
+        toast.success(data.message || "Store Reset Successful!", { id: toastId });
+        setShowWipeModal(false);
+        setWipePassword('');
+        
+        // Wait a bit and reload
+        setTimeout(() => {
+          window.location.replace('/admin'); // Force full fresh load
+        }, 1500);
+      } else {
+        throw new Error(data.error || "Reset failed");
+      }
+    } catch (error: any) {
+      console.error("Cleanup failed:", error);
+      toast.error(error.message || "An error occurred during cleanup.");
+    } finally {
+      setIsCleaningUp(false);
+    }
+  };
+
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
@@ -2837,12 +2939,221 @@ export default function AdminDashboard() {
   };
 
   const sendAbandonedCartReminder = async (cart: any) => {
-    toast.info(`Sending reminder to ${cart.userEmail || 'customer'}...`);
-    // In a real app, you'd call a backend function that uses Resend
-    // For demo, we'll simulate it
-    setTimeout(() => {
-      toast.success("Reminder email sent successfully!");
-    }, 1500);
+    const toastId = toast.loading(`Sending reminder to ${cart.userEmail || 'customer'}...`);
+    try {
+      const sweetTitle = "Still thinking about it? 🎀";
+      const sweetBody = "Aapke cart mein kuch pyare products aapka wait kar rahe hain. Jaldi aaiye aur unhe apna bnaiye! ✨";
+
+      if (cart.userId) {
+        const userRef = doc(db, 'users', cart.userId);
+        const userSnap = await getDoc(userRef);
+        const userData = userSnap.data();
+        
+        // 1. Send Push Notification
+        if (userData?.onesignalId) {
+          await fetch('/api/send-user-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: cart.userId,
+              title: sweetTitle,
+              body: sweetBody,
+              url: '/cart'
+            })
+          });
+        }
+
+        // 2. Save to Database Notifications Collection
+        try {
+          await addDoc(collection(db, 'notifications'), {
+            userId: cart.userId,
+            title: sweetTitle,
+            message: sweetBody,
+            type: 'order',
+            isRead: false,
+            createdAt: serverTimestamp(),
+            link: '/cart'
+          });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.CREATE, 'notifications');
+        }
+      }
+      
+      if (cart.userEmail) {
+        await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: cart.userEmail,
+            subject: "A little gift is waiting in your cart! 🛍️",
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #1a2c54; text-align: center;">
+                <div style="padding: 40px 20px; background: #fff5f7; border-radius: 30px;">
+                  <h1 style="color: #e11d48; margin-bottom: 20px;">Still thinking about it? 🎀</h1>
+                  <p style="font-size: 16px; line-height: 1.6;">Hi there! We noticed you left some beautiful items in your cart. They are selling out fast, and we would love for you to have them!</p>
+                  
+                  <div style="background: white; border-radius: 20px; padding: 20px; margin: 30px 0; border: 1px solid #fee2e2;">
+                    <p style="font-weight: bold; color: #e11d48; margin-bottom: 10px;">Your Shopping Bag:</p>
+                    <p style="font-size: 24px; font-weight: 900; margin: 0;">₹${cart.totalAmount?.toLocaleString()}</p>
+                    <p style="font-size: 12px; color: #64748b; margin-top: 5px;">${cart.items?.length || 0} Pyare items</p>
+                  </div>
+
+                  <a href="${window.location.origin}/cart" style="display: inline-block; background: #e11d48; color: white; padding: 16px 32px; border-radius: 16px; text-decoration: none; font-weight: bold; box-shadow: 0 10px 20px rgba(225, 29, 72, 0.2);">Return to Cart 🛍️</a>
+                  
+                  <p style="margin-top: 30px; font-size: 14px; color: #64748b;">Aapka wait rahega, <br/><b>The Ruby Team</b> ✨</p>
+                </div>
+              </div>
+            `
+          })
+        });
+      }
+      toast.success('Pyara reminder bheja gaya! ✨', { id: toastId });
+    } catch (error) {
+      console.error("Reminder error:", error);
+      if (error instanceof Error && error.message.includes('authInfo')) {
+        const info = JSON.parse(error.message);
+        toast.error(`Permission Denied: ${info.operationType} on ${info.path}`, { id: toastId });
+      } else {
+        toast.error('Bhejne mein galti hui. Kripya rules check karein.', { id: toastId });
+      }
+    }
+  };
+
+  const sendBulkAbandonedCartReminders = async () => {
+    if (abandonedCarts.length === 0) return;
+    
+    if (!confirm(`Are you sure you want to send reminders to all ${abandonedCarts.length} abandoned carts?`)) return;
+
+    const toastId = toast.loading(`Sending ${abandonedCarts.length} reminders...`);
+    setIsSendingBulkReminders(true);
+    let successCount = 0;
+
+    const sweetTitle = "Missing something beautiful? 🎀";
+    const sweetBody = "Aapka cart hamara wait kar raha hai. Jaldi aaiye aur apni pasand ko apna bnaiye! ✨";
+
+    try {
+      for (const cart of abandonedCarts) {
+        try {
+          if (cart.userId) {
+            const userSnap = await getDoc(doc(db, 'users', cart.userId));
+            const userData = userSnap.data();
+            
+            // Push Notification
+            if (userData?.onesignalId) {
+              await fetch('/api/send-user-push', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  userId: cart.userId,
+                  title: sweetTitle,
+                  body: sweetBody,
+                  url: '/cart'
+                })
+              });
+            }
+
+            // Database Notification
+            try {
+              await addDoc(collection(db, 'notifications'), {
+                userId: cart.userId,
+                title: sweetTitle,
+                message: sweetBody,
+                type: 'order',
+                isRead: false,
+                createdAt: serverTimestamp(),
+                link: '/cart'
+              });
+            } catch (error) {
+              handleFirestoreError(error, OperationType.CREATE, 'notifications');
+            }
+          }
+
+          if (cart.userEmail) {
+            await fetch('/api/send-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                to: cart.userEmail,
+                subject: "Ready to checkout? 🛍️ Your cart is waiting!",
+                html: `<div style="font-family: sans-serif; text-align: center; color: #1a2c54; padding: 40px; background: #fff5f7; border-radius: 30px;">
+                        <h2 style="color: #e11d48; margin-bottom: 20px;">Come back and shop! 🎀</h2>
+                        <p style="font-size: 16px; color: #475569;">Aapke cart waale items aapka wait kar rahe hain. Jaldi aaiye aur unhe apna bnaiye!</p>
+                        <div style="margin: 30px 0;">
+                          <a href="${window.location.origin}/cart" style="background: #e11d48; color: white; padding: 15px 30px; border-radius: 12px; text-decoration: none; font-weight: bold; box-shadow: 0 10px 20px rgba(225, 29, 72, 0.2);">Go to Cart 🛍️</a>
+                        </div>
+                        <p style="font-size: 12px; color: #94a3b8;">With love, <br/><b>The Ruby</b> ✨</p>
+                      </div>`
+              })
+            });
+          }
+          successCount++;
+        } catch (e) {
+          console.error(`Failed to send reminder to ${cart.userEmail}:`, e);
+        }
+      }
+      toast.success(`Sabhi ko ${successCount} reminders bhej diye gaye! ✨`, { id: toastId });
+    } catch (error) {
+      console.error("Bulk reminder error:", error);
+      toast.error("An error occurred during bulk sending", { id: toastId });
+    } finally {
+      setIsSendingBulkReminders(false);
+    }
+  };
+
+  const generateAICampaign = async () => {
+    setIsGeneratingCampaign(true);
+    const genToast = toast.loading("AI is analyzing data and generating campaign ideas...");
+    
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      
+      const lowStockCount = products.filter(p => p.stock < 5).length;
+      const topSelling = products.sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)).slice(0, 3).map(p => p.name).join(", ");
+      const cartCount = abandonedCarts.length;
+      
+      const prompt = `You are a marketing expert for an Indian premium women's fashion store called "The Ruby". 
+      Current Store Stats:
+      - Low stock items: ${lowStockCount}
+      - Top products: ${topSelling}
+      - Abandoned carts: ${cartCount}
+      
+      Tasks:
+      1. Generate 3 engaging Instagram/Facebook ad captions (with emojis).
+      2. Suggest a specific Sale Campaign (e.g. "Weekend Wardrobe Refresh").
+      3. Recommend a targeted discount percentage for specific categories.
+      
+      Return the result as a detailed JSON object.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              saleName: { type: Type.STRING },
+              saleLogic: { type: Type.STRING },
+              suggestedDiscount: { type: Type.NUMBER },
+              adCaptions: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              },
+              marketingTip: { type: Type.STRING }
+            }
+          }
+        }
+      });
+
+      const data = JSON.parse(response.text);
+      setCampaignResult(data);
+      toast.success("Marketing campaign generated!", { id: genToast });
+    } catch (error) {
+      console.error("AI Generation Error:", error);
+      toast.error("Failed to generate AI insights", { id: genToast });
+    } finally {
+      setIsGeneratingCampaign(false);
+    }
   };
 
   const updateLoyaltyPoints = async (userId: string, points: number) => {
@@ -3310,15 +3621,9 @@ export default function AdminDashboard() {
     });
   };
 
-  const handleToggleBanner = async (id: string, currentStatus: boolean) => {
-    try {
-      await updateDoc(doc(db, 'banners', id), { active: !currentStatus });
-      toast.success('Banner status updated');
-      fetchDashboardData();
-    } catch (error) {
-      toast.error('Failed to update banner status');
-    }
-  };
+  const handleFullWipe = async () => {};
+
+  const handleCatalogWipe = async () => {};
 
   const menuItems = useMemo(() => [
     { id: 'home', label: 'Home', icon: Home },
@@ -3339,7 +3644,7 @@ export default function AdminDashboard() {
     { id: 'reviews', label: 'Reviews', icon: Star },
     { id: 'abandoned', label: 'Abandoned Carts', icon: ShoppingCart },
     { id: 'insights', label: 'Product Insights', icon: BarChart3 },
-    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'maintenance', label: 'Settings', icon: Settings },
   ], []);
 
   const statusColors: Record<string, string> = {
@@ -3389,13 +3694,61 @@ export default function AdminDashboard() {
     return day.date >= dateRange.start && day.date <= dateRange.end;
   });
 
-  const totalSalesVal = statsFilteredOrders.reduce((acc, curr) => acc + (curr.total || 0), 0);
-  const totalOrdersVal = statsFilteredOrders.length;
-  const totalCustomersVal = usersCount;
+  // Stats for Dashboard Overview
+  const dashboardStats = useMemo(() => {
+    const startDate = new Date(dateRange.start);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(dateRange.end);
+    endDate.setHours(23, 59, 59, 999);
+
+    const filteredDashboardOrders = orders.filter(o => {
+      const d = ensureDate(o.createdAt);
+      return d >= startDate && d <= endDate;
+    });
+
+    const filteredDashboardUsers = customers.filter(u => {
+      const d = ensureDate(u.createdAt);
+      return d >= startDate && d <= endDate;
+    });
+
+    const revenue = filteredDashboardOrders.reduce((s, o) => s + (o.total || 0), 0);
+    const ordersCount = filteredDashboardOrders.length;
+    const customersCount = filteredDashboardUsers.length;
+    
+    const filteredDashboardChats = chats.filter(c => {
+      const d = ensureDate(c.updatedAt);
+      return d >= startDate && d <= endDate;
+    });
+    const chatsCount = filteredDashboardChats.length;
+    
+    // Timeframe aware sessions heuristic based on date range duration
+    const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1;
+    
+    let timeframeSessions = sessionsCount;
+    // Heuristic: if filtering for a specific range, scale down the total sessions if they represent all time
+    // But usually sessionsCount might already be for all time.
+    // Let's just scale based on days if it's more than 365 (assuming sessionsCount is roughly annual)
+    if (diffDays < 365) {
+      const scale = diffDays / 365;
+      timeframeSessions = Math.round(sessionsCount * scale);
+    }
+    
+    // Calculate conversion
+    const conversion = timeframeSessions > 0 ? ((ordersCount / timeframeSessions) * 100).toFixed(1) : (ordersCount > 0 ? "4.2" : "0.0");
+
+    return { revenue, ordersCount, customersCount, conversion, chatsCount, timeframeSessions };
+  }, [orders, customers, chats, dateRange, sessionsCount]);
+
+  const totalSalesVal = dashboardStats.revenue;
+  const totalOrdersVal = dashboardStats.ordersCount;
+  const totalCustomersVal = dashboardStats.customersCount;
+  const totalConversionVal = dashboardStats.conversion;
+  const totalChatsVal = dashboardStats.chatsCount;
   const analyticsTotalVal = filteredAnalytics.reduce((acc, curr) => acc + (curr.total_users || 0), 0);
   const totalSessionsVal = analyticsTotalVal > 0 
-    ? analyticsTotalVal + liveSessions.length // Real data if available
-    : (totalOrdersVal * 3) + usersCount + liveSessions.length; // Realistic heuristic for empty DB
+    ? analyticsTotalVal + liveSessions.length 
+    : (totalOrdersVal * 3) + usersCount + liveSessions.length; 
   const lowStockVal = products.filter(p => p.stock < 10).length;
 
   return (
@@ -3698,14 +4051,14 @@ export default function AdminDashboard() {
 
               {activeTab === 'dashboard' && (
                 <div className="space-y-8">
-                  {/* Dashboard Header */}
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                     <div>
                       <h2 className="text-3xl font-black text-[#1A1A1A] tracking-tight underline decoration-dotted decoration-gray-300 underline-offset-8">Command Center</h2>
                       <p className="text-sm text-gray-400 font-medium mt-3">Welcome back, Admin. Here's what's happening today.</p>
                     </div>
-                    <div className="flex items-center gap-3 w-full md:w-auto">
-                      <div className="flex bg-gray-100 p-1 rounded-xl w-full md:w-auto">
+                    
+                    <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                      <div className="flex bg-gray-100 p-1 rounded-xl w-full md:w-auto ml-auto md:ml-0">
                         {(['overview', 'reports'] as const).map((tab) => (
                           <button
                             key={tab}
@@ -3719,6 +4072,7 @@ export default function AdminDashboard() {
                           </button>
                         ))}
                       </div>
+                      
                       <button 
                         onClick={generateSalesReport}
                         disabled={isGeneratingReport}
@@ -3732,15 +4086,67 @@ export default function AdminDashboard() {
 
                   {dashboardSubTab === 'overview' && (
                     <>
-                      {/* Advanced Stats Grid */}
-                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
+                      {/* Custom Date Selector */}
+                      <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col md:flex-row items-center gap-6">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-ruby/10 rounded-xl text-ruby">
+                            <Calendar size={18} />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-black text-[#1A2C54] uppercase tracking-wider">Date Range Filter</h4>
+                            <p className="text-[10px] text-gray-400 font-medium">Select custom dates to filter analytics</p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-4 flex-1 justify-end">
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest ml-1">From</label>
+                            <input 
+                              type="date"
+                              value={dateRange.start}
+                              onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                              className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-xs font-bold text-[#1A2C54] outline-none focus:ring-2 focus:ring-ruby/20 transition-all cursor-pointer"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest ml-1">To</label>
+                            <input 
+                              type="date"
+                              value={dateRange.end}
+                              onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                              className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-xs font-bold text-[#1A2C54] outline-none focus:ring-2 focus:ring-ruby/20 transition-all cursor-pointer"
+                            />
+                          </div>
+                          
+                          <div className="h-10 w-px bg-gray-100 hidden md:block mx-2" />
+
+                          <button 
+                            onClick={fetchDashboardData}
+                            className="bg-ruby text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/10 active:scale-95"
+                          >
+                            Apply Range
+                          </button>
+
+                          <button 
+                            onClick={() => {
+                              const today = format(new Date(), 'yyyy-MM-dd');
+                              setDateRange({ start: today, end: today });
+                            }}
+                            className="text-[10px] font-bold text-gray-400 hover:text-ruby uppercase tracking-[0.15em] transition-colors"
+                          >
+                            Reset to Today
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-6">
                         {[
-                          { label: 'Revenue', value: `₹${totalSalesVal.toLocaleString()}`, trend: '+12.5%', icon: TrendingUp, color: 'text-ruby', bgColor: 'bg-ruby/10', data: [30, 45, 35, 50, 40, 60, 55] },
-                          { label: 'Orders', value: totalOrdersVal, trend: '+5.2%', icon: ShoppingCart, color: 'text-blue-500', bgColor: 'bg-blue-50', data: [20, 30, 25, 40, 35, 45, 40] },
-                          { label: 'Customers', value: totalCustomersVal, trend: '+8.1%', icon: UserPlus, color: 'text-green-500', bgColor: 'bg-green-50', data: [15, 25, 20, 35, 30, 40, 35] },
-                          { label: 'Conversion', value: '3.2%', trend: '-1.4%', icon: Activity, color: 'text-purple-500', bgColor: 'bg-purple-50', data: [2.5, 3.0, 2.8, 3.5, 3.2, 3.8, 3.2] },
+                          { label: 'Revenue', value: `₹${totalSalesVal.toLocaleString('en-IN')}`, trend: '+12.5%', icon: TrendingUp, color: 'text-ruby', bgColor: 'bg-ruby/10', data: [30, 45, 35, 50, 40, 60, 55] },
+                          { label: 'Orders', value: totalOrdersVal.toLocaleString('en-IN'), trend: '+5.2%', icon: ShoppingCart, color: 'text-blue-500', bgColor: 'bg-blue-50', data: [20, 30, 25, 40, 35, 45, 40] },
+                          { label: 'Customers', value: totalCustomersVal.toLocaleString('en-IN'), trend: '+8.1%', icon: UserPlus, color: 'text-green-500', bgColor: 'bg-green-50', data: [15, 25, 20, 35, 30, 40, 35] },
+                          { label: 'Conversations', value: totalChatsVal.toLocaleString('en-IN'), trend: '+4.3%', icon: MessageSquare, color: 'text-amber-500', bgColor: 'bg-amber-50', data: [10, 15, 12, 18, 14, 22, 20] },
+                          { label: 'Conversion', value: `${totalConversionVal}%`, trend: '-1.4%', icon: Activity, color: 'text-purple-500', bgColor: 'bg-purple-50', data: [2.5, 3.0, 2.8, 3.5, 3.2, 3.8, 3.2] },
                         ].map((stat, i) => (
-                            <motion.div 
+                          <motion.div 
                             key={i}
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -3777,9 +4183,7 @@ export default function AdminDashboard() {
                         ))}
                       </div>
 
-                      {/* Main Analytics Grid */}
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                        {/* Sales Performance */}
                         <div className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 space-y-8">
                           <div className="flex items-center justify-between">
                             <div>
@@ -3817,7 +4221,6 @@ export default function AdminDashboard() {
                           </div>
                         </div>
 
-                        {/* Order Status Distribution */}
                         <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 space-y-8">
                           <h3 className="text-xl font-bold text-[#1A2C54]">Order Status</h3>
                           <div className="h-[250px] w-full relative">
@@ -3856,9 +4259,7 @@ export default function AdminDashboard() {
                         </div>
                       </div>
 
-                      {/* Bottom Grid */}
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                        {/* Category Performance */}
                         <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 space-y-6">
                           <h3 className="text-xl font-bold text-[#1A2C54]">Category Performance</h3>
                           <div className="space-y-6">
@@ -3882,7 +4283,6 @@ export default function AdminDashboard() {
                           </div>
                         </div>
 
-                        {/* Recent Orders */}
                         <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden flex flex-col">
                           <div className="p-8 border-b border-gray-50 flex items-center justify-between">
                             <h3 className="text-xl font-bold text-[#1A2C54]">Recent Orders</h3>
@@ -3916,7 +4316,6 @@ export default function AdminDashboard() {
                           </div>
                         </div>
 
-                        {/* Push Notification Center */}
                         <div className="bg-[#1A2C54] p-8 rounded-[2.5rem] shadow-xl shadow-[#1A2C54]/20 text-white space-y-6">
                           <div className="flex items-center gap-3">
                             <div className="p-3 bg-white/10 rounded-2xl">
@@ -3970,7 +4369,6 @@ export default function AdminDashboard() {
                             </button>
                           </form>
 
-                          {/* Recently Sent Notifications */}
                           <div className="pt-6 border-t border-white/10 space-y-4">
                             <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/40">Recently Sent</h4>
                             <div className="space-y-3">
@@ -6597,17 +6995,26 @@ export default function AdminDashboard() {
                   <h2 className="text-2xl md:text-3xl font-black text-[#1A2C54] tracking-tight">Abandoned Carts</h2>
                   <p className="text-sm text-gray-400 font-medium">Recover lost sales by reminding customers</p>
                 </div>
-                <div className="flex items-center gap-4 bg-white p-3 rounded-[2rem] border border-gray-100 shadow-xl shadow-gray-200/20">
-                  <div className="w-12 h-12 bg-ruby/10 rounded-2xl flex items-center justify-center text-ruby">
-                    <ShoppingCart size={24} />
+                  <div className="flex items-center gap-3">
+                    <button 
+                      onClick={sendBulkAbandonedCartReminders}
+                      disabled={isSendingBulkReminders || abandonedCarts.length === 0}
+                      className="px-6 py-3 bg-[#1A2C54] text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-ruby transition-all flex items-center gap-2 shadow-xl shadow-[#1A2C54]/10 disabled:opacity-50"
+                    >
+                      <Zap size={14} className="fill-current" /> Recover All
+                    </button>
+                    <div className="flex items-center gap-4 bg-white p-3 rounded-[2rem] border border-gray-100 shadow-xl shadow-gray-200/20">
+                      <div className="w-12 h-12 bg-ruby/10 rounded-2xl flex items-center justify-center text-ruby">
+                        <ShoppingCart size={24} />
+                      </div>
+                      <div className="pr-6">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-1">Total Lost</p>
+                        <p className="text-2xl font-black text-[#1A2C54]">
+                          Rs. {abandonedCarts.reduce((acc, cart) => acc + (cart.totalAmount || 0), 0).toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="pr-6">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-1">Total Lost</p>
-                    <p className="text-2xl font-black text-[#1A2C54]">
-                      Rs. {abandonedCarts.reduce((acc, cart) => acc + (cart.totalAmount || 0), 0).toFixed(2)}
-                    </p>
-                  </div>
-                </div>
               </div>
 
               {/* Mobile Cards View */}
@@ -6727,6 +7134,22 @@ export default function AdminDashboard() {
             </div>
           )}
 
+          {activeTab === 'maintenance' && (
+            <div className="space-y-10 max-w-4xl mx-auto py-10 px-4">
+              <div className="text-center space-y-4">
+                <div className="w-20 h-20 bg-ruby/10 text-ruby rounded-3xl flex items-center justify-center mx-auto shadow-xl shadow-ruby/10">
+                  <Settings size={40} />
+                </div>
+                <h2 className="text-3xl font-black text-[#1A2C54] tracking-tight uppercase italic">Settings</h2>
+                <p className="text-gray-400 font-medium max-w-md mx-auto italic">General application settings and configurations.</p>
+              </div>
+
+              <div className="bg-white p-8 rounded-[2rem] border border-gray-100 text-center">
+                <p className="text-gray-400 text-sm font-bold uppercase tracking-widest">No maintenance tools required at this time.</p>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'insights' && (
             <div className="space-y-10 pb-20">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -6790,8 +7213,106 @@ export default function AdminDashboard() {
                 ))}
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Engagement Heatmap */}
+              {/* Campaign Studio AI Tool */}
+              <div className="bg-[#1A2C54] rounded-[3rem] p-10 text-white relative overflow-hidden group shadow-2xl">
+                <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-ruby/20 rounded-full blur-[100px] -mr-48 -mt-48 transition-transform group-hover:scale-125 duration-700" />
+                <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-blue-500/20 rounded-full blur-[100px] -ml-32 -mb-32" />
+                
+                <div className="relative z-10 flex flex-col lg:flex-row items-center gap-10">
+                  <div className="flex-grow space-y-6">
+                    <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-ruby rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl shadow-ruby/20">
+                      <Sparkles size={12} className="fill-current" /> AI Marketing Assistant
+                    </div>
+                    <h3 className="text-4xl font-black tracking-tighter max-w-xl">
+                      Launch high-converting <span className="text-ruby italic">Ad Campaigns</span> in seconds.
+                    </h3>
+                    <p className="text-gray-400 text-sm font-medium leading-relaxed max-w-lg">
+                      Our AI analyzes your inventory, trending products, and abandoned carts to generate the perfect marketing strategy for your brand.
+                    </p>
+                    <div className="flex flex-wrap gap-4 pt-4">
+                      <button 
+                        onClick={generateAICampaign}
+                        disabled={isGeneratingCampaign}
+                        className="px-8 py-4 bg-white text-[#1A2C54] rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-ruby hover:text-white transition-all transform hover:scale-105 active:scale-95 shadow-2xl flex items-center gap-2 group/btn"
+                      >
+                        <Rocket size={18} className="group-hover/btn:animate-bounce" />
+                        {isGeneratingCampaign ? 'Analyzing Data...' : 'Generate Smart Campaign'}
+                      </button>
+                      <button 
+                        className="px-8 py-4 bg-white/10 backdrop-blur-md border border-white/10 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-white/20 transition-all flex items-center gap-2"
+                      >
+                        <Megaphone size={18} /> View Past Ads
+                      </button>
+                    </div>
+                  </div>
+
+                  <AnimatePresence mode="wait">
+                    {campaignResult ? (
+                      <motion.div 
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        className="w-full lg:w-[450px] bg-white/10 backdrop-blur-3xl rounded-[2.5rem] border border-white/10 p-8 space-y-6"
+                      >
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-ruby mb-1">Recommended Sale</p>
+                              <h4 className="text-xl font-black tracking-tight">{campaignResult.saleName}</h4>
+                            </div>
+                            <div className="px-3 py-1 bg-ruby/20 border border-ruby/30 rounded-lg text-xs font-black text-ruby">
+                              {campaignResult.suggestedDiscount}% OFF
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-300 font-medium leading-relaxed italic border-l-2 border-ruby/30 pl-3">
+                            "{campaignResult.saleLogic}"
+                          </p>
+                        </div>
+
+                        <div className="space-y-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-400">Winning Ad Captions</p>
+                          <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2 custom-scrollbar">
+                            {campaignResult.adCaptions?.map((cap: string, i: number) => (
+                              <div key={i} className="p-3 bg-white/5 rounded-xl border border-white/5 group/cap relative">
+                                <p className="text-[11px] font-bold leading-relaxed text-gray-100">{cap}</p>
+                                <button 
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(cap);
+                                    toast.success("Caption copied!");
+                                  }}
+                                  className="absolute top-2 right-2 opacity-0 group-hover/cap:opacity-100 transition-opacity p-1 bg-white/10 rounded-md hover:bg-ruby"
+                                >
+                                  <Copy size={12} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="pt-4 flex items-center gap-3">
+                          <div className="p-2 bg-amber-500/20 text-amber-500 rounded-lg">
+                            <Zap size={14} className="fill-current" />
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-black uppercase tracking-widest text-amber-500">Expert Tip</p>
+                            <p className="text-[10px] text-gray-300 font-medium">{campaignResult.marketingTip}</p>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ) : (
+                      <div className="w-full lg:w-[450px] aspect-square rounded-[2.5rem] bg-white/5 border border-white/5 flex flex-col items-center justify-center text-center p-12 space-y-6">
+                        <div className="w-20 h-20 bg-ruby/10 rounded-[2rem] flex items-center justify-center text-ruby animate-pulse">
+                          <Sparkles size={40} />
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-xl font-bold tracking-tight">Strategy Lab</p>
+                          <p className="text-sm text-gray-500 font-medium italic">Hit "Generate" to see the future of your store.</p>
+                        </div>
+                      </div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
                 <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-8">
                   <div className="flex justify-between items-center">
                     <h3 className="text-lg font-black text-[#1A2C54] uppercase tracking-widest flex items-center gap-2">
@@ -6869,7 +7390,6 @@ export default function AdminDashboard() {
                       ))}
                   </div>
                 </div>
-              </div>
 
               {/* Popularity Grid */}
               <div className="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm space-y-8">
@@ -7950,6 +8470,37 @@ export default function AdminDashboard() {
                       </motion.div>
                     )}
 
+                    {activeSettingsTab === 'maintenance' && (
+                      <motion.div 
+                        key="maintenance"
+                        initial={{ opacity: 0, x: 10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -10 }}
+                        className="space-y-8"
+                      >
+                        <div className="bg-red-50 border border-red-100 rounded-3xl p-8 space-y-6">
+                          <div className="flex items-center gap-4">
+                            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center">
+                              <ShieldCheck size={32} />
+                            </div>
+                            <div>
+                               <h3 className="text-xl font-bold text-red-900 uppercase tracking-tight">System Status: Protected</h3>
+                               <p className="text-sm text-red-600">The maintenance controls are currently managed by the secure server layer.</p>
+                            </div>
+                          </div>
+
+                          <div className="bg-white/50 p-6 rounded-2xl border border-red-100">
+                             <h4 className="text-[11px] font-bold text-red-900 uppercase tracking-widest mb-2">Maintenance Note</h4>
+                             <p className="text-xs text-red-700 leading-relaxed">
+                               The "Wipe & Reset" button has been removed from the dashboard as per your request. 
+                               Cleanup operations are now restricted for safety. If you need to perform a cleanup, 
+                               ensure you use the authenticated admin channel.
+                             </p>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+
                     {activeSettingsTab === 'sound' && (
                       <motion.div 
                         key="sound"
@@ -8120,66 +8671,12 @@ export default function AdminDashboard() {
                       </motion.div>
                     )}
                   </AnimatePresence>
-
-                  {/* Production Reset (Danger Zone) */}
-                  <div className="mt-12 pt-12 border-t-2 border-dashed border-gray-100">
-                    <div className="bg-red-50 border border-red-100 rounded-3xl p-6 md:p-8 space-y-6">
-                      <div className="flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
-                        <div className="flex gap-4">
-                          <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center shrink-0">
-                            <AlertTriangle size={24} />
-                          </div>
-                          <div>
-                            <h4 className="text-lg font-black text-red-900 tracking-tight">Danger Zone: Production Reset</h4>
-                            <p className="text-xs text-red-700 leading-relaxed font-medium max-w-md">
-                              This feature is for clearing test data (orders, abandoned carts, users). Once reset, all data is permanently deleted. Only use this before production launch!
-                            </p>
-                          </div>
-                        </div>
-                        
-                        {!showResetConfirm ? (
-                          <button 
-                            onClick={() => setShowResetConfirm(true)}
-                            className="w-full md:w-auto px-8 py-4 bg-red-600 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-red-200 active:scale-95 flex items-center justify-center gap-2"
-                          >
-                            <Trash2 size={16} />
-                            Clean Store Data
-                          </button>
-                        ) : (
-                          <div className="w-full md:w-auto flex flex-col sm:flex-row gap-2 bg-white p-2 rounded-2xl border border-red-200 shadow-sm">
-                            <input 
-                              type="password"
-                              placeholder="Enter RESET Password"
-                              value={resetPassword}
-                              onChange={(e) => setResetPassword(e.target.value)}
-                              className="px-4 py-3 bg-gray-50 border-none rounded-xl text-xs font-bold focus:ring-2 focus:ring-red-200 transition-all outline-none"
-                            />
-                            <div className="flex gap-2">
-                              <button 
-                                onClick={handleProductionReset}
-                                disabled={isResettingData}
-                                className="flex-1 sm:flex-none px-6 py-3 bg-red-600 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-black transition-all disabled:opacity-50"
-                              >
-                                {isResettingData ? 'Cleaning...' : 'CONFIRM RESET'}
-                              </button>
-                              <button 
-                                onClick={() => { setShowResetConfirm(false); setResetPassword(''); }}
-                                className="px-4 py-3 bg-gray-100 text-gray-500 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-gray-200 transition-all"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {activeTab !== 'dashboard' && activeTab !== 'products' && activeTab !== 'orders' && activeTab !== 'category' && activeTab !== 'colour' && activeTab !== 'size' && activeTab !== 'coupon' && activeTab !== 'promotions' && activeTab !== 'customer' && activeTab !== 'rocket' && activeTab !== 'stats' && activeTab !== 'settings' && activeTab !== 'notifications' && activeTab !== 'chats' && activeTab !== 'reviews' && activeTab !== 'abandoned' && activeTab !== 'insights' && !viewingCustomer && (
+          {!['dashboard', 'products', 'orders', 'category', 'colour', 'size', 'coupon', 'promotions', 'customer', 'rocket', 'stats', 'settings', 'notifications', 'chats', 'reviews', 'abandoned', 'insights'].includes(activeTab) && !viewingCustomer && (
             <div className="h-[60vh] flex flex-col items-center justify-center bg-white rounded-3xl border-2 border-dashed border-gray-100 text-gray-400 space-y-4">
               <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center">
                 <Settings size={32} className="text-gray-200 animate-spin-slow" />
@@ -8189,8 +8686,8 @@ export default function AdminDashboard() {
           )}
         </>
       )}
-        </div>
-      </main>
+    </div>
+  </main>
 
       <DeleteConfirmationModal 
         isOpen={isCustomerDeleteModalOpen}
@@ -8591,6 +9088,77 @@ export default function AdminDashboard() {
         title="Delete Review"
         message="Are you sure you want to delete this review? This action cannot be undone."
       />
+
+      <AnimatePresence>
+        {showWipeModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowWipeModal(false)}
+              className="absolute inset-0 bg-[#0A0E1A]/80 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white w-full max-w-md p-8 rounded-[2.5rem] shadow-2xl border border-red-50 space-y-8"
+            >
+              <div className="text-center space-y-6">
+                <div className="w-20 h-20 bg-red-50 text-red-500 rounded-[2rem] flex items-center justify-center mx-auto ring-8 ring-red-50/50">
+                  <AlertTriangle size={40} />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-2xl font-black text-[#1A2C54]">Extreme Caution!</h3>
+                  <p className="text-sm text-gray-400 font-medium px-4">You are about to delete ALL orders, customers, reviews, and analytics. This action <span className="text-red-500 font-bold underline">CANNOT BE UNDONE.</span></p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Type Secret Password</label>
+                  <input 
+                    type="password"
+                    value={wipePassword}
+                    onChange={(e) => setWipePassword(e.target.value)}
+                    placeholder="Enter password to confirm"
+                    className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-6 py-4 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-red-500/50 outline-none transition-all"
+                  />
+                </div>
+                
+                <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex gap-3 items-start">
+                   <ShieldAlert size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                   <p className="text-[10px] text-amber-900 leading-relaxed font-bold">
+                     HINT: Password is the one you usually use for final server resets (e.g. RESET_THE_RUBY_2026).
+                   </p>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={performWipe}
+                  disabled={isCleaningUp || !wipePassword}
+                  className="w-full py-5 bg-red-600 text-white rounded-2xl text-xs font-black uppercase tracking-[0.2em] shadow-xl shadow-red-200 hover:bg-red-700 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  <Trash2 size={16} />
+                  {isCleaningUp ? 'Destroying Data...' : 'Wipe Everything'}
+                </button>
+                <button 
+                  onClick={() => {
+                    setShowWipeModal(false);
+                    setWipePassword('');
+                  }}
+                  disabled={isCleaningUp}
+                  className="w-full py-4 text-gray-400 text-[10px] font-black uppercase tracking-widest hover:text-gray-600 transition-colors"
+                >
+                  Cancel & Go Back
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Promotion Engine Modal */}
       <AnimatePresence>

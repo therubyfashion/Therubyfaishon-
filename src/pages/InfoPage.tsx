@@ -1,6 +1,6 @@
 import React from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { ChevronLeft, Sparkles } from 'lucide-react';
 
 const content: Record<string, { title: string; body: string }> = {

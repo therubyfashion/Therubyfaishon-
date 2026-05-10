@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { motion, useMotionValue, useTransform, animate } from 'motion/react';
+import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { ChevronRight, Check } from 'lucide-react';
 
 interface SwipeButtonProps {

@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, ChevronLeft, Heart, Tag, Lock, CheckCircle2, Sparkles } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';

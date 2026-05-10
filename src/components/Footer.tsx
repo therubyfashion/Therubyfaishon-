@@ -11,7 +11,7 @@ import {
   HandCoins
 } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
 
 interface AccordionItemProps {

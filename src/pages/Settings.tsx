@@ -1,11 +1,11 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db, auth } from '../firebase';
 import { signOut, updatePassword, updateEmail, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, collection, query, getDocs, where } from 'firebase/firestore';
 import { toast } from 'sonner';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Shield, 
   Bell, 
@@ -29,15 +29,40 @@ import {
   Layers,
   Settings as SettingsIcon,
   LogOut,
-  AppWindow
+  AppWindow,
+  Tag,
+  Gift,
+  Ticket
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function Settings() {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
-  const [activeView, setActiveView] = React.useState<'main' | 'security' | 'notifications' | 'preferences' | 'privacy'>('main');
+  const [searchParams] = useSearchParams();
+  const [activeView, setActiveView] = React.useState<'main' | 'security' | 'notifications' | 'preferences' | 'privacy' | 'coupons'>('main');
   const [loading, setLoading] = React.useState(false);
+  const [coupons, setCoupons] = React.useState<any[]>([]);
+
+  React.useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'coupons') {
+      setActiveView('coupons');
+    }
+  }, [searchParams]);
+
+  React.useEffect(() => {
+    const fetchCoupons = async () => {
+      try {
+        const q = query(collection(db, 'coupons'), where('isActive', '==', true));
+        const snap = await getDocs(q);
+        setCoupons(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } catch (e) {
+        console.error("Error fetching coupons:", e);
+      }
+    };
+    fetchCoupons();
+  }, []);
 
   // Stats for the "Cool" factor
   const [securityScore] = React.useState(85);
@@ -170,6 +195,15 @@ export default function Settings() {
       color: 'bg-emerald-500',
       textColor: 'text-emerald-500',
       status: 'Locked'
+    },
+    {
+      id: 'coupons',
+      title: 'Rewards',
+      desc: 'Coupons & Points',
+      icon: Ticket,
+      color: 'bg-amber-500',
+      textColor: 'text-amber-500',
+      status: 'Active'
     }
   ];
 
@@ -499,6 +533,72 @@ export default function Settings() {
                       <div className="w-4 h-4 bg-white rounded-full shadow-sm" />
                    </div>
                 </div>
+              </div>
+            </motion.div>
+          ) : activeView === 'coupons' ? (
+            <motion.div 
+               key="coupons"
+               initial={{ opacity: 0, scale: 0.95 }}
+               animate={{ opacity: 1, scale: 1 }}
+               className="space-y-6"
+            >
+              {/* Points Card */}
+              <div className="bg-[#1A2C54] rounded-[2.5rem] p-8 text-white relative overflow-hidden shadow-xl shadow-blue-900/10 mb-8">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-ruby/20 rounded-full blur-3xl -mr-16 -mt-16" />
+                <div className="relative z-10 flex flex-col items-center text-center space-y-4">
+                  <div className="w-16 h-16 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center text-ruby border border-white/10">
+                    <Zap size={32} />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-60">Your Loyalty Points</p>
+                    <h2 className="text-5xl font-black tracking-tight">{profile?.loyaltyPoints || 0}</h2>
+                  </div>
+                  <p className="text-[11px] text-gray-400 max-w-[200px]">Use these points for exclusive discounts at checkout.</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between px-2">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#1A2C54]">Available Coupons</h3>
+                  <span className="text-[10px] font-bold text-ruby uppercase tracking-widest">{coupons.length} Active</span>
+                </div>
+
+                {coupons.length === 0 ? (
+                  <div className="bg-white p-12 rounded-[2.5rem] border border-gray-100 text-center space-y-4">
+                    <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center text-gray-300 mx-auto">
+                      <Ticket size={24} />
+                    </div>
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest leading-relaxed">No special coupons available<br/>right now. Check back soon!</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4">
+                    {coupons.map((coupon) => (
+                      <div key={coupon.id} className="bg-white p-6 rounded-[2rem] border border-gray-100 flex items-center justify-between group overflow-hidden relative">
+                        <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-ruby opacity-20 group-hover:opacity-100 transition-opacity" />
+                        <div className="flex items-center gap-5">
+                          <div className="w-12 h-12 bg-ruby/5 text-ruby rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                            <Tag size={20} />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-black text-[#1A2C54] tracking-tight">{coupon.code}</h4>
+                            <p className="text-[10px] text-ruby font-bold uppercase tracking-wider">
+                              {coupon.discountType === 'percentage' ? `${coupon.discountValue}% OFF` : `₹${coupon.discountValue} OFF`}
+                            </p>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => {
+                            navigator.clipboard.writeText(coupon.code);
+                            toast.success("Coupon code copied!");
+                          }}
+                          className="px-4 py-2 bg-gray-50 hover:bg-[#1A2C54] hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </motion.div>
           ) : (

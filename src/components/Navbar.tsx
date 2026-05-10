@@ -8,7 +8,7 @@ import { useNotifications } from '../contexts/NotificationContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { auth, db } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function Navbar({ solid = false }: { solid?: boolean }) {
   const { user, isAdmin } = useAuth();
