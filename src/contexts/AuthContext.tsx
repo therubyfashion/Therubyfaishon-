@@ -69,6 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       loading, 
       isAdmin: profile?.role === 'admin' || 
                user?.email === 'mdsagaransari65670@gmail.com' || 
+               user?.email === 'admin@theruby.com' || 
                user?.email?.toLowerCase().includes('rubi')
     }}>
       {children}

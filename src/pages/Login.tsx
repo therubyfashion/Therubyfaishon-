@@ -176,9 +176,28 @@ export default function Login() {
       const userDocPromise = getDoc(doc(db, 'users', user.uid));
       
       const userDoc = await userDocPromise;
-      const userData = userDoc.data();
+      let userData = userDoc.data();
 
-      if (userData && !userData.isVerified) {
+      // Ensure admin@theruby.com has admin privileges in Firestore
+      if (user.email === 'admin@theruby.com') {
+        if (!userDoc.exists()) {
+          const newAdminData = {
+            uid: user.uid,
+            email: user.email,
+            displayName: 'System Admin',
+            role: 'admin',
+            isVerified: true,
+            createdAt: new Date().toISOString()
+          };
+          await setDoc(doc(db, 'users', user.uid), newAdminData);
+          userData = newAdminData;
+        } else if (userData?.role !== 'admin') {
+          await setDoc(doc(db, 'users', user.uid), { role: 'admin', isVerified: true }, { merge: true });
+          userData = { ...userData, role: 'admin', isVerified: true };
+        }
+      }
+
+      if (userData && !userData.isVerified && user.email !== 'admin@theruby.com') {
         toast.error("Please verify your email before logging in.");
         const userEmail = user.email;
         const userUid = user.uid;
