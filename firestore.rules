@@ -189,6 +189,15 @@ service cloud.firestore {
              data.updatedAt is string;
     }
 
+    function isValidBanner(data) {
+      return data.keys().hasAll(['image', 'title', 'active', 'createdAt']) &&
+             data.image is string && data.image.size() < 1500000 &&
+             data.title is string && data.title.size() < 200 &&
+             data.active is bool &&
+             data.createdAt is string &&
+             (!('link' in data) || data.link == null || (data.link is string && data.link.size() < 1000));
+    }
+
     // Rules
     match /users/{userId} {
       allow read: if isAdmin() || isOwner(userId);
@@ -238,7 +247,8 @@ service cloud.firestore {
 
     match /banners/{bannerId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update: if isAdmin() && isValidBanner(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     match /reviews/{reviewId} {

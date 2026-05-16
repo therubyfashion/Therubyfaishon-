@@ -1012,7 +1012,9 @@ export default function AdminDashboard() {
   const [colorForm, setColorForm] = useState({ name: '', hex: '#000000' });
   const [sizeForm, setSizeForm] = useState({ name: '' });
   const [couponForm, setCouponForm] = useState({ code: '', discount: 0, expiryDate: '', type: 'percentage' as 'percentage' | 'fixed' });
-  const [bannerForm, setBannerForm] = useState({ image: '', link: '', active: true });
+  const [bannerForm, setBannerForm] = useState({ image: '', title: '', link: '', active: true });
+  const [bannerLinkType, setBannerLinkType] = useState<'category' | 'product' | 'link'>('link');
+  const [bannerLinkValue, setBannerLinkValue] = useState('');
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteCategoryModalOpen, setDeleteCategoryModalOpen] = useState(false);
@@ -3568,24 +3570,32 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleBannerImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBannerImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Image size must be less than 5MB");
-      return;
+    
+    const toastId = toast.loading("Processing image...");
+    try {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        try {
+          const compressed = await compressImage(reader.result as string, 1200, 1200, 0.7);
+          setBannerForm({ ...bannerForm, image: compressed });
+          toast.success("Image ready", { id: toastId });
+        } catch (err) {
+          toast.error("Compression failed", { id: toastId });
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      toast.error("Upload failed", { id: toastId });
     }
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setBannerForm({ ...bannerForm, image: reader.result as string });
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleAddBanner = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!bannerForm.image) {
-      toast.error('Please provide an image');
+    if (!bannerForm.image || !bannerForm.title) {
+      toast.error('Please provide an image and title');
       return;
     }
     try {
@@ -3595,10 +3605,26 @@ export default function AdminDashboard() {
       });
       toast.success('Banner added');
       setIsBannerModalOpen(false);
-      setBannerForm({ image: '', link: '', active: true });
+      setBannerForm({ image: '', title: '', link: '', active: true });
+      setBannerLinkType('link');
+      setBannerLinkValue('');
       fetchDashboardData();
     } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'banners');
       toast.error('Failed to add banner');
+    }
+  };
+
+  const handleToggleBanner = async (id: string, currentStatus: boolean) => {
+    try {
+      await updateDoc(doc(db, 'banners', id), {
+        active: !currentStatus
+      });
+      toast.success(`Banner ${!currentStatus ? 'activated' : 'deactivated'}`);
+      fetchDashboardData();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `banners/${id}`);
+      toast.error('Failed to update banner status');
     }
   };
 
@@ -9022,15 +9048,88 @@ export default function AdminDashboard() {
                     />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Target Link (Optional)</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. /shop?category=Men"
-                    value={bannerForm.link || ''}
-                    onChange={e => setBannerForm({...bannerForm, link: e.target.value})}
-                    className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
-                  />
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Banner Title</label>
+                    <input 
+                      type="text" 
+                      placeholder="Enter title (e.g. Summer Collection)"
+                      value={bannerForm.title}
+                      onChange={e => setBannerForm({...bannerForm, title: e.target.value})}
+                      className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Target Action</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {['category', 'product', 'link'].map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => {
+                            setBannerLinkType(type as any);
+                            setBannerLinkValue('');
+                            setBannerForm({ ...bannerForm, link: '' });
+                          }}
+                          className={`py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all border ${
+                            bannerLinkType === type 
+                            ? 'bg-ruby text-white border-ruby shadow-md' 
+                            : 'bg-white text-gray-400 border-gray-100 hover:border-ruby/30'
+                          }`}
+                        >
+                          {type}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="pt-2">
+                      {bannerLinkType === 'category' && (
+                        <select
+                          value={bannerLinkValue}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setBannerLinkValue(val);
+                            setBannerForm({ ...bannerForm, link: `/shop?category=${encodeURIComponent(val)}` });
+                          }}
+                          className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-ruby"
+                        >
+                          <option value="">Select Category</option>
+                          {categories.map(cat => (
+                            <option key={cat.id} value={cat.name}>{cat.name}</option>
+                          ))}
+                        </select>
+                      )}
+
+                      {bannerLinkType === 'product' && (
+                        <select
+                          value={bannerLinkValue}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setBannerLinkValue(val);
+                            setBannerForm({ ...bannerForm, link: `/product/${val}` });
+                          }}
+                          className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-ruby"
+                        >
+                          <option value="">Select Product</option>
+                          {products.map(prod => (
+                            <option key={prod.id} value={prod.id}>{prod.name}</option>
+                          ))}
+                        </select>
+                      )}
+
+                      {bannerLinkType === 'link' && (
+                        <input 
+                          type="text" 
+                          placeholder="https://example.com or /shop"
+                          value={bannerForm.link || ''}
+                          onChange={e => setBannerForm({...bannerForm, link: e.target.value})}
+                          className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
+                        />
+                      )}
+                    </div>
+                  </div>
                 </div>
                 <button type="submit" className="w-full py-4 bg-ruby text-white rounded-2xl text-sm font-bold uppercase tracking-widest shadow-lg shadow-ruby/20 hover:bg-ruby-dark transition-all">
                   Add Banner

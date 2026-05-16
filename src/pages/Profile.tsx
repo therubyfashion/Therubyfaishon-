@@ -6,6 +6,7 @@ import { signOut, updateProfile } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import { compressImage } from '../utils/imageUtils';
 import { 
   History,
   Bell,
@@ -110,15 +111,32 @@ export default function Profile() {
 
     setIsUploading(true);
     try {
-      const storageRef = ref(storage, `profiles/${user.uid}/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
+      // 1. Convert to Base64
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+      const base64 = await base64Promise;
+
+      // 2. Compress
+      const compressed = await compressImage(base64, 400, 400, 0.7);
+      
+      // 3. Convert compressed back to blob for upload
+      const response = await fetch(compressed);
+      const blob = await response.blob();
+
+      const storageRef = ref(storage, `profiles/${user.uid}/${Date.now()}_profile.jpg`);
+      await uploadBytes(storageRef, blob, {
+        contentType: 'image/jpeg'
+      });
       const downloadURL = await getDownloadURL(storageRef);
       
       setEditForm(prev => ({ ...prev, photoURL: downloadURL }));
       toast.success("Image uploaded! Click Save to apply.");
     } catch (error) {
       console.error("Upload error:", error);
-      toast.error("Failed to upload image.");
+      toast.error("Failed to upload image. Please try a different photo.");
     } finally {
       setIsUploading(false);
     }
