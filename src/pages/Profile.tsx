@@ -38,6 +38,8 @@ export default function Profile() {
   const navigate = useNavigate();
   const [isEditing, setIsEditing] = React.useState(false);
   const [isUploading, setIsUploading] = React.useState(false);
+  const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = React.useState('');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [editForm, setEditForm] = React.useState({
     displayName: '',
@@ -56,6 +58,8 @@ export default function Profile() {
         phoneNumber: profile.phoneNumber || '',
         email: user.email || ''
       });
+      setSelectedFile(null);
+      setPreviewUrl('');
       
       // Load recently viewed
       try {
@@ -71,29 +75,61 @@ export default function Profile() {
     e.preventDefault();
     if (!user) return;
 
+    setIsUploading(true);
     try {
+      let finalPhotoURL = editForm.photoURL;
+
+      // Handle image upload if a new file is selected
+      if (selectedFile) {
+        // 1. Convert to Base64
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(selectedFile);
+        });
+        const base64 = await base64Promise;
+
+        // 2. Compress
+        const compressed = await compressImage(base64, 400, 400, 0.7);
+        
+        // 3. Convert compressed back to blob for upload
+        const response = await fetch(compressed);
+        const blob = await response.blob();
+
+        const storageRef = ref(storage, `profiles/${user.uid}/${Date.now()}_profile.jpg`);
+        await uploadBytes(storageRef, blob, {
+          contentType: 'image/jpeg'
+        });
+        finalPhotoURL = await getDownloadURL(storageRef);
+      }
+
       // Update Firebase Auth (Display Name & Photo)
       await updateProfile(user, {
         displayName: editForm.displayName,
-        photoURL: editForm.photoURL
+        photoURL: finalPhotoURL
       });
 
-      // Update Firestore (Name, Phone, Email)
+      // Update Firestore (Name, Phone, Email, Photo)
       await updateDoc(doc(db, 'users', user.uid), {
         displayName: editForm.displayName,
         phoneNumber: editForm.phoneNumber,
-        email: editForm.email
+        email: editForm.email,
+        photoURL: finalPhotoURL
       });
 
       toast.success("Profile updated successfully!");
       setIsEditing(false);
+      setSelectedFile(null);
+      setPreviewUrl('');
     } catch (error) {
       console.error("Update profile error:", error);
       toast.error("Failed to update profile.");
+    } finally {
+      setIsUploading(false);
     }
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
 
@@ -109,37 +145,12 @@ export default function Profile() {
       return;
     }
 
-    setIsUploading(true);
-    try {
-      // 1. Convert to Base64
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve) => {
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(file);
-      });
-      const base64 = await base64Promise;
-
-      // 2. Compress
-      const compressed = await compressImage(base64, 400, 400, 0.7);
-      
-      // 3. Convert compressed back to blob for upload
-      const response = await fetch(compressed);
-      const blob = await response.blob();
-
-      const storageRef = ref(storage, `profiles/${user.uid}/${Date.now()}_profile.jpg`);
-      await uploadBytes(storageRef, blob, {
-        contentType: 'image/jpeg'
-      });
-      const downloadURL = await getDownloadURL(storageRef);
-      
-      setEditForm(prev => ({ ...prev, photoURL: downloadURL }));
-      toast.success("Image uploaded! Click Save to apply.");
-    } catch (error) {
-      console.error("Upload error:", error);
-      toast.error("Failed to upload image. Please try a different photo.");
-    } finally {
-      setIsUploading(false);
-    }
+    setSelectedFile(file);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPreviewUrl(reader.result as string);
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleLogout = async () => {
@@ -282,8 +293,8 @@ export default function Profile() {
                     <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Profile Picture</label>
                     <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-2xl">
                       <div className="w-16 h-16 rounded-xl bg-white flex items-center justify-center overflow-hidden border border-gray-100 shadow-sm">
-                        {editForm.photoURL ? (
-                          <img src={editForm.photoURL} alt="Preview" className="w-full h-full object-cover" />
+                        {previewUrl || editForm.photoURL ? (
+                          <img src={previewUrl || editForm.photoURL} alt="Preview" className="w-full h-full object-cover" />
                         ) : (
                           <User size={24} className="text-gray-300" />
                         )}
@@ -303,8 +314,9 @@ export default function Profile() {
                           className="w-full bg-white border border-gray-100 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest text-[#1A2C54] hover:border-ruby/30 hover:text-ruby transition-all flex items-center justify-center gap-2"
                         >
                           <Camera size={14} />
-                          {isUploading ? 'Uploading...' : 'Choose from Gallery'}
+                          {selectedFile ? 'Change Selection' : 'Choose from Gallery'}
                         </button>
+                        {selectedFile && <p className="text-[10px] text-green-500 mt-1 font-bold">Image selected! Click Save to upload.</p>}
                         <p className="text-[8px] text-gray-400 mt-2 px-1 font-medium italic">Max size 2MB. JPG, PNG supported.</p>
                       </div>
                     </div>
@@ -356,9 +368,10 @@ export default function Profile() {
 
                   <button 
                     type="submit"
-                    className="w-full bg-[#1A2C54] text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-[0.2em] hover:bg-ruby transition-all shadow-lg shadow-[#1A2C54]/20 pt-4"
+                    disabled={isUploading}
+                    className="w-full bg-[#1A2C54] text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-[0.2em] hover:bg-ruby transition-all shadow-lg shadow-[#1A2C54]/20 pt-4 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Save Changes
+                    {isUploading ? 'Saving...' : 'Save Changes'}
                   </button>
                 </form>
               </motion.div>
