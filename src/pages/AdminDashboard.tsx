@@ -3670,7 +3670,7 @@ export default function AdminDashboard() {
     { id: 'reviews', label: 'Reviews', icon: Star },
     { id: 'abandoned', label: 'Abandoned Carts', icon: ShoppingCart },
     { id: 'insights', label: 'Product Insights', icon: BarChart3 },
-    { id: 'maintenance', label: 'Settings', icon: Settings },
+    { id: 'settings', label: 'Settings', icon: Settings },
   ], []);
 
   const statusColors: Record<string, string> = {
