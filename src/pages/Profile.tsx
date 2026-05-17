@@ -89,8 +89,8 @@ export default function Profile() {
         });
         const base64 = await base64Promise;
 
-        // 2. Compress
-        const compressed = await compressImage(base64, 400, 400, 0.7);
+        // 2. Compress (Optimized size for faster processing)
+        const compressed = await compressImage(base64, 300, 300, 0.6);
         
         // 3. Convert compressed back to blob for upload
         const response = await fetch(compressed);
@@ -103,21 +103,25 @@ export default function Profile() {
         finalPhotoURL = await getDownloadURL(storageRef);
       }
 
-      // Update Firebase Auth (Display Name & Photo)
-      await updateProfile(user, {
-        displayName: editForm.displayName,
-        photoURL: finalPhotoURL
-      });
+      // Update Firebase Auth & Firestore simultaneously for speed
+      await Promise.all([
+        updateProfile(user, {
+          displayName: editForm.displayName,
+          photoURL: finalPhotoURL
+        }),
+        updateDoc(doc(db, 'users', user.uid), {
+          displayName: editForm.displayName,
+          phoneNumber: editForm.phoneNumber,
+          email: editForm.email,
+          photoURL: finalPhotoURL,
+          updatedAt: new Date().toISOString()
+        })
+      ]);
 
-      // Update Firestore (Name, Phone, Email, Photo)
-      await updateDoc(doc(db, 'users', user.uid), {
-        displayName: editForm.displayName,
-        phoneNumber: editForm.phoneNumber,
-        email: editForm.email,
-        photoURL: finalPhotoURL
+      toast.success("Style Updated! 💎", {
+        description: "Your profile look has been successfully refreshed.",
+        duration: 3000
       });
-
-      toast.success("Profile updated successfully!");
       setIsEditing(false);
       setSelectedFile(null);
       setPreviewUrl('');
@@ -149,6 +153,10 @@ export default function Profile() {
     const reader = new FileReader();
     reader.onload = () => {
       setPreviewUrl(reader.result as string);
+      toast.success("Ready for a new look? ✨", {
+        description: "Photo selected. Hit 'Save Changes' to update your profile.",
+        duration: 3000
+      });
     };
     reader.readAsDataURL(file);
   };
@@ -316,7 +324,6 @@ export default function Profile() {
                           <Camera size={14} />
                           {selectedFile ? 'Change Selection' : 'Choose from Gallery'}
                         </button>
-                        {selectedFile && <p className="text-[10px] text-green-500 mt-1 font-bold">Image selected! Click Save to upload.</p>}
                         <p className="text-[8px] text-gray-400 mt-2 px-1 font-medium italic">Max size 2MB. JPG, PNG supported.</p>
                       </div>
                     </div>
