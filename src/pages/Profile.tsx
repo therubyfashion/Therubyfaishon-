@@ -49,91 +49,94 @@ export default function Profile() {
   });
 
   const [recentlyViewed, setRecentlyViewed] = React.useState<any[]>([]);
+  const uploadPromiseRef = React.useRef<Promise<string> | null>(null);
 
   React.useEffect(() => {
-    if (user && profile) {
+    // Load recently viewed
+    try {
+      const stored = JSON.parse(localStorage.getItem('recentlyViewed') || '[]');
+      setRecentlyViewed(stored);
+    } catch (e) {
+      console.error("Error loading recently viewed:", e);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (user && profile && !isEditing && !isUploading) {
       setEditForm({
-        displayName: user.displayName || '',
-        photoURL: user.photoURL || '',
+        displayName: user.displayName || profile.displayName || '',
+        photoURL: profile.photoURL || user.photoURL || '',
         phoneNumber: profile.phoneNumber || '',
         email: user.email || ''
       });
       setSelectedFile(null);
       setPreviewUrl('');
-      
-      // Load recently viewed
-      try {
-        const stored = JSON.parse(localStorage.getItem('recentlyViewed') || '[]');
-        setRecentlyViewed(stored);
-      } catch (e) {
-        console.error("Error loading recently viewed:", e);
-      }
     }
-  }, [user, profile]);
+  }, [user, profile, isEditing, isUploading]);
 
-  const handleUpdateProfile = async (e: React.FormEvent) => {
+  const handleUpdateProfile = (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
 
-    setIsUploading(true);
-    try {
-      let finalPhotoURL = editForm.photoURL;
+    // Phase 1: INSTANT UI FEEDBACK
+    // Capture state values for immediate processing
+    const capturedDisplayName = editForm.displayName;
+    const capturedPhoneNumber = editForm.phoneNumber;
+    const capturedEmail = editForm.email;
+    const capturedPhotoURL = editForm.photoURL; // This might be old if upload still in progress
+    
+    // Immediately close modal and show success toast for lightning speed feel
+    setIsEditing(false);
+    toast.success("Profile Updated! 💎", {
+      description: "We're syncing your changes in the background.",
+      duration: 3000
+    });
 
-      // Handle image upload if a new file is selected
-      if (selectedFile) {
-        // 1. Convert to Base64
-        const reader = new FileReader();
-        const base64Promise = new Promise<string>((resolve) => {
-          reader.onload = () => resolve(reader.result as string);
-          reader.readAsDataURL(selectedFile);
-        });
-        const base64 = await base64Promise;
+    // Phase 2: ROBUST BACKGROUND SYNC
+    const performBackgroundSync = async () => {
+      try {
+        let finalPhotoURL = capturedPhotoURL;
 
-        // 2. Compress (Optimized size for faster processing)
-        const compressed = await compressImage(base64, 300, 300, 0.6);
-        
-        // 3. Convert compressed back to blob for upload
-        const response = await fetch(compressed);
-        const blob = await response.blob();
+        // If an upload is currently happening, wait for it
+        if (uploadPromiseRef.current) {
+          try {
+            finalPhotoURL = await uploadPromiseRef.current;
+          } catch (e) {
+            console.error("Delayed upload failed:", e);
+          }
+        }
 
-        const storageRef = ref(storage, `profiles/${user.uid}/${Date.now()}_profile.jpg`);
-        await uploadBytes(storageRef, blob, {
-          contentType: 'image/jpeg'
-        });
-        finalPhotoURL = await getDownloadURL(storageRef);
+        // Final sync with potentially updated photo URL
+        await Promise.all([
+          updateProfile(user, {
+            displayName: capturedDisplayName,
+            photoURL: finalPhotoURL
+          }),
+          updateDoc(doc(db, 'users', user.uid), {
+            displayName: capturedDisplayName,
+            phoneNumber: capturedPhoneNumber,
+            email: capturedEmail,
+            photoURL: finalPhotoURL,
+            updatedAt: new Date().toISOString()
+          })
+        ]);
+
+        console.log("Background sync completed successfully");
+        // Only clear preview after we are SURE the data is persistent
+        setPreviewUrl('');
+        setSelectedFile(null);
+      } catch (error) {
+        console.error("Background sync error:", error);
+        toast.error("Sync failed. Some changes might not have saved.");
+      } finally {
+        uploadPromiseRef.current = null;
       }
+    };
 
-      // Update Firebase Auth & Firestore simultaneously for speed
-      await Promise.all([
-        updateProfile(user, {
-          displayName: editForm.displayName,
-          photoURL: finalPhotoURL
-        }),
-        updateDoc(doc(db, 'users', user.uid), {
-          displayName: editForm.displayName,
-          phoneNumber: editForm.phoneNumber,
-          email: editForm.email,
-          photoURL: finalPhotoURL,
-          updatedAt: new Date().toISOString()
-        })
-      ]);
-
-      toast.success("Style Updated! 💎", {
-        description: "Your profile look has been successfully refreshed.",
-        duration: 3000
-      });
-      setIsEditing(false);
-      setSelectedFile(null);
-      setPreviewUrl('');
-    } catch (error) {
-      console.error("Update profile error:", error);
-      toast.error("Failed to update profile.");
-    } finally {
-      setIsUploading(false);
-    }
+    performBackgroundSync();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
 
@@ -149,16 +152,52 @@ export default function Profile() {
       return;
     }
 
+    // 1. Set local preview immediately
     setSelectedFile(file);
-    const reader = new FileReader();
-    reader.onload = () => {
-      setPreviewUrl(reader.result as string);
-      toast.success("Ready for a new look? ✨", {
-        description: "Photo selected. Hit 'Save Changes' to update your profile.",
-        duration: 3000
-      });
+    const localReader = new FileReader();
+    localReader.onload = () => setPreviewUrl(localReader.result as string);
+    localReader.readAsDataURL(file);
+
+    // 2. Start background upload immediately
+    setIsUploading(true);
+    const uploadTask = async () => {
+      try {
+        // Convert to Base64 for compression
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+        const base64 = await base64Promise;
+
+        // Compress (Ultra-fast/Aggressive compression)
+        const compressed = await compressImage(base64, 250, 250, 0.4);
+        
+        const response = await fetch(compressed);
+        const blob = await response.blob();
+
+        const storageRef = ref(storage, `profiles/${user.uid}/${Date.now()}_profile.jpg`);
+        await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
+        const downloadURL = await getDownloadURL(storageRef);
+        
+        // Update the form state with the new URL
+        setEditForm(prev => ({ ...prev, photoURL: downloadURL }));
+        
+        toast.success("Ready to shine! ✨", {
+          description: "New photo is processed and ready.",
+          duration: 2000
+        });
+        return downloadURL;
+      } catch (error) {
+        console.error("Auto-upload error:", error);
+        toast.error("Photo upload failed.");
+        throw error;
+      } finally {
+        setIsUploading(false);
+      }
     };
-    reader.readAsDataURL(file);
+
+    uploadPromiseRef.current = uploadTask();
   };
 
   const handleLogout = async () => {
@@ -239,8 +278,8 @@ export default function Profile() {
           
           <div className="relative group">
             <div className="w-24 h-24 rounded-[2rem] bg-ruby/10 flex items-center justify-center text-ruby ring-4 ring-white shadow-lg overflow-hidden">
-              {user.photoURL ? (
-                <img src={user.photoURL} alt={user.displayName || ''} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              {previewUrl || profile?.photoURL || user.photoURL ? (
+                <img src={previewUrl || profile?.photoURL || user.photoURL} alt={user.displayName || ''} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
               ) : (
                 <User size={40} />
               )}
@@ -301,8 +340,8 @@ export default function Profile() {
                     <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Profile Picture</label>
                     <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-2xl">
                       <div className="w-16 h-16 rounded-xl bg-white flex items-center justify-center overflow-hidden border border-gray-100 shadow-sm">
-                        {previewUrl || editForm.photoURL ? (
-                          <img src={previewUrl || editForm.photoURL} alt="Preview" className="w-full h-full object-cover" />
+                        {previewUrl || editForm.photoURL || profile?.photoURL ? (
+                          <img src={previewUrl || editForm.photoURL || profile?.photoURL} alt="Preview" className="w-full h-full object-cover" />
                         ) : (
                           <User size={24} className="text-gray-300" />
                         )}
@@ -375,10 +414,9 @@ export default function Profile() {
 
                   <button 
                     type="submit"
-                    disabled={isUploading}
-                    className="w-full bg-[#1A2C54] text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-[0.2em] hover:bg-ruby transition-all shadow-lg shadow-[#1A2C54]/20 pt-4 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full bg-[#1A2C54] text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-[0.2em] hover:bg-ruby transition-all shadow-lg shadow-[#1A2C54]/20 pt-4"
                   >
-                    {isUploading ? 'Saving...' : 'Save Changes'}
+                    🚀 Save Changes
                   </button>
                 </form>
               </motion.div>

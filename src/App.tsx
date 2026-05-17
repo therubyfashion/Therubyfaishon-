@@ -36,7 +36,7 @@ const TrackOrder = React.lazy(() => import('./pages/TrackOrder'));
 const Notifications = React.lazy(() => import('./pages/Notifications'));
 import AdminDashboard from './pages/AdminDashboard';
 const Search = React.lazy(() => import('./pages/Search'));
-const Profile = React.lazy(() => import('./pages/Profile'));
+import Profile from './pages/Profile';
 const Settings = React.lazy(() => import('./pages/Settings'));
 const Addresses = React.lazy(() => import('./pages/Addresses'));
 const VerifyEmail = React.lazy(() => import('./pages/VerifyEmail'));
