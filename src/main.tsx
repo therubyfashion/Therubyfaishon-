@@ -16,6 +16,15 @@ console.error = (...args) => {
   originalError.call(console, ...args);
 };
 
+// Register Service Worker for PWA (Install Prompt)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(err => {
+      console.log('SW registration failed: ', err);
+    });
+  });
+}
+
 if (Capacitor.isNativePlatform()) {
   GoogleAuth.initialize({
     clientId: '987019399933-uda5bcfbav0ag272b4r47rrn624gdkei.apps.googleusercontent.com',
