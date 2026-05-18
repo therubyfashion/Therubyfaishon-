@@ -51,6 +51,7 @@ export default function Login() {
               uid: user.uid,
               email: user.email,
               displayName: user.displayName,
+              photoURL: user.photoURL || '',
               role: 'user',
               isVerified: true,
               createdAt: new Date().toISOString()
@@ -97,6 +98,7 @@ export default function Login() {
               uid: user.uid,
               email: user.email,
               displayName: user.displayName,
+              photoURL: user.photoURL || '',
               role: 'user',
               isVerified: true,
               createdAt: new Date().toISOString()
@@ -130,9 +132,20 @@ export default function Login() {
       }
     } catch (error: any) {
       console.error("Login error:", error);
-      if (error.code !== 'auth/popup-closed-by-user') {
-        toast.error("Login failed. Please try again.");
+      
+      let errorMessage = "Login failed. Please try again.";
+      if (error.code === 'auth/network-request-failed') {
+        errorMessage = "Network error! Please check your internet connection or check if your browser is blocking authentication scripts.";
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        return; // Don't show toast for user cancellation
       }
+
+      toast.error(errorMessage, {
+        action: error.code === 'auth/network-request-failed' ? {
+          label: "Retry",
+          onClick: () => window.location.reload()
+        } : undefined
+      });
     } finally {
       setLoading(false);
     }
@@ -150,6 +163,7 @@ export default function Login() {
           uid: user.uid,
           email: user.email,
           displayName: user.displayName,
+          photoURL: user.photoURL || '',
           role: 'user',
           isVerified: true,
           createdAt: new Date().toISOString()
@@ -185,6 +199,7 @@ export default function Login() {
             uid: user.uid,
             email: user.email,
             displayName: 'System Admin',
+            photoURL: user.photoURL || '',
             role: 'admin',
             isVerified: true,
             createdAt: new Date().toISOString()
@@ -252,7 +267,12 @@ export default function Login() {
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         toast.error("Invalid email or password.");
       } else if (error.code === 'auth/network-request-failed') {
-        toast.error("Network error! Please check your internet connection.");
+        toast.error("Network error! Please check your internet connection or check if your browser is blocking authentication scripts.", {
+          action: {
+            label: "Retry",
+            onClick: () => window.location.reload()
+          }
+        });
       } else {
         toast.error(error.message || "Failed to sign in. Please try again.");
       }

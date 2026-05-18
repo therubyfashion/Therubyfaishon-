@@ -139,7 +139,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let autoOfferDiscount = 0;
 
     items.forEach(item => {
-      subtotal += item.price * item.quantity;
+      const price = Number(item.price);
+      if (!isNaN(price)) {
+        subtotal += price * item.quantity;
+      }
     });
 
     // Strategy 1: Legacy Settings-based Discounts (Optional/Fallback)

@@ -6,6 +6,7 @@ import { db, auth } from '../firebase';
 import { Product, Review } from '../types';
 import { useCart } from '../contexts/CartContext';
 import { useWishlist } from '../contexts/WishlistContext';
+import { useAuth } from '../contexts/AuthContext';
 import { trackPixelEvent } from '../lib/pixel';
 import { toast } from 'sonner';
 import { Share } from '@capacitor/share';
@@ -20,6 +21,7 @@ import ProductCard from '../components/ProductCard';
 import { compressImage } from '../utils/imageUtils';
 
 function ReviewForm({ productId, onReviewAdded }: { productId: string; onReviewAdded: () => void }) {
+  const { user, profile } = useAuth();
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
   const [image, setImage] = useState<string | null>(null);
@@ -28,7 +30,7 @@ function ReviewForm({ productId, onReviewAdded }: { productId: string; onReviewA
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser) {
+    if (!user) {
       toast.error("Please login to write a review");
       return;
     }
@@ -42,9 +44,9 @@ function ReviewForm({ productId, onReviewAdded }: { productId: string; onReviewA
     try {
       await addDoc(collection(db, 'reviews'), {
         productId,
-        userName: auth.currentUser.displayName || auth.currentUser.email?.split('@')[0] || 'Anonymous',
-        userEmail: auth.currentUser.email,
-        userImage: auth.currentUser.photoURL || '',
+        userName: profile?.displayName || user.displayName || user.email?.split('@')[0] || 'Anonymous',
+        userEmail: user.email,
+        userImage: profile?.photoURL || user.photoURL || '',
         rating,
         comment,
         image,

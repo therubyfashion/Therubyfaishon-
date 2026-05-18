@@ -104,9 +104,12 @@ service cloud.firestore {
              data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
              data.role in ['admin', 'user'] &&
              data.createdAt is string &&
+             (!('displayName' in data) || data.displayName is string) &&
+             (!('photoURL' in data) || data.photoURL is string) &&
              (!('phoneNumber' in data) || data.phoneNumber is string) &&
              (!('phoneVerified' in data) || data.phoneVerified is bool) &&
-             (!('isVerified' in data) || data.isVerified is bool);
+             (!('isVerified' in data) || data.isVerified is bool) &&
+             (!('updatedAt' in data) || data.updatedAt is string);
     }
 
     function isValidAddress(data) {

@@ -166,11 +166,11 @@ export default function Checkout() {
   const selectedAddrObj = addresses.find(a => a.id === selectedAddress);
   const selectedShippingObj = shippingOptions.find(o => o.id === selectedShipping);
 
-  const subtotal = total;
-  const discount = appliedPromo ? appliedPromo.discount : 0;
-  const shippingCost = selectedShippingObj?.cost || 0;
-  const codFee = selectedPayment === 'cod' ? 80 : 0;
-  const finalTotal = subtotal - discount + shippingCost + codFee;
+  const subtotal = Number(total) || 0;
+  const discount = Number(appliedPromo ? appliedPromo.discount : 0);
+  const shippingCost = Number(selectedShippingObj?.cost || 0);
+  const codFee = Number(selectedPayment === 'cod' ? 80 : 0);
+  const finalTotal = Math.max(0, subtotal - discount + shippingCost + codFee);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -304,7 +304,7 @@ export default function Checkout() {
         status: 'Confirmed',
         paymentMethod: selectedPayment.toUpperCase(),
         shippingMethod: selectedShippingObj?.label || 'Standard Delivery',
-        email: selectedAddrObj?.email || user?.email || '',
+        email: (selectedAddrObj?.email || user?.email || '').toLowerCase(),
         customerName: selectedAddrObj?.name || user?.displayName || 'Customer',
         address: selectedAddrObj ?? null,
         createdAt: new Date().toISOString(),

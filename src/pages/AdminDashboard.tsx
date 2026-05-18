@@ -44,6 +44,8 @@ import { io } from 'socket.io-client';
 import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
 
+import { useAuth } from '../contexts/AuthContext';
+
 // ═══════════════════════════════════════════════
 // LIVE VIEW HELPER COMPONENTS
 // ═══════════════════════════════════════════════
@@ -972,6 +974,7 @@ function base64ToBlob(base64Data: string) {
 }
 
 export default function AdminDashboard() {
+  const { user, profile } = useAuth();
   const navigate = useNavigate();
   const { wipeSystem, running: hookRunning } = useFullSystemWipe(db);
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
@@ -1248,10 +1251,21 @@ export default function AdminDashboard() {
   const [trackingEvent, setTrackingEvent] = useState({ status: '', location: '', description: '' });
   const [isAddingEvent, setIsAddingEvent] = useState(false);
   const [profileFormData, setProfileFormData] = useState({
-    displayName: auth.currentUser?.displayName || '',
-    phoneNumber: auth.currentUser?.phoneNumber || '',
-    photoURL: auth.currentUser?.photoURL || '',
+    displayName: profile?.displayName || user?.displayName || '',
+    phoneNumber: profile?.phoneNumber || '',
+    photoURL: profile?.photoURL || user?.photoURL || '',
   });
+
+  // Sync profile form when profile data arrives
+  useEffect(() => {
+    if (profile || user) {
+      setProfileFormData({
+        displayName: profile?.displayName || user?.displayName || '',
+        phoneNumber: profile?.phoneNumber || '',
+        photoURL: profile?.photoURL || user?.photoURL || '',
+      });
+    }
+  }, [profile, user]);
 
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: '',
@@ -1261,15 +1275,34 @@ export default function AdminDashboard() {
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser) return;
+    if (!auth.currentUser || !user) return;
     setIsUpdatingProfile(true);
     try {
-      await updateProfile(auth.currentUser, {
+      await user.reload();
+      
+      const updatePayload: any = {
         displayName: profileFormData.displayName,
-        photoURL: profileFormData.photoURL,
-      });
-      toast.success('Admin profile updated successfully!');
+        phoneNumber: profileFormData.phoneNumber,
+        updatedAt: new Date().toISOString()
+      };
+
+      // Only update photo if it's a valid remote URL
+      if (profileFormData.photoURL && !profileFormData.photoURL.startsWith('blob:') && !profileFormData.photoURL.startsWith('data:')) {
+        updatePayload.photoURL = profileFormData.photoURL;
+      }
+
+      await Promise.all([
+        updateProfile(auth.currentUser, {
+          displayName: profileFormData.displayName,
+          photoURL: (profileFormData.photoURL && !profileFormData.photoURL.startsWith('blob:') && !profileFormData.photoURL.startsWith('data:'))
+            ? profileFormData.photoURL 
+            : (user.photoURL || '')
+        }),
+        updateDoc(doc(db, 'users', user.uid), updatePayload)
+      ]);
+      toast.success('Admin profile updated successfully! 💎');
     } catch (error) {
+      console.error("Admin profile update error:", error);
       toast.error('Failed to update admin profile. Please try again.');
     } finally {
       setIsUpdatingProfile(false);
@@ -1480,6 +1513,14 @@ export default function AdminDashboard() {
           // Wait a bit for subscription to update
           await new Promise(resolve => setTimeout(resolve, 2000));
           
+          // Add Admin Tag
+          try {
+            if (OS.User?.addTag) await OS.User.addTag("role", "admin");
+            else if (OS.sendTag) await OS.sendTag("role", "admin");
+          } catch (tagErr) {
+            console.error("Failed to tag admin:", tagErr);
+          }
+
           const isSubscribed = OS.User.PushSubscription.optedIn;
           console.log("OneSignal Subscription status:", isSubscribed);
           
@@ -4032,13 +4073,13 @@ export default function AdminDashboard() {
               >
                 <div className="w-8 h-8 rounded-lg overflow-hidden border border-white shadow-sm ring-1 ring-gray-100">
                   <img 
-                    src={auth.currentUser?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${auth.currentUser?.email}`} 
+                    src={profile?.photoURL || user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.email}`} 
                     alt="Me" 
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform" 
                   />
                 </div>
                 <div className="hidden xs:block text-left leading-none">
-                  <p className="text-[10px] font-black text-[#1A2C54] tracking-tight truncate max-w-[80px]">{auth.currentUser?.displayName || 'Admin'}</p>
+                  <p className="text-[10px] font-black text-[#1A2C54] tracking-tight truncate max-w-[80px]">{profile?.displayName || user?.displayName || 'Admin'}</p>
                   <p className="text-[8px] font-bold text-ruby uppercase tracking-[0.05em] mt-0.5">Online</p>
                 </div>
               </button>
@@ -4328,7 +4369,7 @@ export default function AdminDashboard() {
                                     </div>
                                   </div>
                                   <div className="text-right">
-                                    <p className="text-sm font-black text-[#1A2C54]">₹{order.total?.toLocaleString()}</p>
+                                    <p className="text-sm font-black text-[#1A2C54]">₹{Number(order.total || 0).toLocaleString()}</p>
                                     <span className={cn(
                                       "text-[8px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full",
                                       statusColors[order.status] || "bg-gray-100 text-gray-600"
@@ -4965,7 +5006,7 @@ export default function AdminDashboard() {
                                   </div>
                                 </td>
                                 <td className="px-6 py-5 text-right">
-                                  <p className="text-[17px] font-black text-gray-900 leading-none mb-1">₹{(order.total || 0).toLocaleString()}</p>
+                                  <p className="text-[17px] font-black text-gray-900 leading-none mb-1">₹{Number(order.total || 0).toLocaleString()}</p>
                                   <p className="text-[10px] font-black text-gray-400 tracking-widest uppercase">Razorpay</p>
                                 </td>
                                 <td className="px-6 py-5 text-center">
@@ -5052,7 +5093,7 @@ export default function AdminDashboard() {
                                 </div>
                             </div>
                             <div className="text-right">
-                               <p className="text-[15px] sm:text-[18px] font-black text-gray-900 tracking-tight leading-none">₹{(order.total || 0).toLocaleString()}</p>
+                               <p className="text-[15px] sm:text-[18px] font-black text-gray-900 tracking-tight leading-none">₹{Number(order.total || 0).toLocaleString()}</p>
                                <span className="text-[8px] sm:text-[9px] font-black text-gray-300 tracking-widest uppercase">Total</span>
                             </div>
                           </div>
@@ -5252,7 +5293,7 @@ export default function AdminDashboard() {
                                     </div>
                                   </td>
                                   <td className="py-3 text-right">
-                                    <div className="text-[14px] font-[600] text-shop-text">₹{(item.price * item.qtyToFulfill).toLocaleString()}</div>
+                                    <div className="text-[14px] font-[600] text-shop-text">₹{(Number(item.price || 0) * Number(item.qtyToFulfill || 0)).toLocaleString()}</div>
                                   </td>
                                 </tr>
                               ))}
@@ -5275,7 +5316,7 @@ export default function AdminDashboard() {
                                     {item.selectedSize && item.selectedColor && ' / '}
                                     {item.selectedColor && `Color: ${item.selectedColor}`}
                                   </div>
-                                  <div className="text-[14px] font-[700] text-shop-text mt-1">₹{(item.price).toLocaleString()} / each</div>
+                                  <div className="text-[14px] font-[700] text-shop-text mt-1">₹{(Number(item.price || 0)).toLocaleString()} / each</div>
                                 </div>
                               </div>
                               <div className="flex items-center justify-between pt-3 border-t border-shop-border/30">
@@ -5302,8 +5343,8 @@ export default function AdminDashboard() {
                         </div>
                       </div>
                       <div className="px-4 py-3 bg-[#fafafa] border-t border-shop-border flex justify-between items-center text-[13px]">
-                        <span className="text-shop-text-muted ">Total to fulfill: <strong className="text-shop-text">{fulfillmentItems.reduce((acc: number, curr: any) => acc + curr.qtyToFulfill, 0)} items</strong></span>
-                        <span className="text-[14px] font-[700] text-shop-text">₹{fulfillmentItems.reduce((acc: number, curr: any) => acc + (curr.price * curr.qtyToFulfill), 0).toLocaleString()}</span>
+                        <span className="text-shop-text-muted ">Total to fulfill: <strong className="text-shop-text">{fulfillmentItems.reduce((acc: number, curr: any) => acc + Number(curr.qtyToFulfill || 0), 0)} items</strong></span>
+                        <span className="text-[14px] font-[700] text-shop-text">₹{fulfillmentItems.reduce((acc: number, curr: any) => acc + (Number(curr.price || 0) * Number(curr.qtyToFulfill || 0)), 0).toLocaleString()}</span>
                       </div>
                     </div>
 
@@ -5476,7 +5517,7 @@ export default function AdminDashboard() {
                         </div>
                         <div className="pt-2 border-t border-gray-200 flex justify-between items-start">
                           <span className="text-[14px] text-shop-text font-[800]">Total</span>
-                          <span className="text-[15px] font-[800] text-shop-text">₹{(viewingCustomer.total || 0).toLocaleString()}</span>
+                          <span className="text-[15px] font-800 text-shop-text">₹{Number(viewingCustomer.total || 0).toLocaleString()}</span>
                         </div>
                       </div>
                     </div>
@@ -7545,7 +7586,7 @@ export default function AdminDashboard() {
                               <div className="relative inline-block">
                                 <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-[2rem] bg-white p-2 shadow-2xl border border-gray-100 mx-auto overflow-hidden group-hover:scale-105 transition-transform duration-500">
                                   <img 
-                                    src={auth.currentUser?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${auth.currentUser?.email}`} 
+                                    src={profile?.photoURL || user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.email}`} 
                                     alt="Admin Avatar" 
                                     className="w-full h-full object-cover rounded-[1.5rem]"
                                   />
@@ -7555,13 +7596,13 @@ export default function AdminDashboard() {
                                 </button>
                               </div>
                               <div className="mt-6 space-y-1">
-                                <h3 className="text-xl font-black text-[#1A2C54] tracking-tight">{auth.currentUser?.displayName || 'Admin User'}</h3>
+                                <h3 className="text-xl font-black text-[#1A2C54] tracking-tight">{profile?.displayName || user?.displayName || 'Admin User'}</h3>
                                 <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-ruby/10 text-ruby rounded-lg">
                                   <Shield size={12} />
                                   <span className="text-[10px] font-black uppercase tracking-widest leading-none">Super Administrator</span>
                                 </div>
                               </div>
-                              <p className="text-[11px] text-gray-400 font-medium mt-4">{auth.currentUser?.email}</p>
+                              <p className="text-[11px] text-gray-400 font-medium mt-4">{user?.email}</p>
                             </div>
 
                             <div className="bg-white border border-gray-100 rounded-3xl p-6 space-y-4">

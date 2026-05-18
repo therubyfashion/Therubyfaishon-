@@ -58,6 +58,7 @@ export default function Signup() {
               uid: user.uid,
               email: user.email,
               displayName: user.displayName,
+              photoURL: user.photoURL || '',
               role: 'user',
               isVerified: true,
               createdAt: new Date().toISOString()
@@ -95,6 +96,7 @@ export default function Signup() {
               uid: user.uid,
               email: user.email,
               displayName: user.displayName,
+              photoURL: user.photoURL || '',
               role: 'user',
               isVerified: true,
               createdAt: new Date().toISOString()
@@ -118,9 +120,20 @@ export default function Signup() {
       }
     } catch (error: any) {
       console.error("Signup error:", error);
-      if (error.code !== 'auth/popup-closed-by-user') {
-        toast.error("Signup failed. Please try again.");
+      
+      let errorMessage = "Signup failed. Please try again.";
+      if (error.code === 'auth/network-request-failed') {
+        errorMessage = "Network error! Please check your internet connection or check if your browser is blocking authentication scripts.";
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        return; // Don't show toast for user cancellation
       }
+
+      toast.error(errorMessage, {
+        action: error.code === 'auth/network-request-failed' ? {
+          label: "Retry",
+          onClick: () => window.location.reload()
+        } : undefined
+      });
     } finally {
       setLoading(false);
     }
@@ -138,6 +151,7 @@ export default function Signup() {
           uid: user.uid,
           email: user.email,
           displayName: user.displayName,
+          photoURL: user.photoURL || '',
           role: 'user',
           isVerified: true,
           createdAt: new Date().toISOString()
@@ -289,7 +303,12 @@ export default function Signup() {
       if (error.code === 'auth/email-already-in-use') {
         toast.error("Email already in use. Please sign in.");
       } else if (error.code === 'auth/network-request-failed') {
-        toast.error("Network error! Please check your internet connection or disable ad-blockers.");
+        toast.error("Network error! Please check your internet connection or check if your browser is blocking authentication scripts.", {
+          action: {
+            label: "Retry",
+            onClick: () => window.location.reload()
+          }
+        });
       } else if (error.code === 'not-found' || error.message?.includes('5 NOT_FOUND')) {
         toast.error("The database is being provisioned (Google Provisioning). Please try again in 2-3 minutes! 💎", { duration: 6000 });
       } else if (error.message) {

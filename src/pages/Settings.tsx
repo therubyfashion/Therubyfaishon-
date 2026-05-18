@@ -257,9 +257,10 @@ export default function Settings() {
                   <div className="relative">
                     <div className="w-20 h-20 rounded-2xl overflow-hidden border-2 border-ruby shadow-lg shadow-ruby/10">
                       <img 
-                        src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.email}`} 
+                        src={profile?.photoURL || user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.email}`} 
                         className="w-full h-full object-cover" 
                         alt="Me"
+                        referrerPolicy="no-referrer"
                       />
                     </div>
                     <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-[#1A2C54] rounded-lg border-2 border-white flex items-center justify-center">

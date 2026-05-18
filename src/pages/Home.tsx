@@ -14,11 +14,13 @@ import ProductCard from '../components/ProductCard';
 import { ProductCardSkeleton } from '../components/Skeleton';
 import { toast } from 'sonner';
 import { compressImage } from '../utils/imageUtils';
+import { useAuth } from '../contexts/AuthContext';
 import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
 import { useNotifications } from '../contexts/NotificationContext';
 
 export default function Home() {
+  const { user, profile } = useAuth();
   const [unreadCount] = useState(0); // Notifications context fallback if needed
   const [trendingProducts, setTrendingProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -146,7 +148,7 @@ export default function Home() {
   }, [reviews.length]);
 
   const handleAddReview = async () => {
-    if (!auth.currentUser) {
+    if (!user) {
       toast.error("Please login to share your experience", {
         action: { label: "Login", onClick: () => navigate('/login') }
       });
@@ -166,8 +168,8 @@ export default function Home() {
       const randomColor = colors[Math.floor(Math.random() * colors.length)];
       
       const reviewData = {
-        name: auth.currentUser.displayName || 'Anonymous User',
-        initials: (auth.currentUser.displayName || 'U').charAt(0).toUpperCase(),
+        name: profile?.displayName || user?.displayName || 'Anonymous User',
+        initials: (profile?.displayName || user?.displayName || 'U').charAt(0).toUpperCase(),
         color: randomColor,
         rating: newReview.rating,
         text: newReview.text,
@@ -176,7 +178,7 @@ export default function Home() {
         date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
         likes: 0,
         dislikes: 0,
-        userId: auth.currentUser.uid,
+        userId: user.uid,
         createdAt: serverTimestamp()
       };
 
@@ -240,7 +242,7 @@ export default function Home() {
         await addDoc(collection(db, 'newsletter'), {
           email,
           createdAt: new Date().toISOString(),
-          userId: auth.currentUser?.uid || 'guest'
+          userId: user?.uid || 'guest'
         });
 
         // Tag in OneSignal
@@ -281,8 +283,8 @@ export default function Home() {
         <div className="flex items-center justify-between mb-4">
           <Link to="/profile" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
             <div className="w-11 h-11 rounded-full bg-[#c4a882] overflow-hidden flex items-center justify-center text-white font-bold">
-              {auth.currentUser?.photoURL ? (
-                <img src={auth.currentUser.photoURL} alt="User" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              {profile?.photoURL || user?.photoURL ? (
+                <img src={profile?.photoURL || user?.photoURL} alt="User" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
               ) : (
                 <User size={24} />
               )}
@@ -290,7 +292,7 @@ export default function Home() {
             <div>
               <p className="text-[12px] text-gray-400 font-medium">Good Morning 👋</p>
               <p className="text-[17px] font-bold text-[#111] leading-tight">
-                {auth.currentUser?.displayName || 'User'}
+                {profile?.displayName || user?.displayName || 'User'}
               </p>
             </div>
           </Link>

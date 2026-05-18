@@ -20,13 +20,13 @@ export const generateInvoice = (order: any, settings?: any) => {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(22);
       doc.setTextColor(rubyColor[0], rubyColor[1], rubyColor[2]);
-      doc.text('Thr Ruby', margin, margin + 12);
+      doc.text('The Ruby', margin, margin + 12);
     }
   } else {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(22);
     doc.setTextColor(rubyColor[0], rubyColor[1], rubyColor[2]);
-    doc.text('Thr Ruby', margin, margin + 12);
+    doc.text('The Ruby', margin, margin + 12);
   }
 
   // Tagline under logo
@@ -60,7 +60,7 @@ export const generateInvoice = (order: any, settings?: any) => {
   doc.text('Sold By :', margin, colY);
   
   doc.setFontSize(11);
-  doc.text(settings?.storeName || 'Thr Ruby', margin, colY + 10);
+  doc.text(settings?.storeName || 'The Ruby', margin, colY + 10);
   
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
@@ -224,7 +224,7 @@ export const generateInvoice = (order: any, settings?: any) => {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(0);
-  doc.text(`For ${settings?.storeName || 'Thr Ruby'}`, margin, signY);
+  doc.text(`For ${settings?.storeName || 'The Ruby'}`, margin, signY);
   
   // Dummy Signature Placeholder
   doc.setFont('helvetica', 'italic');

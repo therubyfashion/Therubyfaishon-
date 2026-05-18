@@ -38,6 +38,7 @@ export default function Profile() {
   const navigate = useNavigate();
   const [isEditing, setIsEditing] = React.useState(false);
   const [isUploading, setIsUploading] = React.useState(false);
+  const [isSyncing, setIsSyncing] = React.useState(false);
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = React.useState('');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -62,7 +63,7 @@ export default function Profile() {
   }, []);
 
   React.useEffect(() => {
-    if (user && profile && !isEditing && !isUploading) {
+    if (user && profile && !isEditing && !isUploading && !isSyncing) {
       setEditForm({
         displayName: user.displayName || profile.displayName || '',
         photoURL: profile.photoURL || user.photoURL || '',
@@ -72,7 +73,7 @@ export default function Profile() {
       setSelectedFile(null);
       setPreviewUrl('');
     }
-  }, [user, profile, isEditing, isUploading]);
+  }, [user, profile, isEditing, isUploading, isSyncing]);
 
   const handleUpdateProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,40 +95,63 @@ export default function Profile() {
 
     // Phase 2: ROBUST BACKGROUND SYNC
     const performBackgroundSync = async () => {
+      setIsSyncing(true);
       try {
         let finalPhotoURL = capturedPhotoURL;
 
-        // If an upload is currently happening, wait for it
+        // CRITICAL: Filter out temporary local URLs from the captured state
+        if (finalPhotoURL && (finalPhotoURL.startsWith('blob:') || finalPhotoURL.startsWith('data:'))) {
+          finalPhotoURL = profile?.photoURL || user.photoURL || ''; 
+        }
+
+        // If an upload is currently happening or failed once, wait for it/retry
         if (uploadPromiseRef.current) {
           try {
-            finalPhotoURL = await uploadPromiseRef.current;
+            const uploadedURL = await uploadPromiseRef.current;
+            if (uploadedURL) finalPhotoURL = uploadedURL;
           } catch (e) {
-            console.error("Delayed upload failed:", e);
+            console.error("Background photo sync failed, proceeding with other fields:", e);
+            // If upload failed, revert finalPhotoURL to existing remote URL if current is invalid
+            if (finalPhotoURL.startsWith('blob:') || finalPhotoURL.startsWith('data:')) {
+              finalPhotoURL = profile?.photoURL || user.photoURL || '';
+            }
           }
         }
 
+        const updatePayload: any = {
+          displayName: capturedDisplayName,
+          phoneNumber: capturedPhoneNumber || '',
+          email: capturedEmail,
+          updatedAt: new Date().toISOString()
+        };
+
+        // Only save to Firestore if it's a valid remote URL
+        if (finalPhotoURL && !finalPhotoURL.startsWith('blob:') && !finalPhotoURL.startsWith('data:')) {
+          updatePayload.photoURL = finalPhotoURL;
+        }
+
         // Final sync with potentially updated photo URL
+        await user.reload(); // Refresh the auth token/object
+        
         await Promise.all([
           updateProfile(user, {
             displayName: capturedDisplayName,
-            photoURL: finalPhotoURL
+            photoURL: (finalPhotoURL && !finalPhotoURL.startsWith('blob:') && !finalPhotoURL.startsWith('data:')) 
+              ? finalPhotoURL 
+              : (user.photoURL || '')
           }),
-          updateDoc(doc(db, 'users', user.uid), {
-            displayName: capturedDisplayName,
-            phoneNumber: capturedPhoneNumber,
-            email: capturedEmail,
-            photoURL: finalPhotoURL,
-            updatedAt: new Date().toISOString()
-          })
+          updateDoc(doc(db, 'users', user.uid), updatePayload)
         ]);
 
         console.log("Background sync completed successfully");
         // Only clear preview after we are SURE the data is persistent
+        setIsSyncing(false); 
         setPreviewUrl('');
         setSelectedFile(null);
       } catch (error) {
         console.error("Background sync error:", error);
-        toast.error("Sync failed. Some changes might not have saved.");
+        toast.error("Update failed. Please retry.");
+        setIsSyncing(false);
       } finally {
         uploadPromiseRef.current = null;
       }
@@ -160,37 +184,63 @@ export default function Profile() {
 
     // 2. Start background upload immediately
     setIsUploading(true);
-    const uploadTask = async () => {
+    const uploadTask = async (retries = 3): Promise<string> => {
       try {
         // Convert to Base64 for compression
         const reader = new FileReader();
-        const base64Promise = new Promise<string>((resolve) => {
+        const base64Promise = new Promise<string>((resolve, reject) => {
           reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("Failed to read file"));
           reader.readAsDataURL(file);
         });
         const base64 = await base64Promise;
 
         // Compress (Ultra-fast/Aggressive compression)
-        const compressed = await compressImage(base64, 250, 250, 0.4);
+        const compressed = await compressImage(base64, 400, 400, 0.4);
         
         const response = await fetch(compressed);
         const blob = await response.blob();
 
-        const storageRef = ref(storage, `profiles/${user.uid}/${Date.now()}_profile.jpg`);
-        await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
+        if (blob.size === 0) throw new Error("Generated empty blob");
+
+        // Use a consistent path
+        const storageRef = ref(storage, `users/${user.uid}/profile_${Date.now()}.jpg`);
+        
+        // Use uploadBytes
+        await uploadBytes(storageRef, blob, { 
+          contentType: 'image/jpeg',
+          cacheControl: 'public,max-age=31536000'
+        });
+        
         const downloadURL = await getDownloadURL(storageRef);
         
+        // PERSISTENCE: Save to Firestore immediately for rock-solid sync
+        await user.reload(); // Ensure we have latest auth state
+        
+        await Promise.all([
+          updateProfile(user, { photoURL: downloadURL }),
+          updateDoc(doc(db, 'users', user.uid), { 
+            photoURL: downloadURL,
+            updatedAt: new Date().toISOString()
+          })
+        ]);
+
         // Update the form state with the new URL
         setEditForm(prev => ({ ...prev, photoURL: downloadURL }));
         
-        toast.success("Ready to shine! ✨", {
-          description: "New photo is processed and ready.",
+        toast.success("Profile photo updated! ✨", {
           duration: 2000
         });
         return downloadURL;
-      } catch (error) {
-        console.error("Auto-upload error:", error);
-        toast.error("Photo upload failed.");
+      } catch (error: any) {
+        console.error(`Upload attempt remaining: ${retries}`, error);
+        if (retries > 0 && (error.code === 'storage/retry-limit-exceeded' || error.message?.includes('fetch'))) {
+          // Exponential backoff
+          await new Promise(r => setTimeout(r, (4 - retries) * 1000));
+          return uploadTask(retries - 1);
+        }
+        
+        toast.error("Network issue. Photo might not load instantly.");
         throw error;
       } finally {
         setIsUploading(false);
@@ -293,7 +343,7 @@ export default function Profile() {
           </div>
 
           <div className="space-y-1">
-            <h2 className="text-2xl font-serif font-bold text-[#1A2C54]">{user.displayName || 'The Ruby User'}</h2>
+            <h2 className="text-2xl font-serif font-bold text-[#1A2C54]">{profile?.displayName || user.displayName || 'The Ruby User'}</h2>
             <p className="text-sm text-gray-400 font-medium">{user.email}</p>
           </div>
 

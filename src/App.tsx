@@ -144,7 +144,7 @@ function AppContent() {
               });
             }
 
-            if (user && profile?.isVerified) {
+            if (user) {
               console.log("🚀 OneSignal: Syncing User ID:", user.uid);
               if (OS.setExternalUserId) OS.setExternalUserId(user.uid);
               else if (OS.login) OS.login(user.uid);
@@ -152,7 +152,7 @@ function AppContent() {
               const tags = {
                 "role": isAdmin ? 'admin' : 'customer',
                 "email": user.email || '',
-                "verified": "true"
+                "verified": profile?.isVerified ? "true" : "false"
               };
               
               if (OS.sendTags) OS.sendTags(tags);
@@ -164,7 +164,7 @@ function AppContent() {
             console.error("❌ OneSignal: Native Init Error:", e);
           }
         } else {
-          // Fallback for Web (if script was manually included or for testing)
+          // Web SDK Initialization
           // @ts-ignore
           const OneSignalWeb = window.OneSignal;
           if (OneSignalWeb) {
@@ -172,8 +172,20 @@ function AppContent() {
               appId: appId,
               allowLocalhostAsSecureOrigin: true,
             });
-            if (user && profile?.isVerified) {
+            
+            if (user) {
               await OneSignalWeb.login(user.uid);
+              // Set tags for web
+              const tags = {
+                "role": isAdmin ? 'admin' : 'customer',
+                "email": user.email || '',
+                "verified": profile?.isVerified ? "true" : "false"
+              };
+              if (OneSignalWeb.User?.addTags) {
+                 await OneSignalWeb.User.addTags(tags);
+              } else if (OneSignalWeb.sendTags) {
+                 await OneSignalWeb.sendTags(tags);
+              }
             }
           }
         }

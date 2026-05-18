@@ -45,7 +45,7 @@ export default function TrackOrder() {
     setError(null);
     try {
       const cleanOid = oid.trim();
-      const cleanEmail = emailStr.trim();
+      const cleanEmail = emailStr.trim().toLowerCase();
       
       // We try 3 variations of orderId format since users might enter with/without # or uppercase/lowercase
       const idVariations = [
@@ -483,7 +483,7 @@ export default function TrackOrder() {
                   </div>
                 </div>
                 <div className="flex items-end justify-between">
-                   <p className="text-lg font-black tracking-tight text-shop-text">₹{order.items?.[0]?.price?.toLocaleString() || '0'}</p>
+                   <p className="text-lg font-black tracking-tight text-shop-text">₹{Number(order.items?.[0]?.price || 0).toLocaleString()}</p>
                    <span className="text-[10px] font-black text-gray-400 bg-gray-200/50 px-2 py-0.5 rounded-md uppercase tracking-widest">Qty: {order.items?.[0]?.quantity}</span>
                 </div>
               </div>
@@ -578,7 +578,7 @@ export default function TrackOrder() {
                <div className="space-y-3">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500 font-medium tracking-tight">Total Value</span>
-                    <span className="font-black text-ruby">₹{order.total?.toLocaleString()}</span>
+                    <span className="font-black text-ruby">₹{Number(order.total || 0).toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500 font-medium tracking-tight">Delivery Point</span>

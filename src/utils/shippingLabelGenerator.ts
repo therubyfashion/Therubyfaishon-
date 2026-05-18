@@ -21,7 +21,7 @@ export const generateShippingLabel = async (order: any, settings?: any) => {
   // Logo & Store Name
   doc.setFont('times', 'bold');
   doc.setFontSize(18);
-  doc.text('Thr Ruby', margin + 2, margin + 8);
+  doc.text('The Ruby', margin + 2, margin + 8);
   doc.setFont('times', 'normal');
   doc.setFontSize(7);
   doc.text('Timeless Elegance, Crafted for You', margin + 2, margin + 12);
@@ -74,7 +74,7 @@ export const generateShippingLabel = async (order: any, settings?: any) => {
   doc.line(2, 65, width - 2, 65);
   doc.text('Seller Name:', margin + 2, 69);
   doc.setFont('helvetica', 'bold');
-  doc.text('Thr Ruby', margin + 2, 73);
+  doc.text('The Ruby', margin + 2, 73);
   doc.line(2, 75, width - 2, 75);
 
   // Tracking Barcode #1 (Middle)
@@ -133,7 +133,7 @@ export const generateShippingLabel = async (order: any, settings?: any) => {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(6);
   const pickupAddr = [
-    'Thr Ruby',
+    'The Ruby',
     'D-12, First Floor, Sector-7',
     'Noida, Gautam Buddha Nagar',
     'Uttar Pradesh - 201301',

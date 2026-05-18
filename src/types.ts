@@ -41,6 +41,7 @@ export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
+  photoURL?: string;
   phoneNumber?: string;
   phoneVerified?: boolean;
   addressConfirmedAt?: string;
@@ -49,6 +50,7 @@ export interface UserProfile {
   verificationToken?: string | null;
   loyaltyPoints?: number;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Order {

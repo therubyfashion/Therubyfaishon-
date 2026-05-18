@@ -190,7 +190,14 @@ export default function OrderSuccess() {
 
         {/* Action Buttons */}
         <div className="space-y-4">
-          <button className="w-full bg-ruby text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95">
+          <button 
+            onClick={() => {
+              const emailValue = orderData.address?.email || orderData.email || '';
+              const orderIdValue = (orderData.orderId || '').replace('#', '');
+              navigate(`/track/${orderIdValue}${emailValue ? `?email=${encodeURIComponent(emailValue)}` : ''}`);
+            }}
+            className="w-full bg-ruby text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95"
+          >
             Track My Order 📦
           </button>
           <button 

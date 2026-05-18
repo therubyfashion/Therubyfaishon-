@@ -640,23 +640,23 @@ async function startServer() {
         console.log(`🔍 Checking variations: ${JSON.stringify(uniqueVariants)}`);
 
         for (const variant of uniqueVariants) {
-          const querySnap = await db.collection('orders')
-            .where('orderId', '==', variant)
-            .limit(5) // Get a few to check email in memory if needed
-            .get();
+          // Check 'email', 'address.email', and 'customerEmail' fields in query
+          const emailFields = ['email', 'address.email', 'customerEmail'];
           
-          if (!querySnap.empty) {
-            // Check emails for each result in the variant set
-            for (const doc of querySnap.docs) {
-              const data = doc.data();
-              const customerEmail = String(data?.email || data?.address?.email || data?.customerEmail || '').trim().toLowerCase();
-              if (customerEmail === targetEmail) {
-                orderData = { id: doc.id, ...data };
-                break;
-              }
+          for (const emailField of emailFields) {
+            const querySnap = await db.collection('orders')
+              .where('orderId', '==', variant)
+              .where(emailField, '==', targetEmail)
+              .limit(1)
+              .get();
+            
+            if (!querySnap.empty) {
+              orderData = { id: querySnap.docs[0].id, ...querySnap.docs[0].data() };
+              console.log(`✅ Found order by orderId and ${emailField}`);
+              break;
             }
-            if (orderData) break;
           }
+          if (orderData) break;
         }
       }
 

@@ -11,7 +11,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function Navbar({ solid = false }: { solid?: boolean }) {
-  const { user, isAdmin } = useAuth();
+  const { user, profile, isAdmin } = useAuth();
   const { itemCount } = useCart();
   const { items: wishlistItems } = useWishlist();
   const { unreadCount } = useNotifications();
@@ -144,8 +144,8 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
                   </Link>
                 )}
                 <Link to="/profile" className="w-8 h-8 rounded-full bg-ruby/10 border border-ruby/20 flex items-center justify-center overflow-hidden">
-                  {user.photoURL ? (
-                    <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  {profile?.photoURL || user.photoURL ? (
+                    <img src={profile?.photoURL || user.photoURL} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   ) : (
                     <User size={16} className="text-ruby" />
                   )}
@@ -208,11 +208,20 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
               <div className="mt-auto pt-8 border-t border-gray-100">
                 {user ? (
                   <div className="flex items-center space-x-4">
-                    <div className="w-12 h-12 rounded-full bg-gray-100 overflow-hidden">
-                      {user.photoURL && <img src={user.photoURL} alt="User" className="w-full h-full object-cover" />}
+                    <div className="w-12 h-12 rounded-full bg-gray-100 overflow-hidden flex items-center justify-center">
+                      {profile?.photoURL || user.photoURL ? (
+                        <img 
+                          src={profile?.photoURL || user.photoURL} 
+                          alt="User" 
+                          className="w-full h-full object-cover" 
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <User size={20} className="text-gray-400" />
+                      )}
                     </div>
                     <div>
-                      <p className="font-bold text-gray-900">{user.displayName || 'User'}</p>
+                      <p className="font-bold text-gray-900">{profile?.displayName || user.displayName || 'User'}</p>
                       <Link to="/profile" onClick={() => setIsMenuOpen(false)} className="text-xs text-ruby font-bold uppercase tracking-widest">View Profile</Link>
                     </div>
                   </div>
