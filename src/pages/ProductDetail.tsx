@@ -592,10 +592,10 @@ export default function ProductDetail() {
           </div>
 
           <div className="flex items-center gap-[14px] mb-2">
-            <span className="text-[32px] font-bold text-ruby">₹{product.price.toLocaleString()}</span>
+            <span className="text-[32px] font-bold text-ruby">₹{Number(product.price || 0).toLocaleString()}</span>
             {product.comparePrice && product.comparePrice > product.price && (
               <>
-                <span className="text-[18px] text-gray-400 line-through">₹{product.comparePrice.toLocaleString()}</span>
+                <span className="text-[18px] text-gray-400 line-through">₹{Number(product.comparePrice || 0).toLocaleString()}</span>
                 <span className="px-3 py-1 bg-[#d1fae5] text-[#065f46] rounded-[6px] text-[13px] font-semibold">
                   {Math.round(((product.comparePrice - product.price) / product.comparePrice) * 100)}% OFF
                 </span>

@@ -321,185 +321,13 @@ export default function Checkout() {
 
           await addDoc(collection(db, 'orders'), finalOrderData);
           
-          // Meta Pixel Tracking
-          trackPixelEvent('Purchase', {
-            content_ids: items.map(i => i.id),
-            content_type: 'product',
-            value: finalOrderData.total,
-            currency: 'INR',
-            order_id: finalOrderData.orderId
-          });
-
-          // Send internal notification
-          if (user?.uid) {
-            await sendNotification({
-              userId: user.uid,
-              title: 'Order Placed!',
-              body: `Your order ${finalOrderData.orderId} has been placed successfully.`,
-              type: 'order',
-              iconType: 'package',
-              link: '/my-orders'
-            });
-          }
-
-          // Trigger Admin Push Notification via OneSignal
-          try {
-            await fetch('/api/send-admin-push', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                title: 'New Order Received! 🛍️',
-                body: `You received order ${finalOrderData.orderId} from ${finalOrderData.address.name}`,
-                url: '/admin'
-              })
-            });
-          } catch (e) {
-            console.error("Failed to send admin push notification:", e);
-          }
-
-          await syncToGoogleSheets(finalOrderData);
-
-          // Clear checkout state
+          // Clear checkout state & cart
           localStorage.removeItem('checkout_step');
           localStorage.removeItem('selected_address_id');
-
-          // Clear Abandoned Cart
-          if (user) {
-            try {
-              await deleteDoc(doc(db, 'carts', user.uid));
-            } catch (e) {
-              console.error("Error clearing abandoned cart:", e);
-            }
-          }
-
-          // Send Email Notification
-          try {
-            const settingsSnap = await getDocs(collection(db, 'settings'));
-            if (!settingsSnap.empty) {
-              const settingsData = settingsSnap.docs[0].data();
-              if ((settingsData.resendApiKey || (settingsData.smtpUser && settingsData.smtpPass)) && finalOrderData.address?.email) {
-                const emailHtml = `
-                  <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #000000; padding: 40px 20px; color: #FFFFFF; line-height: 1.5;">
-                    <div style="max-width: 500px; margin: 0 auto;">
-                      <!-- Header -->
-                      <div style="display: flex; justify-content: space-between; margin-bottom: 60px;">
-                        <span style="font-size: 18px; font-weight: 500; color: #FFFFFF;">Order ${finalOrderData.orderId}</span>
-                        <span style="font-size: 18px; font-weight: 500; color: #888888; text-transform: lowercase;">confirmed</span>
-                      </div>
-
-                      <!-- Logo -->
-                      <div style="text-align: center; margin-bottom: 60px;">
-                        ${settingsData.storeLogo ? `<img src="${settingsData.storeLogo}" alt="Logo" style="width: 80px; height: 80px; object-fit: contain;">` : `
-                          <div style="width: 80px; height: 80px; background-color: #1A1A1A; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; overflow: hidden;">
-                            <img src="https://images.unsplash.com/photo-1614732414444-096e5f1122d5?q=80&w=2574&auto=format&fit=crop" style="width: 100%; height: 100%; object-fit: cover; opacity: 0.8;">
-                          </div>
-                        `}
-                      </div>
-
-                      <!-- Main Message -->
-                      <div style="margin-bottom: 40px;">
-                        <h1 style="font-size: 24px; font-weight: 500; margin: 0 0 16px 0;">Thank you for your purchase!</h1>
-                        <p style="font-size: 16px; color: #888888; margin: 0;">We're getting your order ready to be shipped. We will notify you when it has been sent.</p>
-                      </div>
-
-                      <!-- Action Buttons -->
-                      <div style="margin-bottom: 60px; text-align: center;">
-                        <a href="${window.location.origin}/track/${finalOrderData.orderId.replace('#', '')}?email=${finalOrderData.address.email}" 
-                           style="display: block; background-color: #FFFFFF; color: #000000; padding: 18px; border-radius: 4px; text-decoration: none; font-size: 16px; font-weight: 500; text-align: center; margin-bottom: 16px;">
-                          View your order
-                        </a>
-                        <p style="font-size: 14px; color: #888888;">or <a href="${window.location.origin}" style="color: #FFFFFF; text-decoration: underline;">Visit our store</a></p>
-                      </div>
-
-                      <!-- Order Summary -->
-                      <div style="border-top: 1px solid #1A1A1A; padding-top: 40px;">
-                        <h2 style="font-size: 18px; font-weight: 500; margin: 0 0 24px 0;">Order summary</h2>
-                        
-                        ${finalOrderData.items.map((item: any) => `
-                          <div style="display: flex; margin-bottom: 24px;">
-                            <div style="width: 80px; height: 80px; background-color: #1A1A1A; overflow: hidden; margin-right: 16px;">
-                              ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 100%; height: 100%; object-fit: cover;">` : ''}
-                            </div>
-                            <div style="flex: 1;">
-                              <p style="font-size: 16px; font-weight: 500; margin: 0;">${item.name} × ${item.quantity}</p>
-                              <p style="font-size: 14px; color: #888888; margin: 4px 0 0 0;">${item.selectedSize || 'Standard'}</p>
-                            </div>
-                            <div style="text-align: right;">
-                              <p style="font-size: 16px; font-weight: 500; margin: 0;">₹${(item.price * item.quantity).toLocaleString()}</p>
-                            </div>
-                          </div>
-                        `).join('')}
-
-                        <!-- Totals -->
-                        <div style="border-top: 1px solid #1A1A1A; padding-top: 24px;">
-                          <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                            <p style="font-size: 14px; color: #888888; margin: 0;">Subtotal</p>
-                            <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">₹${finalOrderData.subtotal.toLocaleString()}</p>
-                          </div>
-                          ${finalOrderData.discount > 0 ? `
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                              <p style="font-size: 14px; color: #888888; margin: 0;">Discount</p>
-                              <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">-₹${finalOrderData.discount.toLocaleString()}</p>
-                            </div>
-                          ` : ''}
-                          <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                            <p style="font-size: 14px; color: #888888; margin: 0;">Shipping</p>
-                            <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">${finalOrderData.shippingCost === 0 ? 'FREE' : `₹${finalOrderData.shippingCost.toLocaleString()}`}</p>
-                          </div>
-                          ${finalOrderData.codFee > 0 ? `
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                              <p style="font-size: 14px; color: #888888; margin: 0;">COD Handling Fee</p>
-                              <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">₹${finalOrderData.codFee.toLocaleString()}</p>
-                            </div>
-                          ` : ''}
-                          <div style="display: flex; justify-content: space-between; border-top: 1px solid #1A1A1A; padding-top: 24px; margin-top: 24px;">
-                            <p style="font-size: 18px; font-weight: 600; color: #FFFFFF; margin: 0;">Total</p>
-                            <p style="font-size: 24px; font-weight: 600; color: #FFFFFF; margin: 0;">₹${finalOrderData.total.toLocaleString()}</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- Footer -->
-                      <div style="margin-top: 80px; text-align: center; border-top: 1px solid #1A1A1A; padding-top: 40px; padding-bottom: 40px;">
-                        <p style="font-size: 12px; color: #444444; margin: 0;">
-                          &copy; ${new Date().getFullYear()} ${settingsData.storeName || 'The Ruby Fashion'}. All rights reserved.<br/>
-                          Secure payment processing. You're receiving this because you placed an order on our store.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                `;
-                  const emailResponse = await fetch('/api/send-email', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      to: finalOrderData.address.email,
-                      from: settingsData.fromEmail || undefined,
-                      replyTo: settingsData.supportEmail || undefined,
-                      subject: `Order Confirmed! ${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`} ✨`,
-                      html: emailHtml
-                    })
-                  });
-
-                  if (emailResponse.ok) {
-                    console.log('Order confirmation email sent successfully');
-                  } else {
-                    const errorData = await emailResponse.json();
-                    console.error('Failed to send order confirmation email:', errorData);
-                  }
-                } else {
-                  console.warn('Email skipped: Missing configuration or customer email', {
-                    hasResend: !!settingsData.resendApiKey,
-                    hasSmtp: !!(settingsData.smtpUser && settingsData.smtpPass),
-                    hasCustomerEmail: !!finalOrderData.address?.email
-                  });
-                }
-              }
-            } catch (emailError) {
-              console.error('Error in email notification flow:', emailError);
-            }
-
+          clearCart();
           setIsProcessingPayment(false);
+
+          // Navigate IMMEDIATELY to success screen!
           navigate('/order-success', {
             state: {
               ...finalOrderData,
@@ -507,7 +335,209 @@ export default function Checkout() {
             }
           });
           toast.success('Order placed successfully!');
-          clearCart();
+
+          // Run analytical/integrative steps in the background so they do not block visual success transition
+          (async () => {
+            // Meta Pixel Tracking
+            try {
+              trackPixelEvent('Purchase', {
+                content_ids: items.map(i => i.id),
+                content_type: 'product',
+                value: finalOrderData.total,
+                currency: 'INR',
+                order_id: finalOrderData.orderId
+              });
+            } catch (pixelErr) {
+              console.error('Meta Pixel tracking failed:', pixelErr);
+            }
+
+            // Sync with Google Sheets
+            try {
+              await syncToGoogleSheets(finalOrderData);
+            } catch (sheetsErr) {
+              console.error('Google Sheets sync failed:', sheetsErr);
+            }
+
+            // Clear Abandoned Cart
+            if (user) {
+              try {
+                await deleteDoc(doc(db, 'carts', user.uid));
+              } catch (cartErr) {
+                console.error('Error clearing abandoned cart:', cartErr);
+              }
+            }
+
+            // Send internal notification
+            if (user?.uid) {
+              try {
+                await sendNotification({
+                  userId: user.uid,
+                  title: 'Order Placed!',
+                  body: `Your order ${finalOrderData.orderId} has been placed successfully.`,
+                  type: 'order',
+                  iconType: 'package',
+                  link: '/my-orders'
+                });
+              } catch (notifErr) {
+                console.error('Failed to send user notification:', notifErr);
+              }
+            }
+
+            // Trigger Admin Push Notification via OneSignal
+            try {
+              await fetch('/api/send-admin-push', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  title: 'New Order Received! 🛍️',
+                  body: `You received order ${finalOrderData.orderId} from ${finalOrderData.address.name}`,
+                  url: '/admin'
+                })
+              });
+            } catch (pushErr) {
+              console.error('Failed to send admin push notification:', pushErr);
+            }
+
+            // Send Email Notifications
+            try {
+              const settingsSnap = await getDocs(collection(db, 'settings'));
+              if (!settingsSnap.empty) {
+                const settingsData = settingsSnap.docs[0].data();
+                if ((settingsData.resendApiKey || (settingsData.smtpUser && settingsData.smtpPass))) {
+                  const emailHtml = `
+                    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #000000; padding: 40px 20px; color: #FFFFFF; line-height: 1.5;">
+                      <div style="max-width: 500px; margin: 0 auto;">
+                        <!-- Header -->
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 60px;">
+                          <span style="font-size: 18px; font-weight: 500; color: #FFFFFF;">Order ${finalOrderData.orderId}</span>
+                          <span style="font-size: 18px; font-weight: 500; color: #888888; text-transform: lowercase;">confirmed</span>
+                        </div>
+
+                        <!-- Logo -->
+                        <div style="text-align: center; margin-bottom: 60px;">
+                          ${settingsData.storeLogo ? `<img src="${settingsData.storeLogo}" alt="Logo" style="width: 80px; height: 80px; object-fit: contain;">` : `
+                            <div style="width: 80px; height: 80px; background-color: #1A1A1A; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; overflow: hidden;">
+                              <img src="https://images.unsplash.com/photo-1614732414444-096e5f1122d5?q=80&w=2574&auto=format&fit=crop" style="width: 100%; height: 100%; object-fit: cover; opacity: 0.8;">
+                            </div>
+                          `}
+                        </div>
+
+                        <!-- Main Message -->
+                        <div style="margin-bottom: 40px;">
+                          <h1 style="font-size: 24px; font-weight: 500; margin: 0 0 16px 0;">Thank you for your purchase!</h1>
+                          <p style="font-size: 16px; color: #888888; margin: 0;">We're getting your order ready to be shipped. We will notify you when it has been sent.</p>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div style="margin-bottom: 60px; text-align: center;">
+                          <a href="${window.location.origin}/track/${(finalOrderData.orderId || '').replace('#', '')}?email=${encodeURIComponent(finalOrderData.address?.email || '')}" 
+                             style="display: block; background-color: #FFFFFF; color: #000000; padding: 18px; border-radius: 4px; text-decoration: none; font-size: 16px; font-weight: 500; text-align: center; margin-bottom: 16px;">
+                            View your order
+                          </a>
+                          <p style="font-size: 14px; color: #888888;">or <a href="${window.location.origin}" style="color: #FFFFFF; text-decoration: underline;">Visit our store</a></p>
+                        </div>
+
+                        <!-- Order Summary -->
+                        <div style="border-top: 1px solid #1A1A1A; padding-top: 40px;">
+                          <h2 style="font-size: 18px; font-weight: 500; margin: 0 0 24px 0;">Order summary</h2>
+                          
+                          ${finalOrderData.items.map((item: any) => `
+                            <div style="display: flex; margin-bottom: 24px;">
+                              <div style="width: 80px; height: 80px; background-color: #1A1A1A; overflow: hidden; margin-right: 16px;">
+                                ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 100%; height: 100%; object-fit: cover;">` : ''}
+                              </div>
+                              <div style="flex: 1;">
+                                <p style="font-size: 16px; font-weight: 500; margin: 0;">${item.name} × ${item.quantity}</p>
+                                <p style="font-size: 14px; color: #888888; margin: 4px 0 0 0;">${item.selectedSize || 'Standard'}</p>
+                              </div>
+                              <div style="text-align: right;">
+                                <p style="font-size: 16px; font-weight: 500; margin: 0;">₹${Number(item.price * item.quantity).toLocaleString()}</p>
+                              </div>
+                            </div>
+                          `).join('')}
+
+                          <!-- Totals -->
+                          <div style="border-top: 1px solid #1A1A1A; padding-top: 24px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                              <p style="font-size: 14px; color: #888888; margin: 0;">Subtotal</p>
+                              <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">₹${Number(finalOrderData.subtotal || 0).toLocaleString()}</p>
+                            </div>
+                            ${finalOrderData.discount > 0 ? `
+                              <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                                <p style="font-size: 14px; color: #888888; margin: 0;">Discount</p>
+                                <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">-₹${Number(finalOrderData.discount || 0).toLocaleString()}</p>
+                              </div>
+                            ` : ''}
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                              <p style="font-size: 14px; color: #888888; margin: 0;">Shipping</p>
+                              <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">${finalOrderData.shippingCost === 0 ? 'FREE' : `₹${Number(finalOrderData.shippingCost || 0).toLocaleString()}`}</p>
+                            </div>
+                            ${finalOrderData.codFee > 0 ? `
+                              <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                                <p style="font-size: 14px; color: #888888; margin: 0;">COD Handling Fee</p>
+                                <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">₹${Number(finalOrderData.codFee || 0).toLocaleString()}</p>
+                              </div>
+                            ` : ''}
+                            <div style="display: flex; justify-content: space-between; border-top: 1px solid #1A1A1A; padding-top: 24px; margin-top: 24px;">
+                              <p style="font-size: 18px; font-weight: 600; color: #FFFFFF; margin: 0;">Total</p>
+                              <p style="font-size: 24px; font-weight: 600; color: #FFFFFF; margin: 0;">₹${Number(finalOrderData.total || 0).toLocaleString()}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <!-- Footer -->
+                        <div style="margin-top: 80px; text-align: center; border-top: 1px solid #1A1A1A; padding-top: 40px; padding-bottom: 40px;">
+                          <p style="font-size: 12px; color: #444444; margin: 0;">
+                            &copy; ${new Date().getFullYear()} ${settingsData.storeName || 'The Ruby Fashion'}. All rights reserved.<br/>
+                            Secure payment processing. You're receiving this because you placed an order on our store.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                  
+                  // 1. Send to Customer
+                  fetch('/api/send-email', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      to: finalOrderData.address?.email,
+                      from: settingsData.fromEmail || undefined,
+                      replyTo: settingsData.supportEmail || undefined,
+                      subject: `Order Confirmed! ${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`} ✨`,
+                      html: emailHtml
+                    })
+                  }).catch(err => console.error("Customer email failed:", err));
+
+                  // 2. Send to Admin
+                  if (settingsData.supportEmail) {
+                    fetch('/api/send-email', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        to: settingsData.supportEmail,
+                        from: settingsData.fromEmail || undefined,
+                        subject: `New Order Received! ${finalOrderData.orderId} 🛍️`,
+                        html: `
+                          <div style="font-family: sans-serif; padding: 20px;">
+                            <h2>New Order Received: ${finalOrderData.orderId}</h2>
+                            <p><strong>Customer:</strong> ${finalOrderData.customerName}</p>
+                            <p><strong>Email:</strong> ${finalOrderData.address?.email}</p>
+                            <p><strong>Amount:</strong> ₹${Number(finalOrderData.total || 0).toLocaleString()}</p>
+                            <p><strong>Payment:</strong> ${finalOrderData.paymentMethod}</p>
+                            <br/>
+                            <a href="${window.location.origin}/admin" style="background: #E11D48; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Manage Order</a>
+                          </div>
+                        `
+                      })
+                    }).catch(err => console.error("Admin order email failed:", err));
+                  }
+                }
+              }
+            } catch (emailError) {
+              console.error('Error in email notification flow:', emailError);
+            }
+          })();
         } catch (error) {
           console.error("Error completing order:", error);
           toast.error("Failed to place order. Please try again.");

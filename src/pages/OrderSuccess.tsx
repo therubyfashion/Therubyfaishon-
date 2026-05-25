@@ -138,26 +138,26 @@ export default function OrderSuccess() {
             {orderData.items.map((item: any, idx: number) => (
               <div key={idx} className="flex justify-between text-sm font-bold text-[#1A2C54]">
                 <span>{item.name} (Size {item.selectedSize})</span>
-                <span>₹{(item.price * item.quantity).toLocaleString()}</span>
+                <span>₹{Number(item.price * item.quantity).toLocaleString()}</span>
               </div>
             ))}
             <div className="flex justify-between text-sm font-bold text-ruby">
               <span>Discount Applied</span>
-              <span>-₹{orderData.discount.toLocaleString()}</span>
+              <span>-₹{Number(orderData.discount || 0).toLocaleString()}</span>
             </div>
             {orderData.codFee > 0 && (
               <div className="flex justify-between text-sm font-bold text-ruby">
                 <span>COD Handling Fee</span>
-                <span>+₹{orderData.codFee.toLocaleString()}</span>
+                <span>+₹{Number(orderData.codFee || 0).toLocaleString()}</span>
               </div>
             )}
             <div className="flex justify-between text-sm font-bold text-green-500">
               <span>Delivery</span>
-              <span>{orderData.shippingCost === 0 ? 'FREE' : `₹${orderData.shippingCost}`}</span>
+              <span>{orderData.shippingCost === 0 ? 'FREE' : `₹${Number(orderData.shippingCost || 0).toLocaleString()}`}</span>
             </div>
             <div className="pt-4 border-t border-gray-50 flex justify-between items-center">
               <p className="text-lg font-bold text-[#1A2C54]">Total Paid</p>
-              <p className="text-2xl font-bold text-ruby">₹{orderData.total.toLocaleString()}</p>
+              <p className="text-2xl font-bold text-ruby">₹{Number(orderData.total || 0).toLocaleString()}</p>
             </div>
           </div>
         </div>

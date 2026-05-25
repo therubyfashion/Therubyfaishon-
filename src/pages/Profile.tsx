@@ -591,7 +591,7 @@ export default function Profile() {
                     </div>
                     <div className="space-y-0.5">
                       <p className="text-[10px] font-bold text-[#1A2C54] truncate pr-2 group-hover:text-ruby transition-colors">{prod.name}</p>
-                      <p className="text-[10px] font-bold text-ruby">₹{prod.price.toLocaleString()}</p>
+                      <p className="text-[10px] font-bold text-ruby">₹{Number(prod.price || 0).toLocaleString()}</p>
                     </div>
                   </Link>
                 ))}

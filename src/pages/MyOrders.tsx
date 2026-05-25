@@ -142,7 +142,7 @@ export default function MyOrders() {
                       <p className="text-xs text-gray-400 font-medium">Placed on {new Date(order.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
                     </div>
                     <div className="text-left sm:text-right">
-                      <p className="text-2xl font-black text-[#1A2C54]">₹{(order.total || 0).toLocaleString()}</p>
+                      <p className="text-2xl font-black text-[#1A2C54]">₹{Number(order.total || 0).toLocaleString()}</p>
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total Amount</p>
                     </div>
                   </div>
@@ -163,7 +163,7 @@ export default function MyOrders() {
                           <h4 className="text-sm font-bold text-[#1A2C54]">{item.name}</h4>
                           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Size: {item.selectedSize} • Qty: {item.quantity}</p>
                         </div>
-                        <p className="text-sm font-bold text-[#1A2C54]">₹{(item.price * item.quantity).toLocaleString()}</p>
+                        <p className="text-sm font-bold text-[#1A2C54]">₹{Number(item.price * item.quantity).toLocaleString()}</p>
                       </div>
                     ))}
                   </div>

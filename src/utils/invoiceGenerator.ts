@@ -135,8 +135,8 @@ export const generateInvoice = (order: any, settings?: any) => {
     },
     '85183000', // HSN Dummy or if available
     item.quantity,
-    `Rs. ${item.price.toLocaleString()}`,
-    `Rs. ${(item.price * item.quantity).toLocaleString()}`
+    `Rs. ${Number(item.price || 0).toLocaleString()}`,
+    `Rs. ${Number((item.price || 0) * (item.quantity || 0)).toLocaleString()}`
   ]);
 
   autoTable(doc, {
@@ -186,16 +186,16 @@ export const generateInvoice = (order: any, settings?: any) => {
   };
 
   let currentY = finalY;
-  drawRow('Subtotal', `Rs. ${order.subtotal?.toLocaleString() || order.total?.toLocaleString()}`, currentY);
+  drawRow('Subtotal', `Rs. ${Number(order.subtotal || order.total || 0).toLocaleString()}`, currentY);
   currentY += 8;
-  drawRow('Shipping Charges', `Rs. ${order.shippingCost || 0}`, currentY);
+  drawRow('Shipping Charges', `Rs. ${Number(order.shippingCost || 0).toLocaleString()}`, currentY);
   currentY += 8;
   if (order.codFee > 0) {
-    drawRow('COD Handling Fee', `Rs. ${order.codFee.toLocaleString()}`, currentY);
+    drawRow('COD Handling Fee', `Rs. ${Number(order.codFee || 0).toLocaleString()}`, currentY);
     currentY += 8;
   }
   if (order.discount > 0) {
-    drawRow('Shipping Charges Discount', `-Rs. ${order.discount.toLocaleString()}`, currentY);
+    drawRow('Shipping Charges Discount', `-Rs. ${Number(order.discount || 0).toLocaleString()}`, currentY);
     currentY += 8;
   }
   
@@ -203,11 +203,11 @@ export const generateInvoice = (order: any, settings?: any) => {
   doc.line(totalsX - 80, currentY, totalsX, currentY);
   currentY += 10;
   
-  drawRow('Total Amount', `Rs. ${order.total.toLocaleString()}`, currentY);
+  drawRow('Total Amount', `Rs. ${Number(order.total || 0).toLocaleString()}`, currentY);
   currentY += 12;
   
   doc.setFontSize(12);
-  drawRow('Grand Total', `Rs. ${order.total.toLocaleString()}`, currentY, true);
+  drawRow('Grand Total', `Rs. ${Number(order.total || 0).toLocaleString()}`, currentY, true);
 
   // Amount in words
   doc.setFontSize(10);
@@ -247,7 +247,7 @@ export const generateInvoice = (order: any, settings?: any) => {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(100);
-  doc.text(settings?.storeName || 'Thr Ruby', margin, footerY + 16);
+  doc.text(settings?.storeName || 'The Ruby', margin, footerY + 16);
   doc.text('D-12, First Floor, Sector-7', margin, footerY + 21);
   doc.text('Noida, Gautam Buddha Nagar, Uttar Pradesh - 201301, India', margin, footerY + 26);
   doc.text(`GSTIN: 09ABCDE1234F1Z5`, margin, footerY + 35);

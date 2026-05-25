@@ -174,8 +174,8 @@ export default function Cart() {
                   </div>
 
                   <div className="flex items-baseline gap-2">
-                    <span className="text-lg sm:text-xl font-bold text-ruby">₹{item.price.toLocaleString()}</span>
-                    <span className="text-xs sm:text-sm text-gray-300 line-through font-medium">₹{(item.comparePrice || Math.round(item.price * 1.4)).toLocaleString()}</span>
+                    <span className="text-lg sm:text-xl font-bold text-ruby">₹{Number(item.price || 0).toLocaleString()}</span>
+                    <span className="text-xs sm:text-sm text-gray-300 line-through font-medium">₹{Number(item.comparePrice || Math.round(item.price * 1.4)).toLocaleString()}</span>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-3 sm:gap-4 pt-1">
@@ -236,7 +236,7 @@ export default function Cart() {
                     <Sparkles size={14} />
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest">You saved ₹{appliedPromo.discount.toLocaleString()} 🎉</p>
+                    <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest">You saved ₹{Number(appliedPromo.discount || 0).toLocaleString()} 🎉</p>
                     <p className="text-[9px] font-medium text-green-500">Coupon "{appliedPromo.code}" applied</p>
                   </div>
                 </div>
@@ -275,7 +275,7 @@ export default function Cart() {
           <div className="space-y-4">
             <div className="flex justify-between text-sm font-medium text-gray-400">
               <span>Subtotal ({itemCount} items)</span>
-              <span className="text-[#1A2C54]">₹{subtotal.toLocaleString()}</span>
+              <span className="text-[#1A2C54]">₹{Number(subtotal || 0).toLocaleString()}</span>
             </div>
             
             {autoOfferDiscount > 0 && (
@@ -284,7 +284,7 @@ export default function Cart() {
                   <Sparkles size={14} />
                   <span>{useSettings().settings?.buy2Get1Free ? 'Buy 2 Get 1 Free' : 'Bundle Discount'}</span>
                 </div>
-                <span>-₹{autoOfferDiscount.toLocaleString()}</span>
+                <span>-₹{Number(autoOfferDiscount || 0).toLocaleString()}</span>
               </div>
             )}
 
@@ -294,7 +294,7 @@ export default function Cart() {
                   <Tag size={14} />
                   <span>Coupon ({appliedPromo?.code})</span>
                 </div>
-                <span>-₹{promoDiscount.toLocaleString()}</span>
+                <span>-₹{Number(promoDiscount || 0).toLocaleString()}</span>
               </div>
             ) : (
               <div className="flex justify-between text-sm font-medium text-gray-300 italic">
@@ -308,11 +308,11 @@ export default function Cart() {
                 <p className="text-base sm:text-lg font-bold text-[#1A2C54]">Total Payable</p>
                 {totalDiscount > 0 && (
                   <p className="text-[9px] sm:text-[10px] font-bold text-green-500 uppercase tracking-widest flex items-center gap-1">
-                    🎉 You save ₹{totalDiscount.toLocaleString()} on this order!
+                    🎉 You save ₹{Number(totalDiscount || 0).toLocaleString()} on this order!
                   </p>
                 )}
               </div>
-              <p className="text-xl sm:text-2xl font-bold text-[#1A2C54]">₹{finalTotal.toLocaleString()}</p>
+              <p className="text-xl sm:text-2xl font-bold text-[#1A2C54]">₹{Number(finalTotal || 0).toLocaleString()}</p>
             </div>
           </div>
 

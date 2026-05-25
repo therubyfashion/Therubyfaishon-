@@ -5502,7 +5502,7 @@ export default function AdminDashboard() {
                         </div>
                         <div className="pt-2 border-t border-gray-100 flex justify-between items-start">
                           <span className="text-[13px] text-shop-text-muted font-[500]">Subtotal</span>
-                          <span className="text-[13px] font-[600] text-shop-text">₹{(viewingCustomer.total - (viewingCustomer.tax || 0)).toLocaleString()}</span>
+                          <span className="text-[13px] font-[600] text-shop-text">₹{Number(viewingCustomer.total - (viewingCustomer.tax || 0)).toLocaleString()}</span>
                         </div>
                         <div className="flex justify-between items-start">
                           <span className="text-[13px] text-shop-text-muted font-[500]">Shipping</span>
@@ -5513,7 +5513,7 @@ export default function AdminDashboard() {
                         </div>
                         <div className="flex justify-between items-start">
                           <span className="text-[13px] text-shop-text-muted font-[500]">Tax (18% GST)</span>
-                          <span className="text-[13px] font-[600] text-shop-text">₹{(viewingCustomer.tax || 0).toLocaleString()}</span>
+                          <span className="text-[13px] font-[600] text-shop-text">₹{Number(viewingCustomer.tax || 0).toLocaleString()}</span>
                         </div>
                         <div className="pt-2 border-t border-gray-200 flex justify-between items-start">
                           <span className="text-[14px] text-shop-text font-[800]">Total</span>
@@ -5644,7 +5644,7 @@ export default function AdminDashboard() {
                           ) : (
                             [
                               { title: 'Order Fulfilled', status: viewingCustomer.fulfillmentStatus === 'Fulfilled', date: viewingCustomer.fulfilledAt || null, icon: CheckCheck },
-                              { title: `Payment received via ${viewingCustomer.paymentMethod || 'Razorpay'}`, status: true, date: viewingCustomer.createdAt, icon: CreditCard, subtitle: `(₹${(viewingCustomer.total || 0).toLocaleString()})` },
+                              { title: `Payment received via ${viewingCustomer.paymentMethod || 'Razorpay'}`, status: true, date: viewingCustomer.createdAt, icon: CreditCard, subtitle: `(₹${Number(viewingCustomer.total || 0).toLocaleString()})` },
                               { title: `Order placed by ${viewingCustomer.address?.name || viewingCustomer.customerName || viewingCustomer.customer || 'Customer'}`, status: true, date: viewingCustomer.createdAt, icon: ShoppingBag },
                             ].map((evt, i) => (
                               <div key={i} className={cn("flex gap-3.5 items-start relative z-10", !evt.status && "opacity-40 grayscale")}>
@@ -6197,7 +6197,7 @@ export default function AdminDashboard() {
                                       </span>
                                     </td>
                                     <td className="py-3 px-4 text-right font-bold text-sm text-gray-900">
-                                      ₹{order.total?.toLocaleString()}
+                                      ₹{Number(order.total || 0).toLocaleString()}
                                     </td>
                                   </tr>
                                 ))

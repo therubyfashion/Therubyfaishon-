@@ -41,7 +41,7 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
       // Small delay to let the animation finish before triggering navigation/processing
       setTimeout(() => {
         onConfirm();
-      }, 300);
+      }, 100);
     } else {
       animate(x, 0, { type: 'spring', stiffness: 400, damping: 40 });
     }
