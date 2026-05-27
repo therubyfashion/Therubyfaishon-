@@ -144,10 +144,10 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
                   </Link>
                 )}
                 <Link to="/profile" className="w-8 h-8 rounded-full bg-ruby/10 border border-ruby/20 flex items-center justify-center overflow-hidden">
-                  {profile?.photoURL || user.photoURL ? (
-                    <img src={profile?.photoURL || user.photoURL} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  {(user && localStorage.getItem(`user_photo_${user.uid}`)) || profile?.photoURL || user.photoURL ? (
+                    <img src={(user && localStorage.getItem(`user_photo_${user.uid}`)) || profile?.photoURL || user.photoURL || ''} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   ) : (
-                    <User size={16} className="text-ruby" />
+                    <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user?.email || user?.uid || 'guest')}`} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   )}
                 </Link>
               </div>
@@ -209,19 +209,24 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
                 {user ? (
                   <div className="flex items-center space-x-4">
                     <div className="w-12 h-12 rounded-full bg-gray-100 overflow-hidden flex items-center justify-center">
-                      {profile?.photoURL || user.photoURL ? (
+                      {(user && localStorage.getItem(`user_photo_${user.uid}`)) || profile?.photoURL || user.photoURL ? (
                         <img 
-                          src={profile?.photoURL || user.photoURL} 
+                          src={(user && localStorage.getItem(`user_photo_${user.uid}`)) || profile?.photoURL || user.photoURL || ''} 
                           alt="User" 
                           className="w-full h-full object-cover" 
                           referrerPolicy="no-referrer"
                         />
                       ) : (
-                        <User size={20} className="text-gray-400" />
+                        <img 
+                          src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user?.email || user?.uid || 'guest')}`} 
+                          alt="User" 
+                          className="w-full h-full object-cover" 
+                          referrerPolicy="no-referrer"
+                        />
                       )}
                     </div>
                     <div>
-                      <p className="font-bold text-gray-900">{profile?.displayName || user.displayName || 'User'}</p>
+                      <p className="font-bold text-gray-900">{(user && localStorage.getItem(`user_name_${user.uid}`)) || profile?.displayName || user.displayName || 'User'}</p>
                       <Link to="/profile" onClick={() => setIsMenuOpen(false)} className="text-xs text-ruby font-bold uppercase tracking-widest">View Profile</Link>
                     </div>
                   </div>

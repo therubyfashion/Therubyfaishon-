@@ -6256,9 +6256,10 @@ export default function AdminDashboard() {
                           <div className="relative inline-block mb-4">
                             <div className="w-20 h-20 rounded-2xl bg-gray-50 border border-gray-200 overflow-hidden mx-auto">
                               <img 
-                                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedCustomer.displayName || selectedCustomer.email}`} 
+                                src={selectedCustomer.photoURL || selectedCustomer.photo || `https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedCustomer.displayName || selectedCustomer.email}`} 
                                 alt="Avatar" 
                                 className="w-full h-full object-cover"
+                                referrerPolicy="no-referrer"
                               />
                             </div>
                             <div className="absolute -bottom-2 -right-2 w-7 h-7 bg-green-500 border-2 border-white rounded-lg flex items-center justify-center shadow-sm">
@@ -6339,9 +6340,10 @@ export default function AdminDashboard() {
                       <div className="relative mx-auto w-20 h-20">
                         <div className="w-full h-full rounded-[1.5rem] bg-gray-50 border-2 border-white shadow-lg overflow-hidden group-hover:scale-105 transition-transform">
                           <img 
-                            src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${customer.displayName || customer.email}`} 
+                            src={customer.photoURL || customer.photo || `https://api.dicebear.com/7.x/avataaars/svg?seed=${customer.displayName || customer.email}`} 
                             alt="Avatar" 
                             className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
                           />
                         </div>
                         <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-white rounded-lg shadow-md flex items-center justify-center">

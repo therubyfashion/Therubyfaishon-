@@ -283,16 +283,16 @@ export default function Home() {
         <div className="flex items-center justify-between mb-4">
           <Link to="/profile" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
             <div className="w-11 h-11 rounded-full bg-[#c4a882] overflow-hidden flex items-center justify-center text-white font-bold">
-              {profile?.photoURL || user?.photoURL ? (
-                <img src={profile?.photoURL || user?.photoURL} alt="User" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              {(user && localStorage.getItem(`user_photo_${user.uid}`)) || profile?.photoURL || user?.photoURL ? (
+                <img src={(user && localStorage.getItem(`user_photo_${user.uid}`)) || profile?.photoURL || user?.photoURL || ''} alt="User" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
               ) : (
-                <User size={24} />
+                <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user?.email || user?.uid || 'guest')}`} alt="User" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
               )}
             </div>
             <div>
               <p className="text-[12px] text-gray-400 font-medium">Good Morning 👋</p>
               <p className="text-[17px] font-bold text-[#111] leading-tight">
-                {profile?.displayName || user?.displayName || 'User'}
+                {(user && localStorage.getItem(`user_name_${user.uid}`)) || profile?.displayName || user?.displayName || 'User'}
               </p>
             </div>
           </Link>

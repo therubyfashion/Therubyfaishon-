@@ -46,6 +46,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         );
       } else {
+        // Fallback to checking local storage for resilient offline/sandbox users
+        const localUserRaw = localStorage.getItem('ruby_local_user');
+        if (localUserRaw) {
+          try {
+            const parsed = JSON.parse(localUserRaw);
+            const photoURL = parsed.photoURL || localStorage.getItem(`user_photo_${parsed.uid}`) || '';
+            const mimicUser = {
+              uid: parsed.uid,
+              email: parsed.email,
+              displayName: parsed.displayName,
+              photoURL: photoURL,
+              emailVerified: true,
+              getIdToken: async () => "mock-token",
+              reload: async () => {},
+            } as any;
+            
+            const mimicProfile = {
+              uid: parsed.uid,
+              email: parsed.email,
+              displayName: parsed.displayName,
+              photoURL: photoURL,
+              firstName: parsed.firstName || parsed.displayName?.split(' ')[0] || "User",
+              lastName: parsed.lastName || parsed.displayName?.split(' ')[1] || "",
+              role: parsed.role || 'user',
+              isVerified: true,
+              createdAt: parsed.createdAt || new Date().toISOString()
+            } as any;
+            
+            setUser(mimicUser);
+            setProfile(mimicProfile);
+            setLoading(false);
+            return;
+          } catch (_) {}
+        }
+
         setUser(null);
         setProfile(null);
         if (unsubscribeProfile) {

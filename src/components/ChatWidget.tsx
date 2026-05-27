@@ -59,10 +59,10 @@ export default function ChatWidget() {
       })) as Message[];
       setMessages(msgs);
       
-      // Reset unread count for user when chat is open
-      updateDoc(doc(db, 'chats', chatId), {
+      // Reset unread count for user when chat is open safely using merge
+      setDoc(doc(db, 'chats', chatId), {
         unreadCountUser: 0
-      }).catch(() => {});
+      }, { merge: true }).catch(() => {});
     }, (error) => {
       console.error("Chat Messages listener error:", error);
     });
@@ -244,7 +244,7 @@ export default function ChatWidget() {
                         </div>
                         <div className={`flex items-center space-x-1 px-1 ${msg.senderId === user.uid ? 'justify-end' : 'justify-start'}`}>
                           <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">
-                            {msg.createdAt ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
+                            {msg.createdAt && typeof msg.createdAt.toDate === 'function' ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
                           </span>
                           {msg.senderId === user.uid && <CheckCheck size={10} className="text-ruby" />}
                         </div>

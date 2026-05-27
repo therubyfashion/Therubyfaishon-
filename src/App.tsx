@@ -126,6 +126,20 @@ function AppContent() {
           return;
         }
 
+        if (!Capacitor.isNativePlatform() && !(window as any).OneSignal) {
+          await new Promise<void>((resolve) => {
+            const script = document.createElement('script');
+            script.src = "https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js";
+            script.defer = true;
+            script.onload = () => resolve();
+            script.onerror = () => {
+              console.error("Failed to load OneSignal Web SDK");
+              resolve();
+            };
+            document.head.appendChild(script);
+          });
+        }
+
         if (Capacitor.isNativePlatform()) {
           console.log("🚀 OneSignal: Initializing Native Plugin with ID:", appId);
           // Native App Initialization

@@ -257,7 +257,7 @@ export default function Settings() {
                   <div className="relative">
                     <div className="w-20 h-20 rounded-2xl overflow-hidden border-2 border-ruby shadow-lg shadow-ruby/10">
                       <img 
-                        src={profile?.photoURL || user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.email}`} 
+                        src={(user && localStorage.getItem(`user_photo_${user.uid}`)) || profile?.photoURL || user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.email}`} 
                         className="w-full h-full object-cover" 
                         alt="Me"
                         referrerPolicy="no-referrer"
@@ -268,7 +268,9 @@ export default function Settings() {
                     </div>
                   </div>
                   <div className="text-left">
-                    <h2 className="text-xl font-bold tracking-tight text-[#1A2C54]">{profile?.displayName || 'Ruby Core'}</h2>
+                    <h2 className="text-xl font-bold tracking-tight text-[#1A2C54]">
+                      {(user && localStorage.getItem(`user_name_${user.uid}`)) || profile?.displayName || 'Ruby Core'}
+                    </h2>
                     <p className="text-xs text-gray-400 mb-3">{user?.email}</p>
                     <div className="flex items-center gap-3">
                       <div className="h-1 w-24 bg-gray-100 rounded-full overflow-hidden">
