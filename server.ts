@@ -11,6 +11,8 @@ import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
+import { initializeApp as initClientApp, getApps as getClientApps } from 'firebase/app';
+import { getFirestore as getClientFirestore, doc as cDoc, getDoc as cGetDoc, collection as cCollection, getDocs as cGetDocs, limit as cLimit, query as cQuery, where as cWhere } from 'firebase/firestore';
 import fs from 'fs';
 import axios from 'axios';
 import * as OneSignal from 'onesignal-node';
@@ -73,12 +75,32 @@ const initClientsFromEnv = () => {
 
 initClientsFromEnv();
 
-// Initialize Firebase Admin for server-side operations
+// Initialize Firebase Admin and Client Fallback for server-side operations
 let db: any = null;
+let clientDb: any = null;
+let isClientDbReady = false;
 let isDbWriteable = true; // Track if the database is fully writable/accessible
 let adminApp: admin.app.App | null = null;
 let currentFirestoreDatabaseId = '(default)';
 let currentFirebaseProjectId = '';
+
+const initializeClientFirestore = () => {
+  if (isClientDbReady && clientDb) return;
+  try {
+    const rootPath = process.cwd();
+    const configPath = path.join(rootPath, 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const apps = getClientApps();
+      const cApp = apps.length === 0 ? initClientApp(firebaseConfig, 'node-server-secondary') : apps[0];
+      clientDb = getClientFirestore(cApp);
+      isClientDbReady = true;
+      console.log("✅ Resilient Client Firestore SDK fallback initialized successfully.");
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Client SDK initialization fallback skipped:", err.message);
+  }
+};
 
 const initializeFirebase = async (force = false) => {
   if (db && !force) return;
@@ -177,6 +199,8 @@ const initializeFirebase = async (force = false) => {
     db = null;
     isDbWriteable = false;
   }
+  // Initialize client Firebase Firestore fallback asynchronously too
+  initializeClientFirestore();
 };
 
 // Start initialization in background to avoid blocking
@@ -193,34 +217,15 @@ async function sendOneSignalNotification(notification: any, config?: { appId?: s
 
   // 1. If overrides not provided, try Firestore first (Dynamic settings)
   if (!appId || isPlaceholder(appId)) {
-    if (db) {
-      try {
-        // Try 'general' doc first, as it's the standard for settings
-        const settingsDoc = await db.collection('settings').doc('general').get();
-        if (settingsDoc.exists) {
-          const settings = settingsDoc.data();
-          if (settings.oneSignalAppId && !isPlaceholder(settings.oneSignalAppId)) {
-            appId = String(settings.oneSignalAppId).trim();
-            restKey = String(settings.oneSignalRestApiKey || restKey || '').trim();
-            console.log(`OneSignal: Loaded config from settings/general (${appId.substring(0, 8)}...)`);
-          }
-        }
-        
-        // Fallback to searching collection if doc ID isn't exactly 'general'
-        if (!appId || isPlaceholder(appId)) {
-          const settingsSnap = await db.collection('settings').limit(1).get();
-          if (!settingsSnap.empty) {
-            const settings = settingsSnap.docs[0].data();
-            if (settings.oneSignalAppId && !isPlaceholder(settings.oneSignalAppId)) {
-              appId = String(settings.oneSignalAppId).trim();
-              restKey = String(settings.oneSignalRestApiKey || restKey || '').trim();
-              console.log(`OneSignal: Loaded config from settings collection (${appId.substring(0, 8)}...)`);
-            }
-          }
-        }
-      } catch (e: any) {
-        console.error("OneSignal: Failed to fetch settings from DB:", e.message);
+    try {
+      const settings = await resilientGetSettings();
+      if (settings && settings.oneSignalAppId && !isPlaceholder(settings.oneSignalAppId)) {
+        appId = String(settings.oneSignalAppId).trim();
+        restKey = String(settings.oneSignalRestApiKey || restKey || '').trim();
+        console.log(`OneSignal: Loaded config dynamically (${appId.substring(0, 8)}...)`);
       }
+    } catch (e: any) {
+      console.error("OneSignal: Failed to fetch settings:", e.message);
     }
   }
 
@@ -280,6 +285,70 @@ async function sendOneSignalNotification(notification: any, config?: { appId?: s
 let cachedSettings: any = null;
 let lastSettingsFetch = 0;
 const SETTINGS_CACHE_TTL = 5000; // 5 seconds for faster admin updates
+
+// Resilient Settings Loader with triple layer fallback: Cache -> Admin SDK -> Client Web SDK -> Static/Env Configs
+async function resilientGetSettings() {
+  const now = Date.now();
+  if (cachedSettings && (now - lastSettingsFetch < SETTINGS_CACHE_TTL)) {
+    return cachedSettings;
+  }
+
+  // 1. Try Firebase Admin SDK first
+  if (db && isDbWriteable !== false) {
+    try {
+      const settingsSnap = await db.collection('settings').limit(1).get();
+      if (!settingsSnap.empty) {
+        cachedSettings = settingsSnap.docs[0].data();
+        lastSettingsFetch = now;
+        return cachedSettings;
+      }
+    } catch (dbErr: any) {
+      console.warn("ℹ️ Admin SDK Settings Query Denied or Failed. Attempting Client Web SDK...", dbErr.message);
+    }
+  }
+
+  // 2. Try Firebase Client Web SDK Fallback
+  initializeClientFirestore();
+  if (clientDb && isClientDbReady) {
+    try {
+      const settingsQuery = cQuery(cCollection(clientDb, 'settings'), cLimit(1));
+      const settingsSnap = await cGetDocs(settingsQuery);
+      if (!settingsSnap.empty) {
+         const docs = settingsSnap.docs;
+         if (docs && docs.length > 0) {
+           cachedSettings = docs[0].data();
+           lastSettingsFetch = now;
+           console.log("✅ Loaded settings successfully via Client Web SDK.");
+           return cachedSettings;
+         }
+      }
+    } catch (clientErr: any) {
+      console.warn("ℹ️ Client Web SDK Settings Query failed:", clientErr.message);
+    }
+  }
+
+  // 3. Last fallback: local Environment variables or static placeholders
+  const envSettings = {
+    storeName: 'The Ruby Fashion',
+    storeLogo: '',
+    fromEmail: process.env.RESEND_FROM_EMAIL || DEFAULT_FROM_EMAIL,
+    resendApiKey: process.env.RESEND_API_KEY || currentResendApiKey,
+    smtpUser: process.env.SMTP_USER,
+    smtpPass: process.env.SMTP_PASS,
+    oneSignalAppId: process.env.ONESIGNAL_APP_ID,
+    oneSignalRestApiKey: process.env.ONESIGNAL_REST_API_KEY,
+    razorpayKeyId: process.env.VITE_RAZORPAY_KEY_ID,
+    razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET,
+  };
+
+  // Only use cache if we have no settings yet
+  if (!cachedSettings) {
+    cachedSettings = envSettings;
+  }
+  // Short TTL for env fallback so we can retry DB when available
+  lastSettingsFetch = now - (SETTINGS_CACHE_TTL - 30000); 
+  return envSettings;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -402,18 +471,11 @@ function enhanceAndSanitizeEmailHtml(
 
 // Unified direct email sending helper for custom backend flows
 async function sendEmailDirect({ to, subject, html, fromName, baseHost }: { to: string, subject: string, html: string, fromName?: string, baseHost?: string }) {
-  let localCachedSettings = cachedSettings;
+  let localCachedSettings = null;
   try {
-    if (db && (!localCachedSettings || (Date.now() - lastSettingsFetch > SETTINGS_CACHE_TTL))) {
-      const settingsSnap = await db.collection('settings').limit(1).get();
-      if (!settingsSnap.empty) {
-        localCachedSettings = settingsSnap.docs[0].data();
-        cachedSettings = localCachedSettings;
-        lastSettingsFetch = Date.now();
-      }
-    }
-  } catch (dbErr) {
-    console.error("Internal mail fetch settings error:", dbErr);
+    localCachedSettings = await resilientGetSettings();
+  } catch (dbErr: any) {
+    console.warn("ℹ️ Failed to load resilient settings for email, using fallback details:", dbErr.message);
   }
 
   const effectiveSettings = localCachedSettings || {
@@ -1102,16 +1164,15 @@ async function startServer() {
     let hasSecret = !!(process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET);
 
     // Fallback to Firestore
-    if (!keyId && db) {
+    if (!keyId) {
       try {
-        const settingsSnap = await db.collection('settings').get();
-        if (!settingsSnap.empty) {
-          const settings = settingsSnap.docs[0].data();
+        const settings = await resilientGetSettings();
+        if (settings) {
           keyId = settings.razorpayKeyId;
           hasSecret = !!settings.razorpayKeySecret;
         }
-      } catch (err) {
-        console.error("Error fetching settings for config:", err);
+      } catch (err: any) {
+        console.error("Error fetching settings for config:", err.message);
       }
     }
     
@@ -1136,20 +1197,17 @@ async function startServer() {
     let keySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)?.trim();
 
     // Fallback: Try to load from Firestore if missing
-    if ((!keyId || !keySecret) && db) {
+    if (!keyId || !keySecret) {
       try {
         console.log("Keys missing in env, attempting to load from Firestore...");
-        const settingsSnap = await db.collection('settings').get();
-        if (!settingsSnap.empty) {
-          const settings = settingsSnap.docs[0].data();
-          if (settings.razorpayKeyId && settings.razorpayKeySecret) {
-            keyId = settings.razorpayKeyId.trim();
-            keySecret = settings.razorpayKeySecret.trim();
-            console.log("Loaded Razorpay keys from Firestore");
-          }
+        const settings = await resilientGetSettings();
+        if (settings && settings.razorpayKeyId && settings.razorpayKeySecret) {
+          keyId = settings.razorpayKeyId.trim();
+          keySecret = settings.razorpayKeySecret.trim();
+          console.log("Loaded Razorpay keys from settings");
         }
-      } catch (err) {
-        console.error("Error loading settings from Firestore:", err);
+      } catch (err: any) {
+        console.error("Error loading settings from Firestore fallback:", err.message);
       }
     }
 
@@ -1214,12 +1272,7 @@ async function startServer() {
       let displayName = "User";
 
       // 1. Attempt Firestore first if initialized
-      if (!db) {
-        console.log("⏳ Initializing Firebase Admin for forgot password request...");
-        await initializeFirebase().catch(() => {});
-      }
-
-      if (db) {
+      if (db && isDbWriteable !== false) {
         try {
           const usersSnap = await db.collection('users').where('email', '==', cleanEmail).limit(1).get();
           if (!usersSnap.empty) {
@@ -1229,7 +1282,28 @@ async function startServer() {
             displayName = userData.firstName || userData.displayName || 'User';
           }
         } catch (dbErr: any) {
-          console.warn("⚠️ Firestore collection 'users' read skipped: Falling back to Admin Auth lookup.", dbErr.message);
+          console.warn("⚠️ Firestore collection 'users' read skipped: Falling back.", dbErr.message);
+        }
+      }
+
+      // 1.5 Try Client Web SDK User Lookup Fallback
+      if (!uid) {
+        initializeClientFirestore();
+        if (clientDb && isClientDbReady) {
+          try {
+            const { query: cQuery, collection: cCollection, limit: cLimit, getDocs: cGetDocs, where: cWhere } = await import('firebase/firestore');
+            const usersQuery = cQuery(cCollection(clientDb, 'users'), cWhere('email', '==', cleanEmail), cLimit(1));
+            const usersSnap = await cGetDocs(usersQuery);
+            if (!usersSnap.empty) {
+              const userDoc = usersSnap.docs[0];
+              const userData = userDoc.data();
+              uid = userData.uid || userDoc.id;
+              displayName = userData.firstName || userData.displayName || 'User';
+              console.log("✅ Found user via Client Web SDK lookup fallback:", uid);
+            }
+          } catch (clientErr: any) {
+            console.warn("ℹ️ Client Web SDK User Lookup skipped:", clientErr.message);
+          }
         }
       }
 
@@ -1269,13 +1343,10 @@ async function startServer() {
       let storeName = "The Ruby Fashion";
       let storeLogo = "";
       try {
-        if (db) {
-          const settingsSnap = await db.collection('settings').limit(1).get();
-          if (!settingsSnap.empty) {
-            const setts = settingsSnap.docs[0].data();
-            storeName = setts.storeName || storeName;
-            storeLogo = setts.storeLogo || storeLogo;
-          }
+        const setts = await resilientGetSettings();
+        if (setts) {
+          storeName = setts.storeName || storeName;
+          storeLogo = setts.storeLogo || storeLogo;
         }
       } catch (_) {}
 
@@ -1526,9 +1597,29 @@ async function startServer() {
       }
 
       // 2. Fallback to check Firestore
-      if (db) {
+      if (db && isDbWriteable !== false) {
         try {
           const usersSnap = await db.collection('users').where('email', '==', cleanEmail).limit(1).get();
+          if (!usersSnap.empty) {
+            const userData = usersSnap.docs[0].data();
+            if (userData.resetOtp && userData.resetOtp === String(otp).trim()) {
+              if (userData.resetOtpExpiresAt && userData.resetOtpExpiresAt >= Date.now()) {
+                return res.json({ status: "ok", message: "OTP verified!" });
+              } else {
+                return res.status(400).json({ error: "OTP has expired. Please request a new one." });
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 3. Fallback to client SDK for verify
+      initializeClientFirestore();
+      if (clientDb && isClientDbReady) {
+        try {
+          const { query: cQuery, collection: cCollection, limit: cLimit, getDocs: cGetDocs, where: cWhere } = await import('firebase/firestore');
+          const usersQuery = cQuery(cCollection(clientDb, 'users'), cWhere('email', '==', cleanEmail), cLimit(1));
+          const usersSnap = await cGetDocs(usersQuery);
           if (!usersSnap.empty) {
             const userData = usersSnap.docs[0].data();
             if (userData.resetOtp && userData.resetOtp === String(otp).trim()) {
@@ -1573,14 +1664,33 @@ async function startServer() {
         isVerified = true;
       }
 
-      // 2. Fallback to check Firestore
+      // 2. Fallback to check Firestore (Admin SDK)
       if (!isVerified) {
-        if (!db) {
-          await initializeFirebase().catch(() => {});
-        }
-        if (db) {
+        if (db && isDbWriteable !== false) {
           try {
             const usersSnap = await db.collection('users').where('email', '==', cleanEmail).limit(1).get();
+            if (!usersSnap.empty) {
+              const userDoc = usersSnap.docs[0];
+              const userData = userDoc.data();
+              if (userData.resetOtp && userData.resetOtp === String(otp).trim()) {
+                if (userData.resetOtpExpiresAt && userData.resetOtpExpiresAt >= Date.now()) {
+                  uid = userData.uid || userDoc.id;
+                  isVerified = true;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 3. Fallback to check Firestore (Client SDK)
+      if (!isVerified) {
+        initializeClientFirestore();
+        if (clientDb && isClientDbReady) {
+          try {
+            const { query: cQuery, collection: cCollection, limit: cLimit, getDocs: cGetDocs, where: cWhere } = await import('firebase/firestore');
+            const usersQuery = cQuery(cCollection(clientDb, 'users'), cWhere('email', '==', cleanEmail), cLimit(1));
+            const usersSnap = await cGetDocs(usersQuery);
             if (!usersSnap.empty) {
               const userDoc = usersSnap.docs[0];
               const userData = userDoc.data();
@@ -2084,6 +2194,27 @@ async function startServer() {
         error: errorDetail || "Unknown error",
         hint: "This key is incorrect. Go to OneSignal Dashboard -> Settings -> Keys & IDs, and copy the 'REST API Key'. Do not copy 'Key ID'!"
       });
+    }
+  });
+
+  // Explicit route for robots.txt to ensure crawlers are NEVER blocked under any conditions
+  app.get('/robots.txt', (req, res) => {
+    res.type('text/plain');
+    res.send('User-agent: *\nAllow: /\nSitemap: https://therubyfashion.shop/sitemap.xml\n');
+  });
+
+  // Explicit route for sitemap.xml to guarantee index.xml paths are discoverable by Googlebot
+  app.get('/sitemap.xml', (req, res) => {
+    const sitemapPath = path.resolve(process.cwd(), 'public', 'sitemap.xml');
+    const fallbackPath = path.resolve(process.cwd(), 'dist', 'sitemap.xml');
+    if (fs.existsSync(sitemapPath)) {
+      res.type('application/xml');
+      res.sendFile(sitemapPath);
+    } else if (fs.existsSync(fallbackPath)) {
+      res.type('application/xml');
+      res.sendFile(fallbackPath);
+    } else {
+      res.status(404).send('Sitemap not found');
     }
   });
 

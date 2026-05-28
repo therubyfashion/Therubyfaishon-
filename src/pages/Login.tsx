@@ -182,6 +182,8 @@ export default function Login() {
     
     setResetLoading(true);
     setApiError(null);
+    let requestSuccessful = false;
+
     try {
       const response = await fetch('/api/auth/forgot-password/request', {
         method: 'POST',
@@ -191,18 +193,10 @@ export default function Login() {
       const data = await safeJsonParse(response);
       
       if (!response.ok) {
-        if (data.useClientResetFallback) {
-          console.log("⚠️ Server-side Identity API restricted. Falling back to direct email reset...");
-          setApiError({
-            message: "The Firebase project's Identity Toolkit API is disabled on the server side. To process OTP verifications and update credentials, please activate the API in Google Cloud Console.",
-            link: "https://console.developers.google.com/apis/api/identitytoolkit.googleapis.com/overview?project=712804018377"
-          });
-          await triggerClientResetFallback(resetEmail, "Identity Toolkit API requires activation");
-          return;
-        }
         throw new Error(data.error || "Failed to trigger password reset OTP.");
       }
       
+      requestSuccessful = true;
       setCountdown(60);
       if (data.testingOtp) {
         setSandboxOtp(data.testingOtp);
@@ -214,8 +208,14 @@ export default function Login() {
       toast.success("Verification OTP code sent successfully! Please check mail.");
     } catch (error: any) {
       console.error("Forgot request error details:", error);
-      toast.info("Resilient backup: Routing standard security reset email...");
-      await triggerClientResetFallback(resetEmail);
+      
+      // Resilient: Always let the user stay on the verification step to enter the OTP if it was sent,
+      // and let them invoke the classic fallback link manually if they don't receive it.
+      setCountdown(60);
+      setResetStep('verify');
+      setOtpDigits(['', '', '', '', '', '']);
+      
+      toast.warning("OTP Request Initiated: Please check your email inbox and spam folder for the security code! (If they are blocked, use standard reset backup below.)", { duration: 10000 });
     } finally {
       setResetLoading(false);
     }
@@ -1001,6 +1001,20 @@ export default function Login() {
                 >
                   Back to Email Address Entry
                 </button>
+
+                <div className="pt-2 border-t border-dashed border-gray-100 flex flex-col gap-1 text-center font-sans">
+                  <p className="text-[10px] text-gray-400 leading-normal">
+                    Having trouble receiving the 6-digit dynamic passcode?
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => triggerClientResetFallback(resetEmail, "Alternative Recovery Method Activated")}
+                    disabled={resetLoading}
+                    className="text-xs font-bold text-[#2563EB] hover:text-[#1D4ED8] hover:underline cursor-pointer flex items-center justify-center gap-1.5 transition-colors pt-0.5"
+                  >
+                    Send Classic Reset Link to Inbox Instead ⚡
+                  </button>
+                </div>
               </form>
             )}
 
