@@ -76,6 +76,8 @@ export default function App() {
   );
 }
 
+let isOneSignalWebInitialized = false;
+
 function AppContent() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -182,23 +184,41 @@ function AppContent() {
           // @ts-ignore
           const OneSignalWeb = window.OneSignal;
           if (OneSignalWeb) {
-            await OneSignalWeb.init({
-              appId: appId,
-              allowLocalhostAsSecureOrigin: true,
-            });
+            if (!isOneSignalWebInitialized) {
+              try {
+                await OneSignalWeb.init({
+                  appId: appId,
+                  allowLocalhostAsSecureOrigin: true,
+                });
+                isOneSignalWebInitialized = true;
+                console.log("✅ OneSignal: Web SDK Initialized Successfully");
+              } catch (initErr: any) {
+                console.warn("OneSignal Web SDK Init skipped or restricted (expected in local/dev previews):", initErr.message || initErr);
+                const errMsg = String(initErr.message || initErr || "").toLowerCase();
+                if (errMsg.includes("already initialized") || errMsg.includes("already-exists")) {
+                  isOneSignalWebInitialized = true;
+                }
+              }
+            }
             
-            if (user) {
-              await OneSignalWeb.login(user.uid);
-              // Set tags for web
-              const tags = {
-                "role": isAdmin ? 'admin' : 'customer',
-                "email": user.email || '',
-                "verified": profile?.isVerified ? "true" : "false"
-              };
-              if (OneSignalWeb.User?.addTags) {
-                 await OneSignalWeb.User.addTags(tags);
-              } else if (OneSignalWeb.sendTags) {
-                 await OneSignalWeb.sendTags(tags);
+            if (isOneSignalWebInitialized && user) {
+              try {
+                if (typeof OneSignalWeb.login === 'function') {
+                  await OneSignalWeb.login(user.uid);
+                }
+                // Set tags for web
+                const tags = {
+                  "role": isAdmin ? 'admin' : 'customer',
+                  "email": user.email || '',
+                  "verified": profile?.isVerified ? "true" : "false"
+                };
+                if (OneSignalWeb.User?.addTags) {
+                   await OneSignalWeb.User.addTags(tags);
+                } else if (OneSignalWeb.sendTags) {
+                   await OneSignalWeb.sendTags(tags);
+                }
+              } catch (syncErr: any) {
+                console.warn("OneSignal Web Sync User/Tags failed/skipped:", syncErr.message || syncErr);
               }
             }
           }

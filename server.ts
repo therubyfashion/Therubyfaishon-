@@ -1241,6 +1241,126 @@ async function startServer() {
     }
   });
 
+  // Serve profile photo directly as image contents bypassing Firebase Storage limitations
+  app.get('/api/user/photo/:uid', async (req, res) => {
+    const { uid } = req.params;
+    if (!uid) {
+      return res.status(400).send("User ID required");
+    }
+
+    try {
+      let photoBase64 = "";
+
+      // 1. Try reading from Firestore Admin SDK if ready
+      if (db && isDbWriteable !== false) {
+        try {
+          const userDoc = await db.collection('users').doc(uid).get();
+          if (userDoc.exists) {
+            photoBase64 = userDoc.data()?.photoBase64 || "";
+          }
+        } catch (fErr: any) {
+          console.warn("❌ Firestore read photoBase64 failed:", fErr.message);
+        }
+      }
+
+      // 2. Fallback to Client SDK Firestore
+      if (!photoBase64) {
+        initializeClientFirestore();
+        if (clientDb && isClientDbReady) {
+          try {
+            const { doc: cDoc, getDoc: cGetDoc } = await import('firebase/firestore');
+            const userDocSnap = await cGetDoc(cDoc(clientDb, 'users', uid));
+            if (userDocSnap.exists()) {
+              photoBase64 = userDocSnap.data()?.photoBase64 || "";
+            }
+          } catch (clientErr: any) {
+            console.warn("ℹ️ Client Web SDK photo query failed:", clientErr.message);
+          }
+        }
+      }
+
+      // 3. Serve the photo securely
+      if (photoBase64 && photoBase64.startsWith('data:image')) {
+        const matches = photoBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          const contentType = matches[1];
+          const dataBuffer = Buffer.from(matches[2], 'base64');
+          
+          res.setHeader('Content-Type', contentType);
+          res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+          return res.send(dataBuffer);
+        }
+      }
+
+      // Redirection fallback to Dicebear avatar if no custom image base64 exists
+      return res.redirect(`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(uid)}`);
+    } catch (err: any) {
+      console.error("❌ Serve user photo error:", err);
+      return res.redirect(`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(uid)}`);
+    }
+  });
+
+  // Handle uploading user profile picture and saving to Firestore & update Auth photoURL
+  app.post('/api/user/upload-profile-image', async (req, res) => {
+    const { uid, photo } = req.body;
+    
+    if (!uid || !photo) {
+      return res.status(400).json({ error: "Missing uid or photo content." });
+    }
+
+    try {
+      // Use clean image endpoint with timestamp to force cache refresh
+      const photoURL = `/api/user/photo/${uid}?t=${Date.now()}`;
+      
+      // 1. Update in Firestore
+      if (db && isDbWriteable !== false) {
+        try {
+          await db.collection('users').doc(uid).set({
+            photoBase64: photo,
+            photoURL: photoURL,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+          console.log(`✅ Stored photoBase64 in Firestore for user ${uid}`);
+        } catch (fErr: any) {
+          console.error("❌ Failed to store photoBase64 in Firestore:", fErr.message);
+        }
+      }
+
+      // 2. Also try writing via Client SDK Firestore for local/sandbox consistency
+      initializeClientFirestore();
+      if (clientDb && isClientDbReady) {
+        try {
+          const { doc: cDoc, setDoc: cSetDoc } = await import('firebase/firestore');
+          await cSetDoc(cDoc(clientDb, 'users', uid), {
+            photoBase64: photo,
+            photoURL: photoURL,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+          console.log(`✅ Stored photoBase64 via Client SDK for user ${uid}`);
+        } catch (clientErr: any) {
+          console.warn("ℹ️ Client SDK photo update skipped:", clientErr.message);
+        }
+      }
+
+      // 3. Update Firebase Auth (if not sandbox user)
+      if (!uid.startsWith('offline_')) {
+        try {
+          await admin.auth().updateUser(uid, {
+            photoURL: photoURL
+          });
+          console.log(`✅ Updated Auth photoURL in Firebase Auth for user ${uid}`);
+        } catch (authErr: any) {
+          console.error("❌ Failed to update Auth photoURL in Firebase Auth:", authErr.message);
+        }
+      }
+
+      return res.json({ success: true, photoURL });
+    } catch (err: any) {
+      console.error("❌ User photo upload handler error:", err);
+      return res.status(500).json({ error: err.message || "Failed to process profile photo." });
+    }
+  });
+
   app.post("/api/delete-user", async (req, res) => {
     const { uid } = req.body;
     if (!uid) {

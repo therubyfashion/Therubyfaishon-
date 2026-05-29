@@ -1309,6 +1309,68 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleAdminPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error("Please select an image file.");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image size should be less than 5MB.");
+      return;
+    }
+
+    const toastId = toast.loading("Uploading admin profile picture...");
+    try {
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.readAsDataURL(file);
+      });
+      const base64 = await base64Promise;
+
+      const compressed = await compressImage(base64, 400, 400, 0.45);
+      
+      const response = await fetch('/api/user/upload-profile-image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          uid: user.uid,
+          photo: compressed
+        })
+      });
+      
+      toast.dismiss(toastId);
+
+      if (!response.ok) {
+        throw new Error(`Server profile upload returned status ${response.status}`);
+      }
+      
+      const result = await response.json();
+      if (result.success && result.photoURL) {
+        setProfileFormData(prev => ({ ...prev, photoURL: result.photoURL }));
+        localStorage.setItem(`user_photo_${user.uid}`, result.photoURL);
+        toast.success("Admin photo updated successfully! ✨");
+        // Force update local user details
+        setTimeout(() => {
+          window.location.reload();
+        }, 800);
+      } else {
+        throw new Error("Invalid response from server");
+      }
+    } catch (err: any) {
+      toast.dismiss(toastId);
+      console.error("Admin photo upload error:", err);
+      toast.error("Failed to upload photo: " + err.message);
+    }
+  };
+
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser || !auth.currentUser.email) return;
@@ -7585,15 +7647,22 @@ export default function AdminDashboard() {
                           <div className="w-full md:w-80 space-y-6">
                             <div className="bg-gray-50 rounded-[2.5rem] p-8 text-center border border-gray-100 shadow-inner relative overflow-hidden group">
                               <div className="absolute top-0 left-0 w-full h-1 bg-ruby" />
-                              <div className="relative inline-block">
+                              <div className="relative inline-block cursor-pointer" onClick={() => document.getElementById('admin-profile-image-upload')?.click()}>
+                                <input 
+                                  type="file" 
+                                  id="admin-profile-image-upload" 
+                                  className="hidden" 
+                                  accept="image/*" 
+                                  onChange={handleAdminPhotoUpload} 
+                                />
                                 <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-[2rem] bg-white p-2 shadow-2xl border border-gray-100 mx-auto overflow-hidden group-hover:scale-105 transition-transform duration-500">
                                   <img 
-                                    src={profile?.photoURL || user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.email}`} 
+                                    src={(user && localStorage.getItem(`user_photo_${user.uid}`)) || profile?.photoURL || user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.email}`} 
                                     alt="Admin Avatar" 
                                     className="w-full h-full object-cover rounded-[1.5rem]"
                                   />
                                 </div>
-                                <button className="absolute -bottom-2 -right-2 w-10 h-10 bg-ruby text-white rounded-xl flex items-center justify-center shadow-xl border-4 border-white hover:scale-110 active:scale-95 transition-all">
+                                <button type="button" className="absolute -bottom-2 -right-2 w-10 h-10 bg-ruby text-white rounded-xl flex items-center justify-center shadow-xl border-4 border-white hover:scale-110 active:scale-95 transition-all">
                                   <Camera size={18} />
                                 </button>
                               </div>
