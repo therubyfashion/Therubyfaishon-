@@ -1575,12 +1575,33 @@ export default function AdminDashboard() {
           // Wait a bit for subscription to update
           await new Promise(resolve => setTimeout(resolve, 2000));
           
-          // Add Admin Tag
-          try {
-            if (OS.User?.addTag) await OS.User.addTag("role", "admin");
-            else if (OS.sendTag) await OS.sendTag("role", "admin");
-          } catch (tagErr) {
-            console.error("Failed to tag admin:", tagErr);
+          // Add Admin Tag and login associated with the current user
+          if (user) {
+            try {
+              if (typeof OS.login === 'function') {
+                await OS.login(user.uid);
+              }
+              const tags = {
+                "role": "admin",
+                "email": user.email || '',
+                "verified": profile?.isVerified ? "true" : "false"
+              };
+              if (OS.User?.addTags) {
+                await OS.User.addTags(tags);
+              } else if (OS.sendTags) {
+                await OS.sendTags(tags);
+              }
+              console.log("Successfully logged in and tagged Admin in OneSignal:", user.uid);
+            } catch (tagErr) {
+              console.error("Failed to tag/login admin:", tagErr);
+            }
+          } else {
+            try {
+              if (OS.User?.addTag) await OS.User.addTag("role", "admin");
+              else if (OS.sendTag) await OS.sendTag("role", "admin");
+            } catch (tagErr) {
+              console.error("Failed to tag admin:", tagErr);
+            }
           }
 
           const isSubscribed = OS.User.PushSubscription.optedIn;

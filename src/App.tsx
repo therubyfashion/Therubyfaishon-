@@ -180,11 +180,8 @@ function AppContent() {
             console.error("❌ OneSignal: Native Init Error:", e);
           }
         } else {
-          // Web SDK Initialization via standard OneSignalDeferred to prevent race conditions
-          // @ts-ignore
-          window.OneSignalDeferred = window.OneSignalDeferred || [];
-          // @ts-ignore
-          window.OneSignalDeferred.push(async (OneSignalWeb) => {
+          // Web SDK Initialization
+          const runWebSync = async (OneSignalWeb: any) => {
             if (!isOneSignalWebInitialized) {
               try {
                 await OneSignalWeb.init({
@@ -202,10 +199,11 @@ function AppContent() {
               }
             }
             
-            if (isOneSignalWebInitialized && user) {
+            if (user) {
               try {
                 if (typeof OneSignalWeb.login === 'function') {
                   await OneSignalWeb.login(user.uid);
+                  console.log("✅ OneSignal Web sync login success:", user.uid);
                 }
                 // Set tags for web
                 const tags = {
@@ -218,11 +216,25 @@ function AppContent() {
                 } else if (OneSignalWeb.sendTags) {
                    await OneSignalWeb.sendTags(tags);
                 }
+                console.log("✅ OneSignal Web sync tags success:", tags);
               } catch (syncErr: any) {
                 console.warn("OneSignal Web Sync User/Tags failed/skipped:", syncErr.message || syncErr);
               }
             }
-          });
+          };
+
+          // @ts-ignore
+          const OSWebDirect = window.OneSignal;
+          if (OSWebDirect) {
+            await runWebSync(OSWebDirect);
+          } else {
+            // @ts-ignore
+            window.OneSignalDeferred = window.OneSignalDeferred || [];
+            // @ts-ignore
+            window.OneSignalDeferred.push(async (OneSignalWeb) => {
+              await runWebSync(OneSignalWeb);
+            });
+          }
         }
       } catch (error) {
         console.error("Error initializing OneSignal:", error);
