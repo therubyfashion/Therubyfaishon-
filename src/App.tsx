@@ -180,10 +180,11 @@ function AppContent() {
             console.error("❌ OneSignal: Native Init Error:", e);
           }
         } else {
-          // Web SDK Initialization
+          // Web SDK Initialization via standard OneSignalDeferred to prevent race conditions
           // @ts-ignore
-          const OneSignalWeb = window.OneSignal;
-          if (OneSignalWeb) {
+          window.OneSignalDeferred = window.OneSignalDeferred || [];
+          // @ts-ignore
+          window.OneSignalDeferred.push(async (OneSignalWeb) => {
             if (!isOneSignalWebInitialized) {
               try {
                 await OneSignalWeb.init({
@@ -221,7 +222,7 @@ function AppContent() {
                 console.warn("OneSignal Web Sync User/Tags failed/skipped:", syncErr.message || syncErr);
               }
             }
-          }
+          });
         }
       } catch (error) {
         console.error("Error initializing OneSignal:", error);
