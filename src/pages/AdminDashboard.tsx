@@ -1645,6 +1645,7 @@ export default function AdminDashboard() {
 
   const [isTestingOneSignal, setIsTestingOneSignal] = useState(false);
   const [isSendingTestPush, setIsSendingTestPush] = useState(false);
+  const [isSeeding, setIsSeeding] = useState(false);
 
   const handleTestOneSignal = async () => {
     setIsTestingOneSignal(true);
@@ -3806,31 +3807,466 @@ export default function AdminDashboard() {
   };
 
   const seedData = async () => {
+    setIsSeeding(true);
+    const loadingToast = toast.loading("Seeding premium ethnic wear collections, products, and analytics...");
     try {
-      const ordersRef = collection(db, 'orders');
-      const dummyOrders = [
-        { customerName: 'Rajesh Sharma', status: 'Shipped', total: 3200, createdAt: new Date().toISOString() },
-        { customerName: 'Anita Verma', status: 'Pending', total: 1850, createdAt: new Date().toISOString() },
-        { customerName: 'Vikram Gupta', status: 'Delivered', total: 2500, createdAt: new Date().toISOString() },
-        { customerName: 'Sneha Patel', status: 'Cancelled', total: 900, createdAt: new Date().toISOString() },
+      // 1. Seed Categories if empty
+      const categoriesRef = collection(db, 'categories');
+      const categorySnap = await getDocs(categoriesRef);
+      const categoryMap: Record<string, string> = {};
+      
+      const newCategories = [
+        { name: "Kurti", image: "https://images.unsplash.com/photo-1621184455862-c163dfb30e0f?auto=format&fit=crop&q=80&w=300", slug: "kurti" },
+        { name: "Sarees", image: "https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=300", slug: "sarees" },
+        { name: "Lehengas", image: "https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&q=80&w=300", slug: "lehengas" },
+        { name: "Suits", image: "https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&q=80&w=300", slug: "suits" },
+        { name: "Dupatta", image: "https://images.unsplash.com/photo-1583391733914-64c0242c1616?auto=format&fit=crop&q=80&w=300", slug: "dupatta" }
       ];
-      
-      for (const order of dummyOrders) {
-        await addDoc(ordersRef, order);
+
+      if (categorySnap.empty) {
+        for (const cat of newCategories) {
+          const docRef = await addDoc(categoriesRef, {
+            ...cat,
+            createdAt: new Date().toISOString()
+          });
+          categoryMap[cat.name] = docRef.id;
+        }
+      } else {
+        categorySnap.docs.forEach(doc => {
+          categoryMap[doc.data().name] = doc.id;
+        });
       }
-      
-      // Also add some dummy users if count is 0
-      if (usersCount === 0) {
-        const usersRef = collection(db, 'users');
-        for (let i = 0; i < 5; i++) {
-          await addDoc(usersRef, { email: `user${i}@example.com`, createdAt: new Date().toISOString() });
+
+      // 2. Seed Colors if empty
+      const colorsRef = collection(db, 'colors');
+      const colorsSnap = await getDocs(colorsRef);
+      const newColors = [
+        { name: "Ruby Red", hex: "#E11D48" },
+        { name: "Emerald Green", hex: "#059669" },
+        { name: "Royal Blue", hex: "#2563EB" },
+        { name: "Jet Black", hex: "#111827" },
+        { name: "Lilac Violet", hex: "#8B5CF6" }
+      ];
+      if (colorsSnap.empty) {
+        for (const col of newColors) {
+          await addDoc(colorsRef, {
+            ...col,
+            createdAt: new Date().toISOString()
+          });
         }
       }
 
-      toast.success("Dashboard data seeded successfully!");
+      // 3. Seed Sizes if empty
+      const sizesRef = collection(db, 'sizes');
+      const sizesSnap = await getDocs(sizesRef);
+      const newSizes = ["S", "M", "L", "XL", "XXL"];
+      if (sizesSnap.empty) {
+        for (const sz of newSizes) {
+          await addDoc(sizesRef, {
+            name: sz,
+            createdAt: new Date().toISOString()
+          });
+        }
+      }
+
+      // 4. Seed Banners if empty
+      const bannersRef = collection(db, 'banners');
+      const bannersSnap = await getDocs(bannersRef);
+      if (bannersSnap.empty) {
+        const dummyBanners = [
+          {
+            title: "Festive Season Collection",
+            image: "https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=1200",
+            link: "/shop",
+            active: true,
+            createdAt: new Date().toISOString()
+          },
+          {
+            title: "Elegant Pure Cotton Kurtas",
+            image: "https://images.unsplash.com/photo-1621184455862-c163dfb30e0f?auto=format&fit=crop&q=80&w=1200",
+            link: "/shop?category=kurti",
+            active: true,
+            createdAt: new Date().toISOString()
+          }
+        ];
+        for (const ban of dummyBanners) {
+          await addDoc(bannersRef, ban);
+        }
+      }
+
+      // 5. Seed Coupons if empty
+      const couponsRef = collection(db, 'coupons');
+      const couponsSnap = await getDocs(couponsRef);
+      if (couponsSnap.empty) {
+        const dummyCoupons = [
+          { code: "RUBYWELCOME", discount: 150, type: "flat", expiryDate: "2026-12-31", active: true, createdAt: new Date().toISOString() },
+          { code: "FESTIVE25", discount: 25, type: "percentage", expiryDate: "2026-12-31", active: true, createdAt: new Date().toISOString() }
+        ];
+        for (const c of dummyCoupons) {
+          await addDoc(couponsRef, c);
+        }
+      }
+
+      // 6. Seed High Quality Products if empty
+      const productsRef = collection(db, 'products');
+      const productsSnap = await getDocs(productsRef);
+      let seededProducts: any[] = [];
+
+      const rawProducts = [
+        {
+          name: "Royal Crimson Anarkali Kurta Set",
+          price: 1899,
+          comparePrice: 2999,
+          category: ["Kurti"],
+          sizes: ["M", "L", "XL", "XXL"],
+          images: ["https://images.unsplash.com/photo-1621184455862-c163dfb30e0f?auto=format&fit=crop&q=80&w=800"],
+          stock: 25,
+          stockStatus: "In Stock",
+          isTrending: true,
+          description: "Grace any occasion with this beautiful heavy georgette crimson red Anarkali kurta set. Richly embroidered with golden zari work and featuring a matching dupatta with intricate borders.",
+          viewCount: 145,
+          wishlistCount: 38
+        },
+        {
+          name: "Elegant Banarasi Red Silk Saree",
+          price: 3499,
+          comparePrice: 5999,
+          category: ["Sarees"],
+          sizes: ["M", "L"],
+          images: ["https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=800"],
+          stock: 15,
+          stockStatus: "In Stock",
+          isTrending: true,
+          description: "Impeccably handwoven silk saree featuring exquisite golden Banarasi borders and elegant paisley motifs. Ideal for weddings, festivals, and royal family events.",
+          viewCount: 189,
+          wishlistCount: 52
+        },
+        {
+          name: "Sapphire Blue Velvet Lehenga Choli",
+          price: 4999,
+          comparePrice: 8999,
+          category: ["Lehengas"],
+          sizes: ["S", "M", "L"],
+          images: ["https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&q=80&w=800"],
+          stock: 10,
+          stockStatus: "In Stock",
+          isTrending: true,
+          description: "Make heads turn with this stunning sapphire blue velvet lehenga, heavily embellished with sequins, pearl work, and embroidery. Comes with deep-cut choli and sheer baby pink net dupatta.",
+          viewCount: 232,
+          wishlistCount: 89
+        },
+        {
+          name: "Classic Ivory Lucknowi Chikankari Kurti",
+          price: 1299,
+          comparePrice: 2299,
+          category: ["Kurti"],
+          sizes: ["S", "M", "L", "XL"],
+          images: ["https://images.unsplash.com/photo-1608933221953-c6cd6a7f0525?auto=format&fit=crop&q=80&w=800"],
+          stock: 45,
+          stockStatus: "In Stock",
+          isTrending: false,
+          description: "Traditional Lucknowi hand-embroidered georgette Chikankari kurti in ivory white. Breathable, comfortable, and semi-sheer with gorgeous handshadow-work embroidery details.",
+          viewCount: 94,
+          wishlistCount: 22
+        },
+        {
+          name: "Pastel Mint Green Sharara Set",
+          price: 2499,
+          comparePrice: 3999,
+          category: ["Suits"],
+          sizes: ["S", "M", "L", "XL"],
+          images: ["https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&q=80&w=800"],
+          stock: 18,
+          stockStatus: "In Stock",
+          isTrending: true,
+          description: "Indulge in absolute style with this beautiful mint green sharara suit set. Styled with intricate lace detailing on the neck, a flared bottom, and a matching organza dupatta.",
+          viewCount: 165,
+          wishlistCount: 41
+        },
+        {
+          name: "Handwoven Golden Zari Dupatta",
+          price: 799,
+          comparePrice: 1499,
+          category: ["Dupatta"],
+          sizes: ["M", "L"],
+          images: ["https://images.unsplash.com/photo-1583391733914-64c0242c1616?auto=format&fit=crop&q=80&w=800"],
+          stock: 30,
+          stockStatus: "In Stock",
+          isTrending: false,
+          description: "Premium handloom golden zari dupatta to elevate your simple ethnic kurtas. Lightweight, fluid, and textured with elegant metallic thread work.",
+          viewCount: 61,
+          wishlistCount: 14
+        },
+        {
+          name: "Floral Printed Peach Fusion Set",
+          price: 1699,
+          comparePrice: 2899,
+          category: ["Suits"],
+          sizes: ["M", "L", "XL"],
+          images: ["https://images.unsplash.com/photo-1583391733979-514d3ec17e3f?auto=format&fit=crop&q=80&w=800"],
+          stock: 22,
+          stockStatus: "In Stock",
+          isTrending: false,
+          description: "Enchanting peach-colored ethnic crop top and matching palazzo pants set, completed with an elegant floral printed long shrug jacket.",
+          viewCount: 110,
+          wishlistCount: 29
+        },
+        {
+          name: "Indigo Block-Print Cotton Kurti",
+          price: 999,
+          comparePrice: 1699,
+          category: ["Kurti"],
+          sizes: ["S", "M", "L", "XL", "XXL"],
+          images: ["https://images.unsplash.com/photo-1610030469668-93535c17b6b3?auto=format&fit=crop&q=80&w=800"],
+          stock: 40,
+          stockStatus: "In Stock",
+          isTrending: false,
+          description: "Pure organic cotton daily-wear Indigo kurti with artisanal hand-block print. Designed in a timeless straight-cut style with 3/4 sleeves.",
+          viewCount: 88,
+          wishlistCount: 19
+        }
+      ];
+
+      if (productsSnap.empty) {
+        for (const prod of rawProducts) {
+          const docRef = await addDoc(productsRef, {
+            ...prod,
+            createdAt: new Date().toISOString()
+          });
+          seededProducts.push({ id: docRef.id, ...prod });
+        }
+      } else {
+        seededProducts = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      }
+
+      // 7. Seed Users / Customers
+      const usersRef = collection(db, 'users');
+      const usersSnap = await getDocs(usersRef);
+      const seededUsers: any[] = [];
+      const dummyCustomers = [
+        { displayName: "Rajesh Sharma", email: "rajesh@example.com", role: "user", isVerified: true, loyaltyPoints: 350 },
+        { displayName: "Anita Verma", email: "anita@example.com", role: "user", isVerified: true, loyaltyPoints: 120 },
+        { displayName: "Vikram Gupta", email: "vikram@example.com", role: "user", isVerified: true, loyaltyPoints: 240 },
+        { displayName: "Sneha Patel", email: "sneha@example.com", role: "user", isVerified: true, loyaltyPoints: 90 },
+        { displayName: "Amit Kumar", email: "amit@example.com", role: "user", isVerified: true, loyaltyPoints: 180 }
+      ];
+
+      if (usersSnap.empty) {
+        for (const cust of dummyCustomers) {
+          const relativeDays = Math.floor(Math.random() * 20) + 10; // 10 to 30 days ago
+          const date = new Date(Date.now() - relativeDays * 24 * 60 * 60 * 1000).toISOString();
+          const docRef = await addDoc(usersRef, {
+            ...cust,
+            uid: `mock_${Math.random().toString(36).substring(7)}`,
+            createdAt: date,
+            updatedAt: date
+          });
+          seededUsers.push({ id: docRef.id, ...cust });
+        }
+      } else {
+        seededUsers.push(...usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }
+
+      // 8. Seed Orders spanning last 30 days
+      const ordersRef = collection(db, 'orders');
+      const ordersSnap = await getDocs(ordersRef);
+      if (ordersSnap.empty && seededProducts.length > 0) {
+        // Construct realistic order templates using our real products
+        const orderTemplates = [
+          {
+            customerName: "Rajesh Sharma",
+            userId: seededUsers[0]?.id || "mock_user_rajesh",
+            items: [
+              {
+                ...seededProducts[0],
+                selectedSize: "XL",
+                selectedColor: "Ruby Red",
+                quantity: 2
+              }
+            ],
+            total: seededProducts[0].price * 2,
+            status: "Delivered",
+            shippingMethod: "Express Shipping",
+            shippingAddress: {
+              fullName: "Rajesh Sharma",
+              phoneNumber: "+91 98765 43210",
+              address: "A-405, Shanti Vihar Apartments, Outer Ring Road",
+              city: "New Delhi",
+              zipCode: "110001",
+              country: "India"
+            },
+            relativeDaysAgo: 25
+          },
+          {
+            customerName: "Anita Verma",
+            userId: seededUsers[1]?.id || "mock_user_anita",
+            items: [
+              {
+                ...seededProducts[1],
+                selectedSize: "M",
+                selectedColor: "Ruby Red",
+                quantity: 1
+              }
+            ],
+            total: seededProducts[1].price,
+            status: "Shipped",
+            shippingMethod: "Standard Shipping",
+            shippingAddress: {
+              fullName: "Anita Verma",
+              phoneNumber: "+91 88822 34567",
+              address: "Flat 2C, Regency Towers, Gariahat",
+              city: "Kolkata",
+              zipCode: "700019",
+              country: "India"
+            },
+            relativeDaysAgo: 15
+          },
+          {
+            customerName: "Vikram Gupta",
+            userId: seededUsers[2]?.id || "mock_user_vikram",
+            items: [
+              {
+                ...seededProducts[2],
+                selectedSize: "L",
+                selectedColor: "Lilac Violet",
+                quantity: 1
+              }
+            ],
+            total: seededProducts[2].price,
+            status: "Processing",
+            shippingMethod: "Express Shipping",
+            shippingAddress: {
+              fullName: "Vikram Gupta",
+              phoneNumber: "+91 99112 23344",
+              address: "Villa 42, Green Meadows, Whitefield",
+              city: "Bengaluru",
+              zipCode: "560066",
+              country: "India"
+            },
+            relativeDaysAgo: 5
+          },
+          {
+            customerName: "Sneha Patel",
+            userId: seededUsers[3]?.id || "mock_user_sneha",
+            items: [
+              {
+                ...seededProducts[3],
+                selectedSize: "S",
+                selectedColor: "Jet Black",
+                quantity: 1
+              }
+            ],
+            total: seededProducts[3].price,
+            status: "Pending",
+            shippingMethod: "Standard Shipping",
+            shippingAddress: {
+              fullName: "Sneha Patel",
+              phoneNumber: "+91 77766 55443",
+              address: "15, Panchsheel Society, Ashram Road",
+              city: "Ahmedabad",
+              zipCode: "380009",
+              country: "India"
+            },
+            relativeDaysAgo: 2
+          },
+          {
+            customerName: "Amit Kumar",
+            userId: seededUsers[4]?.id || "mock_user_amit",
+            items: [
+              {
+                ...seededProducts[4],
+                selectedSize: "XL",
+                selectedColor: "Emerald Green",
+                quantity: 1
+              },
+              {
+                ...seededProducts[5],
+                selectedSize: "L",
+                selectedColor: "Ruby Red",
+                quantity: 1
+              }
+            ],
+            total: seededProducts[4].price + seededProducts[5].price,
+            status: "Delivered",
+            shippingMethod: "Standard Shipping",
+            shippingAddress: {
+              fullName: "Amit Kumar",
+              phoneNumber: "+91 98333 44455",
+              address: "B-12, Sector 62",
+              city: "Noida",
+              zipCode: "201301",
+              country: "India"
+            },
+            relativeDaysAgo: 20
+          },
+          {
+            customerName: "Rita Sen",
+            userId: "mock_user_rita",
+            items: [
+              {
+                ...seededProducts[7],
+                selectedSize: "M",
+                selectedColor: "Royal Blue",
+                quantity: 1
+              }
+            ],
+            total: seededProducts[7].price,
+            status: "Cancelled",
+            shippingMethod: "Standard Shipping",
+            shippingAddress: {
+              fullName: "Rita Sen",
+              phoneNumber: "+91 90071 82736",
+              address: "3B, Lake View Road",
+              city: "Kolkata",
+              zipCode: "700029",
+              country: "India"
+            },
+            relativeDaysAgo: 11
+          }
+        ];
+
+        for (const tmpl of orderTemplates) {
+          const date = new Date(Date.now() - tmpl.relativeDaysAgo * 24 * 60 * 60 * 1000).toISOString();
+          const { relativeDaysAgo, ...orderData } = tmpl;
+          await addDoc(ordersRef, {
+            ...orderData,
+            createdAt: date
+          });
+        }
+      }
+
+      // 9. Seed Daily Analytics to build beautiful charts
+      const analyticsRef = collection(db, 'analytics_daily');
+      const analyticsSnap = await getDocs(analyticsRef);
+      if (analyticsSnap.empty) {
+        // Build 14 days of historical stats
+        for (let i = 14; i >= 0; i--) {
+          const dateObj = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+          const dateStr = dateObj.toISOString().substring(0, 10);
+          
+          // Generate realistic trends
+          const visitors = 45 + Math.floor(Math.random() * 40);
+          const ordersCount = Math.floor(visitors * 0.05) + (Math.random() > 0.5 ? 1 : 0);
+          const sales = ordersCount * (1200 + Math.floor(Math.random() * 1000));
+          
+          await addDoc(analyticsRef, {
+            date: dateStr,
+            total_sales: sales,
+            total_orders: ordersCount,
+            total_users: visitors,
+            conversions: visitors > 0 ? Number(((ordersCount / visitors) * 100).toFixed(1)) : 0,
+            createdAt: dateObj.toISOString()
+          });
+        }
+      }
+
+      toast.success("Fashion store seed data uploaded successfully! 🎉", { id: loadingToast });
       fetchDashboardData();
-    } catch (error) {
-      toast.error("Failed to seed data");
+    } catch (error: any) {
+      console.error("Error seeding store data:", error);
+      toast.error(`Failed to seed data: ${error.message || error}`, { id: loadingToast });
+    } finally {
+      setIsSeeding(false);
     }
   };
 
@@ -4212,7 +4648,7 @@ export default function AdminDashboard() {
                         {(['overview', 'reports'] as const).map((tab) => (
                           <button
                             key={tab}
-                            onClick={() => setDashboardSubTab(tab)}
+                            onClick={() => setDashboardSubTab(tab as any)}
                             className={cn(
                               "flex-1 md:flex-none px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
                               dashboardSubTab === tab ? "bg-white text-[#1A2C54] shadow-sm" : "text-gray-400 hover:text-gray-600"
@@ -4233,6 +4669,31 @@ export default function AdminDashboard() {
                       </button>
                     </div>
                   </div>
+
+                  {products.length === 0 && (
+                    <div className="bg-gradient-to-r from-ruby/10 via-ruby/5 to-transparent p-6 rounded-3xl border border-dashed border-ruby/30 flex flex-col md:flex-row justify-between items-center gap-6 shadow-sm animate-pulse-once">
+                      <div className="flex items-center gap-4">
+                        <div className="hidden sm:flex w-12 h-12 rounded-2xl bg-ruby/10 text-ruby items-center justify-center font-bold text-xl">
+                          🌱
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-black text-[#1A2C54] uppercase tracking-wider">Empty Database Detected</h4>
+                          <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                            Your store databases are currently empty because of the new Firebase setup. 
+                            Click the seed button to instantly populate high-quality ethnic wear collections, live products, 
+                            orders with custom addresses, sales reports, and customer profiles!
+                          </p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={seedData}
+                        disabled={isSeeding}
+                        className="w-full md:w-auto shrink-0 bg-ruby text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 flex items-center justify-center gap-2 transform active:scale-95 disabled:opacity-50"
+                      >
+                        <span>{isSeeding ? 'Seeding...' : 'Seed Sample Store Data'}</span>
+                      </button>
+                    </div>
+                  )}
 
                   {dashboardSubTab === 'overview' && (
                     <>
