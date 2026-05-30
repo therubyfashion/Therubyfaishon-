@@ -12,8 +12,25 @@ const SettingsContext = createContext<SettingsContextType>({
   loading: true,
 });
 
+const DEFAULT_CLIENT_SETTINGS = {
+  storeName: 'The Ruby Fashion',
+  storeLogo: '',
+  fromEmail: 'support@therubyfashion.shop',
+  resendApiKey: '',
+  smtpUser: '',
+  smtpPass: '',
+  oneSignalAppId: String((import.meta as any).env.VITE_ONESIGNAL_APP_ID || '').trim(),
+  oneSignalRestApiKey: '',
+  razorpayKeyId: String((import.meta as any).env.VITE_RAZORPAY_KEY_ID || '').trim(),
+  razorpayKeySecret: '',
+  otpMonthlyLimit: 9999,
+  buy2Get1Free: false,
+  buy2GetPercentEnabled: false,
+  buy2GetPercentOff: 0
+};
+
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [settings, setSettings] = useState<any | null>(null);
+  const [settings, setSettings] = useState<any | null>(DEFAULT_CLIENT_SETTINGS);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -22,7 +39,12 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const q = query(collection(db, 'settings'), limit(1));
         const querySnapshot = await getDocs(q);
         if (!querySnapshot.empty) {
-          setSettings(querySnapshot.docs[0].data());
+          setSettings({
+            ...DEFAULT_CLIENT_SETTINGS,
+            ...querySnapshot.docs[0].data()
+          });
+        } else {
+          setSettings(DEFAULT_CLIENT_SETTINGS);
         }
       } catch (error: any) {
         if (error.code === 'resource-exhausted') {
@@ -30,6 +52,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         } else {
           console.error("Error fetching settings:", error);
         }
+        setSettings(DEFAULT_CLIENT_SETTINGS);
       } finally {
         setLoading(false);
       }

@@ -163,6 +163,10 @@ const initializeFirebase = async (force = false) => {
         db = currentDb;
         isDbWriteable = true;
         console.log("✅ Firebase Connected: Database is fully accessible.");
+        // Try to seed settings as database is writable
+        seedSettingsIfEmpty(currentDb).catch((err) => {
+          console.warn("⚠️ Seeding skipped on main db:", err.message);
+        });
       } catch (probeErr: any) {
         console.warn("⚠️ Firebase Admin initial probe failed:", probeErr.message);
         isDbWriteable = false; // Mark restricted initially
@@ -178,6 +182,10 @@ const initializeFirebase = async (force = false) => {
             isDbWriteable = true;
             currentFirestoreDatabaseId = '(default)';
             console.log("✅ Firebase Connected: Fallback to '(default)' database successful.");
+            // Try to seed settings on fallback db
+            seedSettingsIfEmpty(fallbackDb).catch((err) => {
+              console.warn("⚠️ Seeding skipped on fallback db:", err.message);
+            });
           } catch (fallbackErr: any) {
             console.log("ℹ️ Fallback database probe also failed. Assigning configured database to prevent lockouts.");
             db = currentDb;
@@ -201,6 +209,37 @@ const initializeFirebase = async (force = false) => {
   }
   // Initialize client Firebase Firestore fallback asynchronously too
   initializeClientFirestore();
+};
+
+const seedSettingsIfEmpty = async (targetDb: any) => {
+  try {
+    const settingsSnap = await targetDb.collection('settings').limit(1).get();
+    if (settingsSnap.empty) {
+      console.log("🌱 Database settings collection is empty. Seeding defaults from system configurations...");
+      const defaultSettings = {
+        storeName: 'The Ruby Fashion',
+        storeLogo: '',
+        fromEmail: process.env.RESEND_FROM_EMAIL || `support@therubyfashion.shop`,
+        resendApiKey: process.env.RESEND_API_KEY || '',
+        smtpUser: process.env.SMTP_USER || '',
+        smtpPass: process.env.SMTP_PASS || '',
+        oneSignalAppId: process.env.ONESIGNAL_APP_ID || process.env.VITE_ONESIGNAL_APP_ID || '',
+        oneSignalRestApiKey: process.env.ONESIGNAL_REST_API_KEY || '',
+        razorpayKeyId: process.env.VITE_RAZORPAY_KEY_ID || '',
+        razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
+        otpMonthlyLimit: 9999,
+        buy2Get1Free: false,
+        buy2GetPercentEnabled: false,
+        buy2GetPercentOff: 0
+      };
+      await targetDb.collection('settings').add(defaultSettings);
+      console.log("🌱 Settings successfully seeded to database.");
+    } else {
+      console.log("🌱 Settings collection contains existing custom data.");
+    }
+  } catch (err: any) {
+    console.error("❌ Seeding settings failed:", err.message);
+  }
 };
 
 // Start initialization in background to avoid blocking
@@ -1881,7 +1920,7 @@ async function startServer() {
       const now = Date.now();
       if (!cachedSettings || (now - lastSettingsFetch > SETTINGS_CACHE_TTL)) {
         try {
-          if (db) {
+          if (db && isDbWriteable !== false) {
             const settingsSnap = await db.collection('settings').limit(1).get();
             if (!settingsSnap.empty) {
               cachedSettings = settingsSnap.docs[0].data();
@@ -1909,7 +1948,7 @@ async function startServer() {
       const monthlyLimit = effectiveSettings.otpMonthlyLimit || 9999;
       const currentMonth = new Date().toISOString().substring(0, 7); // "YYYY-MM"
       
-      if (db) {
+      if (db && isDbWriteable !== false) {
         try {
           const usageRef = db.collection('system_stats').doc('communications');
           const usageSnap = await usageRef.get();
