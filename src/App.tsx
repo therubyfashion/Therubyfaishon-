@@ -12,6 +12,7 @@ import Footer from './components/Footer';
 import BottomNav from './components/BottomNav';
 import ChatWidget from './components/ChatWidget';
 import SplashScreen from './components/SplashScreen';
+import PageLoader from './components/PageLoader';
 import { AnimatePresence } from 'framer-motion';
 import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
@@ -54,7 +55,7 @@ const ScrollToTop = () => {
 
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAdmin, loading } = useAuth();
-  if (loading) return <div className="h-screen flex items-center justify-center">Loading...</div>;
+  if (loading) return <PageLoader variant="minimal" message="Verifying access" />;
   return isAdmin ? <>{children}</> : <Navigate to="/" />;
 };
 
@@ -295,7 +296,7 @@ function AppContent() {
       </AnimatePresence>
       <ScrollToTop />
       <main className="flex-grow">
-        <Suspense fallback={<div className="h-screen flex items-center justify-center">Loading...</div>}>
+        <Suspense fallback={<PageLoader variant="minimal" message="Gathering Collections" />}>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/shop" element={<Shop />} />

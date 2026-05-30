@@ -40,6 +40,7 @@ import { generateShippingLabel } from '../utils/shippingLabelGenerator';
 import { compressImage } from '../utils/imageUtils';
 import Barcode from 'react-barcode';
 import LiveView from '../components/LiveView';
+import PageLoader from '../components/PageLoader';
 import { io } from 'socket.io-client';
 import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
@@ -2436,6 +2437,17 @@ export default function AdminDashboard() {
 
   const fetchDashboardData = async () => {
     setLoading(true);
+    
+    // Resilient fallback query wrapper for extreme loading speed and index fault-tolerance
+    const safeGetDocs = async (queryRef: any) => {
+      try {
+        return await getDocs(queryRef);
+      } catch (err) {
+        console.warn("Failed fetching query safely, returning fallback:", queryRef, err);
+        return { docs: [], empty: true, size: 0 } as any;
+      }
+    };
+
     try {
       const [
         productsSnap, ordersSnap, usersSnap, categoriesSnap, 
@@ -2443,20 +2455,20 @@ export default function AdminDashboard() {
         settingsSnap, reviewsSnap, cartsSnap, sessionsSnap, promotionsSnap,
         analyticsDailySnap
       ] = await Promise.all([
-        getDocs(query(collection(db, 'products'), limit(500))),
-        getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(500))),
-        getDocs(query(collection(db, 'users'), limit(500))),
-        getDocs(collection(db, 'categories')),
-        getDocs(collection(db, 'colors')),
-        getDocs(collection(db, 'sizes')),
-        getDocs(collection(db, 'coupons')),
-        getDocs(collection(db, 'banners')),
-        getDocs(collection(db, 'settings')),
-        getDocs(query(collection(db, 'reviews'), orderBy('createdAt', 'desc'), limit(100))),
-        getDocs(query(collection(db, 'carts'), orderBy('updatedAt', 'desc'), limit(100))),
-        getDocs(query(collection(db, 'active_sessions'), limit(100))),
-        getDocs(query(collection(db, 'promotions'), orderBy('priority', 'asc'))),
-        getDocs(query(collection(db, 'analytics_daily'), orderBy('date', 'desc'), limit(365)))
+        safeGetDocs(query(collection(db, 'products'), limit(500))),
+        safeGetDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(500))),
+        safeGetDocs(query(collection(db, 'users'), limit(500))),
+        safeGetDocs(collection(db, 'categories')),
+        safeGetDocs(collection(db, 'colors')),
+        safeGetDocs(collection(db, 'sizes')),
+        safeGetDocs(collection(db, 'coupons')),
+        safeGetDocs(collection(db, 'banners')),
+        safeGetDocs(collection(db, 'settings')),
+        safeGetDocs(query(collection(db, 'reviews'), orderBy('createdAt', 'desc'), limit(100))),
+        safeGetDocs(query(collection(db, 'carts'), orderBy('updatedAt', 'desc'), limit(100))),
+        safeGetDocs(query(collection(db, 'active_sessions'), limit(100))),
+        safeGetDocs(query(collection(db, 'promotions'), orderBy('priority', 'asc'))),
+        safeGetDocs(query(collection(db, 'analytics_daily'), orderBy('date', 'desc'), limit(365)))
       ]);
 
       if (!analyticsDailySnap.empty) {
@@ -4337,6 +4349,14 @@ export default function AdminDashboard() {
     : (totalOrdersVal * 3) + usersCount + liveSessions.length; 
   const lowStockVal = products.filter(p => p.stock < 10).length;
 
+  if (loading && products.length === 0) {
+    return (
+      <div className="min-h-screen bg-[#F5F7FA] flex items-center justify-center w-full">
+        <PageLoader variant="minimal" message="Cultivating Style Trends & Metrics" />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F5F7FA] flex font-sans max-w-full overflow-x-hidden">
       {/* Sidebar Overlay for Mobile */}
@@ -4670,30 +4690,7 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
-                  {products.length === 0 && (
-                    <div className="bg-gradient-to-r from-ruby/10 via-ruby/5 to-transparent p-6 rounded-3xl border border-dashed border-ruby/30 flex flex-col md:flex-row justify-between items-center gap-6 shadow-sm animate-pulse-once">
-                      <div className="flex items-center gap-4">
-                        <div className="hidden sm:flex w-12 h-12 rounded-2xl bg-ruby/10 text-ruby items-center justify-center font-bold text-xl">
-                          🌱
-                        </div>
-                        <div>
-                          <h4 className="text-sm font-black text-[#1A2C54] uppercase tracking-wider">Empty Database Detected</h4>
-                          <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                            Your store databases are currently empty because of the new Firebase setup. 
-                            Click the seed button to instantly populate high-quality ethnic wear collections, live products, 
-                            orders with custom addresses, sales reports, and customer profiles!
-                          </p>
-                        </div>
-                      </div>
-                      <button 
-                        onClick={seedData}
-                        disabled={isSeeding}
-                        className="w-full md:w-auto shrink-0 bg-ruby text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 flex items-center justify-center gap-2 transform active:scale-95 disabled:opacity-50"
-                      >
-                        <span>{isSeeding ? 'Seeding...' : 'Seed Sample Store Data'}</span>
-                      </button>
-                    </div>
-                  )}
+
 
                   {dashboardSubTab === 'overview' && (
                     <>
