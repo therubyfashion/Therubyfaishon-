@@ -1405,20 +1405,41 @@ export default function AdminDashboard() {
 
   // OneSignal Status Fetcher
   useEffect(() => {
-    if (activeTab === 'settings' && activeSettingsTab === 'push' && Capacitor.isNativePlatform()) {
-      try {
-        const OS = OneSignal as any;
-        // Try multiple ways to get ID depending on version (v3 vs v5)
-        if (OS.getDeviceState) {
-          OS.getDeviceState((state: any) => {
-            setOnesignalSubscriptionId(state.userId || state.pushToken || null);
-          });
-        } else if (OS.User?.pushSubscription?.id) {
-          setOnesignalSubscriptionId(OS.User.pushSubscription.id);
+    if (activeTab === 'settings' && activeSettingsTab === 'push') {
+      const fetchId = () => {
+        if (Capacitor.isNativePlatform()) {
+          try {
+            const OS = OneSignal as any;
+            if (OS.getDeviceState) {
+              OS.getDeviceState((state: any) => {
+                setOnesignalSubscriptionId(state.userId || state.pushToken || null);
+              });
+            } else if (OS.User?.pushSubscription?.id) {
+              setOnesignalSubscriptionId(OS.User.pushSubscription.id);
+            }
+          } catch (e) {
+            console.error("Error fetching native OneSignal state:", e);
+          }
+        } else {
+          // Web platform
+          try {
+            const OS = (window as any).OneSignal;
+            if (OS) {
+              if (OS.User?.PushSubscription?.id) {
+                setOnesignalSubscriptionId(OS.User.PushSubscription.id);
+              } else if (OS.User?.pushSubscriptionId) {
+                setOnesignalSubscriptionId(OS.User.pushSubscriptionId);
+              }
+            }
+          } catch (e) {
+            console.error("Error fetching web OneSignal state:", e);
+          }
         }
-      } catch (e) {
-        console.error("Error fetching OneSignal device state:", e);
-      }
+      };
+
+      fetchId();
+      const interval = setInterval(fetchId, 2000);
+      return () => clearInterval(interval);
     }
   }, [activeTab, activeSettingsTab]);
   const [isLoadingStatus, setIsLoadingStatus] = useState(false);
@@ -1514,117 +1535,106 @@ export default function AdminDashboard() {
   };
 
   const requestNotificationPermission = async () => {
-    // @ts-ignore
-    const OneSignal = window.OneSignal;
-    
-    // @ts-ignore
-    if (!OneSignal && !window.OneSignalDeferred) {
-      toast.error("OneSignal script is not loaded. Please check your internet or disable adblockers.");
+    // Check if keys are configured first
+    if (!settings.oneSignalAppId) {
+      toast.error("Please configure and save OneSignal App ID first.");
       return;
     }
 
     setIsSubscribingPush(true);
 
-    // Safety timeout to prevent button from being stuck forever
-    const timeoutId = setTimeout(() => {
-      if (isSubscribingPush) {
-        setIsSubscribingPush(false);
-        toast.error("OneSignal initialization timed out. Please make sure your App ID is correct and you are not in an iframe.");
-      }
-    }, 10000);
+    const triggerPermission = async (OS: any) => {
+      try {
+        if (!OS) {
+          throw new Error("OneSignal SDK not found. Double check your App ID or content blockers.");
+        }
 
-    try {
-      console.log("OneSignal Button Clicked. Requesting permission...");
-      
+        // Initialize dynamically if needed
+        if (!OS.Notifications) {
+          await OS.init({
+            appId: settings.oneSignalAppId.trim(),
+            safari_web_id: "web.onesignal.auto.40e188d7-5f7a-4af3-8ac5-05427adc97a7",
+            allowLocalhostAsSecureOrigin: true,
+          });
+        }
+
+        // Handle standard native browser or custom OS flow
+        console.log("Triggering push request...");
+        
+        // Iframe check helper
+        if (window.self !== window.top) {
+          toast.warning("NOTE: Browser notifications do not prompt inside small iframes. Click the 'Open App in New Tab' icon on top right to enable successfully! ↗️", { duration: 10000 });
+        }
+
+        if (OS.Notifications?.requestPermission) {
+          await OS.Notifications.requestPermission();
+        } else if (typeof OS.registerForPushNotifications === 'function') {
+          await OS.registerForPushNotifications();
+        } else {
+          // Native browser nudge fallback
+          await Notification.requestPermission();
+        }
+
+        // Delay to allow subscriber registry sync
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Sync local subscriber ID to state
+        let subId = null;
+        if (OS.User?.PushSubscription?.id) {
+          subId = OS.User.PushSubscription.id;
+        } else if (OS.User?.pushSubscriptionId) {
+          subId = OS.User.pushSubscriptionId;
+        } else if (typeof OS.getUserId === 'function') {
+          subId = OS.getUserId();
+        }
+        
+        if (subId) {
+          setOnesignalSubscriptionId(subId);
+        }
+
+        // Login & Tag
+        if (user) {
+          if (typeof OS.login === 'function') await OS.login(user.uid).catch(() => {});
+          const tags = {
+            role: "admin",
+            email: user.email || '',
+            verified: "true"
+          };
+          if (OS.User?.addTags) {
+            await OS.User.addTags(tags).catch(() => {});
+          } else if (OS.sendTags) {
+            await OS.sendTags(tags).catch(() => {});
+          }
+        }
+
+        // Refresh permission value to show success
+        const granted = OS.Notifications?.permission === 'granted' || (Notification as any).permission === 'granted';
+        if (granted) {
+          toast.success("Push Notifications Enabled Successfully! 🔔 You are now ready to receive real-time updates.");
+        } else {
+          toast.info("Please accept the browser's native notification prompt to subscribe.");
+        }
+
+      } catch (err: any) {
+        console.error("OneSignal inner prompt error:", err);
+        toast.error("Subscription Error: " + (err.message || err));
+      } finally {
+        setIsSubscribingPush(false);
+      }
+    };
+
+    // Try executing directly
+    // @ts-ignore
+    const directOS = window.OneSignal;
+    if (directOS) {
+      await triggerPermission(directOS);
+    } else {
       // @ts-ignore
       window.OneSignalDeferred = window.OneSignalDeferred || [];
       // @ts-ignore
       window.OneSignalDeferred.push(async (OS) => {
-        clearTimeout(timeoutId);
-        try {
-          // Check if initialized
-          if (!OS.Notifications) {
-            // Try to initialize if not already done (using settings)
-            if (settings.oneSignalAppId) {
-              await OS.init({
-                appId: settings.oneSignalAppId,
-                safari_web_id: "web.onesignal.auto.40e188d7-5f7a-4af3-8ac5-05427adc97a7",
-                allowLocalhostAsSecureOrigin: true,
-              });
-            } else {
-              toast.error("OneSignal App ID is missing in settings.");
-              setIsSubscribingPush(false);
-              return;
-            }
-          }
-
-          // Check current permission
-          const permission = await OS.Notifications.permission;
-          if (permission === 'denied') {
-            toast.error("Notifications are blocked. Please enable them in your browser settings.");
-            setIsSubscribingPush(false);
-            return;
-          }
-
-          // Iframe check - OneSignal usually fails in iframes
-          if (window.self !== window.top) {
-            toast.warning("Push notifications might not work inside an iframe. Please open the app in a new tab.");
-          }
-
-          await OS.Notifications.requestPermission();
-          
-          // Wait a bit for subscription to update
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-          // Add Admin Tag and login associated with the current user
-          if (user) {
-            try {
-              if (typeof OS.login === 'function') {
-                await OS.login(user.uid);
-              }
-              const tags = {
-                "role": "admin",
-                "email": user.email || '',
-                "verified": profile?.isVerified ? "true" : "false"
-              };
-              if (OS.User?.addTags) {
-                await OS.User.addTags(tags);
-              } else if (OS.sendTags) {
-                await OS.sendTags(tags);
-              }
-              console.log("Successfully logged in and tagged Admin in OneSignal:", user.uid);
-            } catch (tagErr) {
-              console.error("Failed to tag/login admin:", tagErr);
-            }
-          } else {
-            try {
-              if (OS.User?.addTag) await OS.User.addTag("role", "admin");
-              else if (OS.sendTag) await OS.sendTag("role", "admin");
-            } catch (tagErr) {
-              console.error("Failed to tag admin:", tagErr);
-            }
-          }
-
-          const isSubscribed = OS.User.PushSubscription.optedIn;
-          console.log("OneSignal Subscription status:", isSubscribed);
-          
-          if (isSubscribed) {
-            toast.success("Push Notifications Enabled! 🔔 You will now receive order alerts.");
-          } else {
-            toast.info("Please make sure to 'Allow' notifications in the browser prompt.");
-          }
-        } catch (innerError: any) {
-          console.error("OneSignal Inner Error:", innerError);
-          toast.error("OneSignal Error: " + innerError.message);
-        } finally {
-          setIsSubscribingPush(false);
-        }
+        await triggerPermission(OS);
       });
-    } catch (error: any) {
-      clearTimeout(timeoutId);
-      console.error("Error enabling push:", error);
-      toast.error(error.message || "Failed to enable push notifications");
-      setIsSubscribingPush(false);
     }
   };
 
@@ -2440,8 +2450,15 @@ export default function AdminDashboard() {
     
     // Resilient fallback query wrapper for extreme loading speed and index fault-tolerance
     const safeGetDocs = async (queryRef: any) => {
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Query timeout")), 25000)
+      );
       try {
-        return await getDocs(queryRef);
+        const result = await Promise.race([
+          getDocs(queryRef),
+          timeoutPromise
+        ]);
+        return result as any;
       } catch (err) {
         console.warn("Failed fetching query safely, returning fallback:", queryRef, err);
         return { docs: [], empty: true, size: 0 } as any;
@@ -8524,10 +8541,11 @@ export default function AdminDashboard() {
                             </div>
                             <div className="flex gap-2">
                               <button 
-                                onClick={handlePromptPermission}
-                                className="px-3 py-1.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded-lg hover:bg-blue-200 transition-colors uppercase tracking-wider"
+                                onClick={requestNotificationPermission}
+                                disabled={isSubscribingPush}
+                                className="px-3 py-1.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded-lg hover:bg-blue-200 transition-colors uppercase tracking-wider disabled:opacity-50"
                               >
-                                Enable Notifications
+                                {isSubscribingPush ? 'Enabling...' : 'Enable Notifications'}
                               </button>
                               <button 
                                 onClick={() => handleSendTestPush(false)}
@@ -8609,14 +8627,12 @@ export default function AdminDashboard() {
                                 </span>
                               </div>
                               
-                              {Capacitor.isNativePlatform() && (
-                                <div className="flex items-center justify-between text-[10px]">
-                                  <span className="text-blue-600">My Subscription ID:</span>
-                                  <span className="text-[#1A2C54] font-mono font-bold truncate max-w-[150px]">
-                                    {onesignalSubscriptionId || "Connecting..."}
-                                  </span>
-                                </div>
-                              )}
+                              <div className="flex items-center justify-between text-[10px]">
+                                <span className="text-blue-600">My Subscription ID:</span>
+                                <span className="text-[#1A2C54] font-mono font-bold truncate max-w-[150px]">
+                                  {onesignalSubscriptionId || "Connecting..."}
+                                </span>
+                              </div>
 
                               <div className="flex items-center justify-between text-[10px] pt-2 border-t border-blue-100">
                                 <span className="text-blue-600">Firebase Status:</span>

@@ -2144,7 +2144,8 @@ async function startServer() {
 
       if (type === 'individual' && playerId) {
         notification.include_player_ids = [playerId];
-        console.log(`OneSignal: Targetting player ID: ${playerId}`);
+        notification.include_subscription_ids = [playerId];
+        console.log(`OneSignal: Targeting player and subscription ID: ${playerId}`);
       } else {
         notification.included_segments = type === 'all' ? ['Subscribed Users'] : (type === 'active' ? ['Active Users'] : ['Subscribed Users']);
       }
@@ -2177,19 +2178,20 @@ async function startServer() {
       let userFriendlyError = "Broadcast notification failed. 🔔";
       let hint = "";
 
-      if (errorMsg.includes("not subscribed") || errorMsg.includes("no users") || errorMsg.includes("players are not subscribed")) {
+      const errLower = String(errorMsg || '').toLowerCase();
+      
+      if (errLower.includes("not subscribed") || errLower.includes("no users") || errLower.includes("players are not subscribed") || errLower.includes("no subscribed players") || errLower.includes("unsubscribed")) {
         console.warn("OneSignal Broadcast Warning: No subscribed users yet.");
         return res.json({ 
           success: true, 
-          warning: "No one has subscribed to Push Notifications yet (No one subscribed yet). Message not sent. Please open the app and allow notifications first.", 
+          warning: "No one has subscribed to Push Notifications yet (No active devices). Please open the app in a new browser window/tab and click 'Enable Notifications' first.", 
           id: null 
         });
       }
 
-      const errLower = errorMsg.toLowerCase();
       if (errLower.includes("app_id not found") || errLower.includes("invalid app_id") || errLower.includes("app_id")) {
         hint = "❌ ERROR: OneSignal App ID is incorrect! \nSolution: Check that 'OneSignal App ID' is correct in Admin Panel -> Settings.";
-      } else if (errLower.includes("rest api key") || errLower.includes("invalid rest api key") || errLower.includes("unauthorized")) {
+      } else if (errLower.includes("rest api key") || errLower.includes("invalid rest api key") || errLower.includes("unauthorized") || errLower.includes("key_id")) {
         hint = "❌ ERROR: REST API Key is incorrect! \nSolution: Go to OneSignal Settings -> Keys & IDs, and copy the long REST API Key into Admin panel.";
       } else if (errLower.includes("segment") || errLower.includes("filters")) {
         hint = "❌ ERROR: OneSignal Segment Error! \nSolution: Check that 'Subscribed Users' segment exists in OneSignal Dashboard.";

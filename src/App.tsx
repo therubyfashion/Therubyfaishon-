@@ -115,13 +115,13 @@ function AppContent() {
     
     const initOneSignal = async () => {
       try {
-        let appId = ((import.meta as any).env.VITE_ONESIGNAL_APP_ID || '').trim();
-        const settingsAppId = (settings?.oneSignalAppId || '').trim();
+        let appId = (settings?.oneSignalAppId || '').trim();
+        const envAppId = ((import.meta as any).env.VITE_ONESIGNAL_APP_ID || '').trim();
         
         const isPlaceholder = (id: string) => !id || id === 'dummy-id' || id === 'YOUR_ONESIGNAL_APP_ID' || id.length < 10;
         
-        if (isPlaceholder(appId) && !isPlaceholder(settingsAppId)) {
-          appId = settingsAppId;
+        if (isPlaceholder(appId) && !isPlaceholder(envAppId)) {
+          appId = envAppId;
         }
         
         if (!appId) {
