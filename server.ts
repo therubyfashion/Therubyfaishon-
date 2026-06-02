@@ -182,19 +182,6 @@ const initializeFirebase = async (force = false) => {
             isDbWriteable = true;
             currentFirestoreDatabaseId = '(default)';
             console.log("✅ Firebase Connected: Fallback to '(default)' database successful.");
-            // Rewrite local config to keep client in sync
-            try {
-              if (fs.existsSync(configPath)) {
-                const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-                if (cfg.firestoreDatabaseId !== '(default)') {
-                  cfg.firestoreDatabaseId = '(default)';
-                  fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf8');
-                  console.log("📝 Auto-updated firebase-applet-config.json to '(default)' for client synchronization.");
-                }
-              }
-            } catch (writeErr: any) {
-              console.warn("⚠️ Failed to write fallback database ID to local config:", writeErr.message);
-            }
             // Try to seed settings on fallback db
             seedSettingsIfEmpty(fallbackDb).catch((err) => {
               console.warn("⚠️ Seeding skipped on fallback db:", err.message);
