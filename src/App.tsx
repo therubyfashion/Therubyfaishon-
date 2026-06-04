@@ -1,7 +1,7 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import { collection, getDocs, query, limit } from 'firebase/firestore';
+import { collection, getDocs, query, limit, doc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SettingsProvider, useSettings } from './contexts/SettingsContext';
@@ -113,6 +113,20 @@ function AppContent() {
   useEffect(() => {
     if (settingsLoading) return;
     
+    const syncOneSignalIdToFirestore = async (userId: string, subId: string) => {
+      if (!userId || !subId) return;
+      if (profile && profile.onesignalId === subId) {
+        return;
+      }
+      try {
+        const userRef = doc(db, 'users', userId);
+        await updateDoc(userRef, { onesignalId: subId });
+        console.log("📝 Synced OneSignal ID to user profile in DB:", subId);
+      } catch (err: any) {
+        console.error("❌ Failed to sync OneSignal ID to Firestore:", err.message);
+      }
+    };
+    
     const initOneSignal = async () => {
       try {
         let appId = (settings?.oneSignalAppId || '').trim();
@@ -174,6 +188,19 @@ function AppContent() {
               
               if (OS.sendTags) OS.sendTags(tags);
               else if (OS.User?.addTags) OS.User.addTags(tags);
+
+              // Sync native subscription ID
+              if (typeof OS.getDeviceState === 'function') {
+                OS.getDeviceState((state: any) => {
+                  const subId = state?.userId;
+                  if (subId) {
+                    syncOneSignalIdToFirestore(user.uid, subId);
+                  }
+                });
+              } else if (OS.User?.PushSubscription?.id) {
+                const subId = OS.User.PushSubscription.id;
+                syncOneSignalIdToFirestore(user.uid, subId);
+              }
             }
             
             console.log("✅ OneSignal: Native Initialization Completed");
@@ -218,6 +245,20 @@ function AppContent() {
                    await OneSignalWeb.sendTags(tags);
                 }
                 console.log("✅ OneSignal Web sync tags success:", tags);
+
+                // Fetch web subscription ID
+                let subId = null;
+                if (OneSignalWeb.User?.PushSubscription?.id) {
+                  subId = OneSignalWeb.User.PushSubscription.id;
+                } else if (OneSignalWeb.User?.pushSubscriptionId) {
+                  subId = OneSignalWeb.User.pushSubscriptionId;
+                } else if (typeof OneSignalWeb.getUserId === 'function') {
+                  subId = await OneSignalWeb.getUserId();
+                }
+                
+                if (subId) {
+                  await syncOneSignalIdToFirestore(user.uid, subId);
+                }
               } catch (syncErr: any) {
                 console.warn("OneSignal Web Sync User/Tags failed/skipped:", syncErr.message || syncErr);
               }

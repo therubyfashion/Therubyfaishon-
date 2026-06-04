@@ -2264,7 +2264,24 @@ async function startServer() {
         return res.status(400).json({ error: "OneSignal error: userId is required for targeted push." });
       }
 
-      const notification = {
+      // Read user from database to find their direct device registration ID if synced
+      let onesignalId = null;
+      if (db && isDbWriteable !== false) {
+        try {
+          const userDoc = await db.collection('users').doc(String(userId)).get();
+          if (userDoc.exists) {
+            const userData = userDoc.data();
+            onesignalId = userData?.onesignalId || null;
+            if (onesignalId) {
+              console.log(`OneSignal DB Check: Found onesignalId ${onesignalId} for user ${userId}`);
+            }
+          }
+        } catch (dbErr: any) {
+          console.warn("OneSignal Web DB sync lookup failed:", dbErr.message);
+        }
+      }
+
+      const notification: any = {
         contents: {
           en: body || "Your order status has been updated.",
         },
@@ -2273,7 +2290,24 @@ async function startServer() {
         },
         url: url || '/',
         include_external_user_ids: [String(userId)],
+        include_aliases: {
+          external_id: [String(userId)]
+        }
       };
+
+      if (onesignalId) {
+        // If they possess a mock connection from developer playground, simulate success safely
+        if (String(onesignalId).startsWith('simulated_push_')) {
+          console.log(`OneSignal: Simulating push to user ${userId} using mock id: ${onesignalId}`);
+          return res.json({ 
+            success: true, 
+            message: "OneSignal API is configured! Simulated direct push to mock device succeeded. ✅", 
+            id: "simulated-msg-id-2026-" + Date.now() 
+          });
+        }
+        notification.include_player_ids = [onesignalId];
+        notification.include_subscription_ids = [onesignalId];
+      }
 
       const response = await sendOneSignalNotification(notification);
       const responseData = response.data;
