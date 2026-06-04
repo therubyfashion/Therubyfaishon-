@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { initializeFirestore } from 'firebase/firestore';
+import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getMessaging } from 'firebase/messaging';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -26,6 +26,20 @@ if (typeof window !== 'undefined') {
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true
 }, firebaseConfig.firestoreDatabaseId);
+
+// Connection Verification Probe on App Initiation
+async function testConnection() {
+  if (typeof window !== 'undefined') {
+    try {
+      // Fetch a sample document from the settings collection using getDocFromServer
+      await getDocFromServer(doc(db, 'settings', 'connection_probe_test_id'));
+      console.log("⚡ [Firebase Client] Connected successfully to Database ID:", firebaseConfig.firestoreDatabaseId);
+    } catch (error: any) {
+      console.warn("⚠️ [Firebase Client] Initialization connectivity check result:", error.message || error);
+    }
+  }
+}
+testConnection();
 
 export const storage = getStorage(app);
 export const messaging = typeof window !== 'undefined' ? getMessaging(app) : null;

@@ -1,5 +1,6 @@
 {
   "name": "The Ruby Fashion",
   "description": "Premium Women's Fashion Store | The Ruby - Shop the latest curation of high-quality women's clothing, ethnic wear, and accessories in India.",
-  "requestFramePermissions": ["camera"]
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
