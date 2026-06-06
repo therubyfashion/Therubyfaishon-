@@ -259,6 +259,17 @@ function AppContent() {
                 if (subId) {
                   await syncOneSignalIdToFirestore(user.uid, subId);
                 }
+
+                // Add real-time event listener for subscription changes
+                if (OneSignalWeb.User?.PushSubscription?.addEventListener) {
+                  OneSignalWeb.User.PushSubscription.addEventListener("change", async (event: any) => {
+                    const newSubId = event.current?.id || event.current?.token;
+                    if (newSubId) {
+                      console.log("🔔 [OneSignal Listener] Subscription changed! New subId:", newSubId);
+                      await syncOneSignalIdToFirestore(user.uid, newSubId);
+                    }
+                  });
+                }
               } catch (syncErr: any) {
                 console.warn("OneSignal Web Sync User/Tags failed/skipped:", syncErr.message || syncErr);
               }

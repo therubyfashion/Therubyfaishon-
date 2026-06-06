@@ -104,6 +104,22 @@ export default function Profile() {
           } else if (OneSignalWeb.sendTags) {
              await OneSignalWeb.sendTags(tags);
           }
+
+          // Directly fetch and synchronize the subscription ID (subId) in Firestore database
+          let subId = null;
+          if (OneSignalWeb.User?.PushSubscription?.id) {
+            subId = OneSignalWeb.User.PushSubscription.id;
+          } else if (OneSignalWeb.User?.pushSubscriptionId) {
+            subId = OneSignalWeb.User.pushSubscriptionId;
+          } else if (typeof OneSignalWeb.getUserId === 'function') {
+            subId = await OneSignalWeb.getUserId();
+          }
+
+          if (subId) {
+            const userRef = doc(db, 'users', user.uid);
+            await updateDoc(userRef, { onesignalId: subId });
+            console.log("📝 Synced OneSignal subId directly from requestNotificationPermission:", subId);
+          }
         }
         
         toast.success("✨ Push device subscription updated successfully!");
