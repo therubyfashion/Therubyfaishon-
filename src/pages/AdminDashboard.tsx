@@ -1402,6 +1402,33 @@ export default function AdminDashboard() {
   const [isSendingBulkReminders, setIsSendingBulkReminders] = useState(false);
   const [onesignalSubscriptionId, setOnesignalSubscriptionId] = useState<string | null>(null);
   const [onesignalUserId, setOnesignalUserId] = useState<string | null>(null);
+  const [registeredDevices, setRegisteredDevices] = useState<any[]>([]);
+  const [isLoadingDevices, setIsLoadingDevices] = useState(false);
+
+  const fetchRegisteredDevices = async () => {
+    setIsLoadingDevices(true);
+    try {
+      const snapshot = await getDocs(collection(db, 'users'));
+      const devicesList: any[] = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.onesignalId) {
+          devicesList.push({
+            id: doc.id,
+            name: data.displayName || data.name || 'Unnamed User',
+            email: data.email || 'No Email',
+            onesignalId: data.onesignalId,
+            role: data.role || 'customer'
+          });
+        }
+      });
+      setRegisteredDevices(devicesList);
+    } catch (error) {
+      console.error("Error fetching registered devices:", error);
+    } finally {
+      setIsLoadingDevices(false);
+    }
+  };
 
   // OneSignal Status Fetcher
   useEffect(() => {
@@ -1410,6 +1437,9 @@ export default function AdminDashboard() {
       const storedMock = localStorage.getItem("onesignal_mock_sub_id");
       if (storedReal) setOnesignalSubscriptionId(storedReal);
       else if (storedMock) setOnesignalSubscriptionId(storedMock);
+
+      const storedMockUserId = localStorage.getItem("onesignal_mock_user_id");
+      if (storedMockUserId) setOnesignalUserId(storedMockUserId);
 
       const fetchId = () => {
         if (Capacitor.isNativePlatform()) {
@@ -1422,10 +1452,16 @@ export default function AdminDashboard() {
                   setOnesignalSubscriptionId(deviceId);
                   localStorage.setItem("onesignal_real_sub_id", deviceId);
                 }
+                if (state.userId) {
+                  setOnesignalUserId(state.userId);
+                }
               });
             } else if (OS.User?.pushSubscription?.id) {
               setOnesignalSubscriptionId(OS.User.pushSubscription.id);
               localStorage.setItem("onesignal_real_sub_id", OS.User.pushSubscription.id);
+              if (OS.User?.onesignalId) {
+                setOnesignalUserId(OS.User.onesignalId);
+              }
             }
           } catch (e) {
             console.error("Error fetching native OneSignal state:", e);
@@ -1440,6 +1476,10 @@ export default function AdminDashboard() {
                 setOnesignalSubscriptionId(subId);
                 localStorage.setItem("onesignal_real_sub_id", subId);
               }
+              const osUserId = OS.User?.onesignalId;
+              if (osUserId) {
+                setOnesignalUserId(osUserId);
+              }
             }
           } catch (e) {
             console.error("Error fetching web OneSignal state:", e);
@@ -1448,6 +1488,7 @@ export default function AdminDashboard() {
       };
 
       fetchId();
+      fetchRegisteredDevices();
       const interval = setInterval(fetchId, 3000);
       return () => clearInterval(interval);
     }
@@ -1769,6 +1810,80 @@ export default function AdminDashboard() {
       toast.error("Failed to send test push");
     } finally {
       setIsSendingTestPush(false);
+    }
+  };
+
+  const handleSendDirectPush = async (playerId: string, targetName: string) => {
+    if (!settings.oneSignalAppId || !settings.oneSignalRestApiKey) {
+      toast.error("Please configure and save OneSignal keys first");
+      return;
+    }
+    const toastId = toast.loading(`Sending diagnostic push to ${targetName}...`);
+    try {
+      const response = await fetch('/api/send-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: "Diagnostic Test Received! 🛠️",
+          body: `Admin successfully tested notifications to this device. ID: ${playerId.substring(0, 8)}...`,
+          type: 'individual',
+          playerId: playerId,
+          appId: settings.oneSignalAppId,
+          restKey: settings.oneSignalRestApiKey
+        })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        toast.success(`Push sent successfully to ${targetName}! 🚀`, { id: toastId });
+      } else {
+        toast.error(`Push failed: ${data.error || 'Unknown error'}`, { id: toastId, duration: 8000 });
+      }
+    } catch (error) {
+      console.error("Error sending diagnostic push:", error);
+      toast.error("Failed to make push request", { id: toastId });
+    }
+  };
+
+  const handleSimulateDevice = async () => {
+    const mockSubId = `sim_sub_2026_${Math.random().toString(36).substring(2, 10)}`;
+    const mockUserId = `sim_uid_2026_${Math.random().toString(36).substring(2, 10)}`;
+    
+    setOnesignalSubscriptionId(mockSubId);
+    setOnesignalUserId(mockUserId);
+    localStorage.setItem("onesignal_mock_sub_id", mockSubId);
+    localStorage.setItem("onesignal_mock_user_id", mockUserId);
+    
+    // Write it to firestore directly for the current admin user if authenticated
+    if (user) {
+      try {
+        await updateDoc(doc(db, 'users', user.uid), { onesignalId: mockSubId });
+        toast.success("Successfully registered Simulated Device in database! 🧪");
+        fetchRegisteredDevices();
+      } catch (err: any) {
+        console.error("Failed to sync mock ID to firebase:", err);
+        toast.success("Generated Simulated Device token! 🔔");
+      }
+    } else {
+      toast.success("Generated Simulated Device token! 🔔");
+    }
+  };
+
+  const handleClearSimulatedDevice = async () => {
+    localStorage.removeItem("onesignal_mock_sub_id");
+    localStorage.removeItem("onesignal_mock_user_id");
+    localStorage.removeItem("onesignal_real_sub_id");
+    setOnesignalSubscriptionId(null);
+    setOnesignalUserId(null);
+    if (user) {
+      try {
+        await updateDoc(doc(db, 'users', user.uid), { onesignalId: null });
+        toast.success("Cleared Simulated Device registration!");
+        fetchRegisteredDevices();
+      } catch (err: any) {
+        console.error("Failed to clear device registration in firebase:", err);
+      }
+    } else {
+      toast.success("Cleared Simulated Device registration!");
     }
   };
 
@@ -8648,55 +8763,248 @@ export default function AdminDashboard() {
                             Get these from OneSignal Dashboard &gt; Settings &gt; Keys & IDs.
                           </p>
 
-                          {/* Diagnostic Section */}
-                          <div className="mt-4 p-4 bg-blue-50 rounded-2xl border border-blue-100">
-                            <h5 className="text-[10px] font-bold text-blue-700 uppercase tracking-widest mb-3">Service Health Diagnostics</h5>
-                            <div className="space-y-2">
-                              <div className="flex items-center justify-between text-[10px]">
-                                <span className="text-blue-600">OneSignal SDK:</span>
-                                <span className={Capacitor.isNativePlatform() || (window as any).OneSignal ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
-                                  {Capacitor.isNativePlatform() ? "Ready (App)" : ((window as any).OneSignal ? "Ready (Web)" : "Not Loaded")}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between text-[10px]">
-                                <span className="text-blue-600">Permissions:</span>
-                                <span className={String((window as any).OneSignal?.Notifications?.permission) === 'granted' || Capacitor.isNativePlatform() ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
-                                  {Capacitor.isNativePlatform() ? "Managed by OS" : (String((window as any).OneSignal?.Notifications?.permission || 'Not Requested'))}
-                                </span>
-                              </div>
-                              
-                              <div className="flex items-center justify-between text-[10px]">
-                                <span className="text-blue-600">My Subscription ID:</span>
-                                <span className="text-[#1A2C54] font-mono font-bold truncate max-w-[150px]">
-                                  {onesignalSubscriptionId || "Connecting..."}
-                                </span>
+                          {/* Real-time OneSignal Device Diagnostics Panel */}
+                          <div className="mt-6 space-y-4">
+                            <div className="p-5 bg-[#1a2c54]/5 rounded-2xl border border-[#1a2c54]/10">
+                              <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#1a2c54]/10">
+                                <div>
+                                  <h4 className="text-[11px] font-bold text-[#1a2c54] uppercase tracking-widest flex items-center gap-2">
+                                    <Activity size={14} className="text-[#1a2c54] animate-pulse" /> Live Device Push Diagnostics
+                                  </h4>
+                                  <p className="text-[9px] text-gray-400 italic">Real-time inspection of current browser or native connection Status</p>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <button 
+                                    onClick={() => {
+                                      const OS = (window as any).OneSignal;
+                                      if (OS) {
+                                        try {
+                                          const subId = OS.User?.PushSubscription?.id || OS.User?.pushSubscriptionId;
+                                          if (subId) {
+                                            setOnesignalSubscriptionId(subId);
+                                            localStorage.setItem("onesignal_real_sub_id", subId);
+                                          }
+                                          const osUserId = OS.User?.onesignalId;
+                                          if (osUserId) setOnesignalUserId(osUserId);
+                                        } catch(e) {}
+                                      }
+                                      fetchRegisteredDevices();
+                                      toast.success("Diagnostics refreshed! 🔄");
+                                    }}
+                                    className="p-1 px-2.5 bg-white text-[#1A2C54] text-[9px] font-bold rounded-lg hover:bg-gray-100 border border-gray-200 transition-colors uppercase tracking-wider flex items-center gap-1"
+                                  >
+                                    <RefreshCw size={10} /> Refresh
+                                  </button>
+                                  <button 
+                                    onClick={handleSimulateDevice}
+                                    className="p-1 px-2.5 bg-ruby/10 text-ruby text-[9px] font-bold rounded-lg hover:bg-ruby/20 transition-colors uppercase tracking-wider flex items-center gap-1"
+                                  >
+                                    <Sparkles size={10} /> Simulate Developer ID
+                                  </button>
+                                  {(onesignalSubscriptionId && onesignalSubscriptionId.startsWith('sim_sub')) && (
+                                    <button 
+                                      onClick={handleClearSimulatedDevice}
+                                      className="p-1 px-2 bg-red-100 text-red-600 text-[9px] font-bold rounded-lg hover:bg-red-200 transition-colors uppercase"
+                                    >
+                                      Clear
+                                    </button>
+                                  )}
+                                </div>
                               </div>
 
-                              <div className="flex items-center justify-between text-[10px] pt-2 border-t border-blue-100">
-                                <span className="text-blue-600">Firebase Status:</span>
-                                <span className={firebaseStatus.includes('Connected') ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
-                                  {firebaseStatus}
-                                </span>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                                <div className="bg-white p-3 rounded-xl border border-gray-100 flex flex-col justify-between">
+                                  <span className="text-[9px] text-gray-400 uppercase font-bold tracking-wider">Subscription ID</span>
+                                  <div className="mt-1 flex items-center justify-between gap-1.5">
+                                    <span className="text-[11px] font-mono font-bold text-[#1A2C54] truncate max-w-[130px]">
+                                      {onesignalSubscriptionId || "None / Ignored"}
+                                    </span>
+                                    {onesignalSubscriptionId && (
+                                      <button 
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(onesignalSubscriptionId);
+                                          toast.success("Subscription ID copied!");
+                                        }}
+                                        className="text-gray-400 hover:text-ruby p-0.5"
+                                      >
+                                        <Copy size={11} />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="bg-white p-3 rounded-xl border border-gray-100 flex flex-col justify-between">
+                                  <span className="text-[9px] text-gray-400 uppercase font-bold tracking-wider">Associated User ID (External)</span>
+                                  <div className="mt-1 flex items-center justify-between gap-1.5">
+                                    <span className="text-[11px] font-mono font-bold text-[#1A2C54] truncate max-w-[130px]">
+                                      {user?.uid || "Not Authenticated"}
+                                    </span>
+                                    {user?.uid && (
+                                      <button 
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(user.uid);
+                                          toast.success("User UID copied!");
+                                        }}
+                                        className="text-gray-400 hover:text-[#1A2C54] p-0.5"
+                                      >
+                                        <Copy size={11} />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="bg-white p-3 rounded-xl border border-gray-100 flex flex-col justify-between">
+                                  <span className="text-[9px] text-gray-400 uppercase font-bold tracking-wider">Status ('isSubscribed')</span>
+                                  <div className="mt-1 flex items-center gap-1.5">
+                                    {onesignalSubscriptionId ? (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+                                        <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_6px_rgba(34,197,94,0.6)]"></div>
+                                        TRUE (Subscribed)
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">
+                                        <div className="w-1.5 h-1.5 bg-red-400 rounded-full"></div>
+                                        FALSE (Idle)
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2 text-[10px] bg-white rounded-xl p-3 border border-gray-100">
+                                <h5 className="font-bold text-[#1A2C54] uppercase tracking-wider text-[9px] mb-2 flex items-center gap-1">
+                                  <Info size={11} className="text-blue-500" /> Push Protocol Requirements Checklist
+                                </h5>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-gray-500">HTTPS Protocol (or localhost)</span>
+                                    <span className={window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? "text-green-600 font-bold" : "text-amber-600 font-bold"}>
+                                      {window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? "✅ Verified" : "⚠️ HTTP Not Supported"}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-gray-500">OneSignal Javascript SDK</span>
+                                    <span className={(window as any).OneSignal ? "text-green-600 font-bold" : "text-red-500 font-bold"}>
+                                      {(window as any).OneSignal ? "✅ Active" : "❌ Blocked / Not Loaded"}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-gray-500">Browser Permissions</span>
+                                    <span className={String((window as any).Notification?.permission) === 'granted' ? "text-green-600 font-bold" : "text-amber-500 font-bold"}>
+                                      {String((window as any).Notification?.permission || 'Unsupported')}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-gray-500">Iframe Sandbox Boundary</span>
+                                    {window.self !== window.top ? (
+                                      <span className="text-amber-600 font-bold flex items-center gap-1">
+                                        ⚠️ Limited (Run in New Tab to Test)
+                                      </span>
+                                    ) : (
+                                      <span className="text-green-600 font-bold">✅ None (Direct host)</span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-gray-500">Firebase Registration status</span>
+                                    <span className={firebaseStatus.includes('Connected') ? "text-green-600 font-bold" : "text-red-500 font-bold"}>
+                                      {firebaseStatus}
+                                    </span>
+                                  </div>
+                                  {onesignalUserId && (
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-gray-500">OneSignal Backend User Profile</span>
+                                      <span className="text-green-600 font-bold truncate max-w-[120px]" title={onesignalUserId}>
+                                        ✅ {onesignalUserId.substring(0, 8)}...
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                            
-                            {onesignalSubscriptionId && (
-                              <div className="mt-4 p-3 bg-white rounded-xl border border-blue-100 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
-                                  <span className="text-[10px] font-bold text-gray-600 uppercase tracking-tight">Active Connection Found</span>
+
+                            {/* Stored Users Registered Devices (Full Database View) */}
+                            <div className="p-5 bg-white border border-gray-150 rounded-2xl shadow-sm">
+                              <div className="flex items-center justify-between mb-4">
+                                <div>
+                                  <h4 className="text-[11px] font-bold text-[#1A2C54] uppercase tracking-widest flex items-center gap-1.5">
+                                    <Database size={13} className="text-[#1a2c54]" /> Firebase Device Database
+                                  </h4>
+                                  <p className="text-[9px] text-gray-400">All saved user subscriptions (onesignalId) synchronized in Firestore</p>
                                 </div>
                                 <button 
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(onesignalSubscriptionId);
-                                    toast.success("ID Copied!");
-                                  }}
-                                  className="text-[9px] font-bold text-blue-600 hover:underline"
+                                  onClick={fetchRegisteredDevices}
+                                  disabled={isLoadingDevices}
+                                  className="p-1 px-3 bg-gray-50 text-gray-600 text-[10px] font-bold rounded-lg hover:bg-gray-100 border border-gray-200 transition-colors flex items-center gap-1 disabled:opacity-50"
                                 >
-                                  Copy ID
+                                  <RefreshCw size={11} className={isLoadingDevices ? "animate-spin" : ""} />
+                                  {isLoadingDevices ? "fetching..." : "Sync List"}
                                 </button>
                               </div>
-                            )}
+
+                              {registeredDevices.length === 0 ? (
+                                <div className="text-center py-6 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                                  <Smartphone size={24} className="mx-auto text-gray-300 mb-2" />
+                                  <p className="text-[11px] font-bold text-gray-500">No registered devices found</p>
+                                  <p className="text-[9px] text-gray-400 max-w-sm mx-auto mt-1 leading-relaxed">
+                                    Devices appear here automatically when a user opens the application and grants push permission.
+                                  </p>
+                                </div>
+                              ) : (
+                                <div className="overflow-x-auto rounded-xl border border-gray-150">
+                                  <table className="w-full text-left border-collapse">
+                                    <thead>
+                                      <tr className="bg-gray-50 border-b border-gray-150 text-[9px] font-bold text-gray-400 uppercase tracking-wider">
+                                        <th className="py-2.5 px-3">User</th>
+                                        <th className="py-2.5 px-3">Role</th>
+                                        <th className="py-2.5 px-3">Subscription Token ID</th>
+                                        <th className="py-2.5 px-3 text-right">Diagnostic Push</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                      {registeredDevices.map((device) => (
+                                        <tr key={device.id} className="text-[10px] hover:bg-gray-50/50 transition-colors">
+                                          <td className="py-2 px-3">
+                                            <div className="font-bold text-[#1A2C54]">{device.name}</div>
+                                            <div className="text-[9px] text-gray-400">{device.email}</div>
+                                          </td>
+                                          <td className="py-2 px-3">
+                                            <span className={`inline-block text-[8px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-wide ${
+                                              device.role === 'admin' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-gray-50 text-gray-600'
+                                            }`}>
+                                              {device.role}
+                                            </span>
+                                          </td>
+                                          <td className="py-2 px-3 font-mono text-[9px] text-gray-500">
+                                            <div className="flex items-center gap-2">
+                                              <span className="truncate max-w-[120px]" title={device.onesignalId}>
+                                                {device.onesignalId}
+                                              </span>
+                                              <button 
+                                                onClick={() => {
+                                                  navigator.clipboard.writeText(device.onesignalId);
+                                                  toast.success("Device token copied!");
+                                                }}
+                                                className="text-gray-300 hover:text-ruby"
+                                              >
+                                                <Copy size={10} />
+                                              </button>
+                                            </div>
+                                          </td>
+                                          <td className="py-2 px-3 text-right">
+                                            <button 
+                                              onClick={() => handleSendDirectPush(device.onesignalId, device.name)}
+                                              className="bg-ruby text-white text-[9px] font-bold py-1 px-2.5 rounded-lg hover:bg-ruby-dark transition-colors inline-flex items-center gap-1 shadow-md shadow-ruby/10 animate-fade-in"
+                                            >
+                                              <Send size={10} /> Send Push
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
                           </div>
 
                           <div className="pt-6 flex justify-end">

@@ -107,7 +107,9 @@ export default function Profile() {
 
           // Directly fetch and synchronize the subscription ID (subId) in Firestore database
           let subId = null;
-          if (OneSignalWeb.User?.PushSubscription?.id) {
+          if (OneSignalWeb.User?.pushSubscription?.id) {
+            subId = OneSignalWeb.User.pushSubscription.id;
+          } else if (OneSignalWeb.User?.PushSubscription?.id) {
             subId = OneSignalWeb.User.PushSubscription.id;
           } else if (OneSignalWeb.User?.pushSubscriptionId) {
             subId = OneSignalWeb.User.pushSubscriptionId;

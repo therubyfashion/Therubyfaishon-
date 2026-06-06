@@ -78,6 +78,7 @@ export default function App() {
 }
 
 let isOneSignalWebInitialized = false;
+let isOneSignalNativeInitialized = false;
 
 function AppContent() {
   const location = useLocation();
@@ -159,23 +160,35 @@ function AppContent() {
 
         if (Capacitor.isNativePlatform()) {
           console.log("🚀 OneSignal: Initializing Native Plugin with ID:", appId);
-          // Native App Initialization
-          try {
-            const OS = OneSignal as any;
-            if (typeof OS.setAppId === 'function') {
-              OS.setAppId(appId);
-            } else if (typeof OS.initialize === 'function') {
-              OS.initialize(appId);
-            }
+          const OS = OneSignal as any;
+          
+          // Native App Initialization (Only Once)
+          if (!isOneSignalNativeInitialized) {
+            try {
+              if (typeof OS.setAppId === 'function') {
+                OS.setAppId(appId);
+              } else if (typeof OS.initialize === 'function') {
+                OS.initialize(appId);
+              }
 
-            // In v5+ we need to opt-in or check permission
-            if (OS.promptForPushNotificationsWithUserResponse) {
-              OS.promptForPushNotificationsWithUserResponse((accepted: any) => {
-                console.log("🚀 OneSignal: Permission Response:", accepted);
-              });
+              // In v5+ we need to opt-in or check permission
+              if (OS.promptForPushNotificationsWithUserResponse) {
+                OS.promptForPushNotificationsWithUserResponse((accepted: any) => {
+                  console.log("🚀 OneSignal: Permission Response:", accepted);
+                });
+              }
+              isOneSignalNativeInitialized = true;
+              console.log("✅ OneSignal: Native Initialization Completed");
+            } catch (e) {
+              console.error("❌ OneSignal: Native Init Error:", e);
+              // Treat as initialized to prevent breaking subsequent runs
+              isOneSignalNativeInitialized = true;
             }
+          }
 
-            if (user) {
+          // User login & sync (Runs reliably when auth state changes)
+          if (user) {
+            try {
               console.log("🚀 OneSignal: Syncing User ID:", user.uid);
               if (OS.setExternalUserId) OS.setExternalUserId(user.uid);
               else if (OS.login) OS.login(user.uid);
@@ -197,15 +210,16 @@ function AppContent() {
                     syncOneSignalIdToFirestore(user.uid, subId);
                   }
                 });
+              } else if (OS.User?.pushSubscription?.id) {
+                const subId = OS.User.pushSubscription.id;
+                syncOneSignalIdToFirestore(user.uid, subId);
               } else if (OS.User?.PushSubscription?.id) {
                 const subId = OS.User.PushSubscription.id;
                 syncOneSignalIdToFirestore(user.uid, subId);
               }
+            } catch (e) {
+              console.error("❌ OneSignal: Native User Sync Error:", e);
             }
-            
-            console.log("✅ OneSignal: Native Initialization Completed");
-          } catch (e) {
-            console.error("❌ OneSignal: Native Init Error:", e);
           }
         } else {
           // Web SDK Initialization
@@ -248,7 +262,9 @@ function AppContent() {
 
                 // Fetch web subscription ID
                 let subId = null;
-                if (OneSignalWeb.User?.PushSubscription?.id) {
+                if (OneSignalWeb.User?.pushSubscription?.id) {
+                  subId = OneSignalWeb.User.pushSubscription.id;
+                } else if (OneSignalWeb.User?.PushSubscription?.id) {
                   subId = OneSignalWeb.User.PushSubscription.id;
                 } else if (OneSignalWeb.User?.pushSubscriptionId) {
                   subId = OneSignalWeb.User.pushSubscriptionId;
@@ -261,7 +277,15 @@ function AppContent() {
                 }
 
                 // Add real-time event listener for subscription changes
-                if (OneSignalWeb.User?.PushSubscription?.addEventListener) {
+                if (OneSignalWeb.User?.pushSubscription?.addEventListener) {
+                  OneSignalWeb.User.pushSubscription.addEventListener("change", async (event: any) => {
+                    const newSubId = event.current?.id || event.current?.token;
+                    if (newSubId) {
+                      console.log("🔔 [OneSignal Listener] Subscription changed! New subId:", newSubId);
+                      await syncOneSignalIdToFirestore(user.uid, newSubId);
+                    }
+                  });
+                } else if (OneSignalWeb.User?.PushSubscription?.addEventListener) {
                   OneSignalWeb.User.PushSubscription.addEventListener("change", async (event: any) => {
                     const newSubId = event.current?.id || event.current?.token;
                     if (newSubId) {
