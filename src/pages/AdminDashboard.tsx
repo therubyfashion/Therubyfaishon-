@@ -649,17 +649,33 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                   />
                 </div>
 
-                <div className="md:col-span-2 flex items-center space-x-3 p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, isTrending: !formData.isTrending })}
-                    className={`w-12 h-6 rounded-full transition-all relative ${formData.isTrending ? 'bg-ruby' : 'bg-gray-300'}`}
-                  >
-                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${formData.isTrending ? 'left-7' : 'left-1'}`} />
-                  </button>
-                  <div>
-                    <p className="text-sm font-bold text-[#1A2C54]">Trending Product</p>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Show this product on the home page trending section</p>
+                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex items-center space-x-3 p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, isTrending: !formData.isTrending })}
+                      className={`w-12 h-6 rounded-full transition-all relative flex-shrink-0 ${formData.isTrending ? 'bg-ruby' : 'bg-gray-300'}`}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${formData.isTrending ? 'left-7' : 'left-1'}`} />
+                    </button>
+                    <div>
+                      <p className="text-sm font-bold text-[#1A2C54]">Trending Product</p>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Show in homepage trending section</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-3 p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, isPopular: !formData.isPopular })}
+                      className={`w-12 h-6 rounded-full transition-all relative flex-shrink-0 ${formData.isPopular ? 'bg-ruby' : 'bg-gray-300'}`}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${formData.isPopular ? 'left-7' : 'left-1'}`} />
+                    </button>
+                    <div>
+                      <p className="text-sm font-bold text-[#1A2C54]">Most Popular Product</p>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Show in homepage most popular section</p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1012,7 +1028,8 @@ export default function AdminDashboard() {
   const [isCustomerDeleteModalOpen, setIsCustomerDeleteModalOpen] = useState(false);
   const [customerToDelete, setCustomerToDelete] = useState<any>(null);
 
-  const [categoryForm, setCategoryForm] = useState({ name: '', image: '' });
+  const [categoryForm, setCategoryForm] = useState({ name: '', image: '', sortOrder: '' });
+  const [editingCategory, setEditingCategory] = useState<any>(null);
   const [colorForm, setColorForm] = useState({ name: '', hex: '#000000' });
   const [sizeForm, setSizeForm] = useState({ name: '' });
   const [couponForm, setCouponForm] = useState({ code: '', discount: 0, expiryDate: '', type: 'percentage' as 'percentage' | 'fixed' });
@@ -1192,7 +1209,14 @@ export default function AdminDashboard() {
     },
     buy2Get1Free: false,
     buy2GetPercentEnabled: false,
-    buy2GetPercentOff: 0
+    buy2GetPercentOff: 0,
+    promoEnabled: false,
+    promoType: 'timer',
+    promoMessage: '🔥 Mega Sale Ends In:',
+    promoEndDate: '2026-06-30T23:59:59',
+    promoScrolling: false,
+    promoBgColor: '#A11B35',
+    promoTextColor: '#FFFFFF'
   });
 
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -2434,6 +2458,7 @@ export default function AdminDashboard() {
     sku: string;
     barcode: string;
     isTrending: boolean;
+    isPopular: boolean;
     updatedAt?: string;
     variants: { size: string; color: string; stock: number }[];
   }>({
@@ -2453,6 +2478,7 @@ export default function AdminDashboard() {
     sku: '',
     barcode: '',
     isTrending: false,
+    isPopular: false,
     variants: []
   });
 
@@ -2657,7 +2683,13 @@ export default function AdminDashboard() {
       setOrders(ordersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setUsersCount(usersSnap.size);
       setCustomers(usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const catsSorted = categoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      catsSorted.sort((a, b) => {
+        const orderA = a.sortOrder !== undefined ? Number(a.sortOrder) : 1000;
+        const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
+        return orderA - orderB;
+      });
+      setCategories(catsSorted);
       setColors(colorsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setSizes(sizesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setCoupons(couponsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -3085,6 +3117,7 @@ export default function AdminDashboard() {
         sku: '',
         barcode: '',
         isTrending: false,
+        isPopular: false,
         variants: []
       });
 
@@ -3583,7 +3616,14 @@ export default function AdminDashboard() {
   };
 
   const handleAddCategory = () => {
-    setCategoryForm({ name: '', image: '' });
+    setCategoryForm({ name: '', image: '', sortOrder: '' });
+    setEditingCategory(null);
+    setIsCategoryModalOpen(true);
+  };
+
+  const handleEditCategory = (cat: any) => {
+    setCategoryForm({ name: cat.name || '', image: cat.image || '', sortOrder: cat.sortOrder !== undefined ? String(cat.sortOrder) : '' });
+    setEditingCategory(cat);
     setIsCategoryModalOpen(true);
   };
 
@@ -3591,25 +3631,40 @@ export default function AdminDashboard() {
     e.preventDefault();
     if (!categoryForm.name) return;
     
-    const saveToast = toast.loading("Adding category...");
+    const isEdit = !!editingCategory;
+    const actionLabel = isEdit ? "Updating category..." : "Adding category...";
+    const successLabel = isEdit ? "Category updated" : "Category added";
+    const saveToast = toast.loading(actionLabel);
     setLoading(true);
     try {
       const slug = categoryForm.name.toLowerCase().replace(/ /g, '-');
-      await addDoc(collection(db, 'categories'), { 
-        ...categoryForm, 
-        slug, 
-        createdAt: new Date().toISOString() 
-      });
-      toast.success('Category added', { id: saveToast });
+      const sortOrderNum = categoryForm.sortOrder ? parseInt(categoryForm.sortOrder, 10) : 0;
+      const payload: any = {
+        name: categoryForm.name,
+        image: categoryForm.image || '',
+        slug,
+        sortOrder: isNaN(sortOrderNum) ? 0 : sortOrderNum
+      };
+
+      if (isEdit) {
+        await updateDoc(doc(db, 'categories', editingCategory.id), payload);
+      } else {
+        await addDoc(collection(db, 'categories'), { 
+          ...payload, 
+          createdAt: new Date().toISOString() 
+        });
+      }
+      toast.success(successLabel, { id: saveToast });
       setIsCategoryModalOpen(false);
+      setEditingCategory(null);
       fetchDashboardData();
     } catch (error: any) {
       console.error("Save category error:", error);
       handleFirestoreError(error, OperationType.WRITE, 'categories');
       
-      let errorMsg = 'Failed to add category';
+      let errorMsg = isEdit ? 'Failed to update category' : 'Failed to add category';
       if (error.code === 'permission-denied') {
-        errorMsg = 'Permission denied. Only admins can add categories.';
+        errorMsg = 'Permission denied. Only admins can modify categories.';
       } else if (error.message && error.message.includes('too large')) {
         errorMsg = 'Category image is too large. Please use a smaller image.';
       }
@@ -4619,6 +4674,7 @@ export default function AdminDashboard() {
                             { id: 'security', label: 'Security & Limits', icon: Shield },
                             { id: 'sound', label: 'Notification Sound', icon: Volume2 },
                             { id: 'seo', label: 'SEO & Branding', icon: Globe },
+                            { id: 'promo_ticker', label: 'Promo Ticker Bar', icon: Megaphone },
                           ].map((subItem) => (
                             <button
                               key={subItem.id}
@@ -5243,6 +5299,7 @@ export default function AdminDashboard() {
                             sku: '',
                             barcode: '',
                             isTrending: false,
+                            isPopular: false,
                             variants: []
                           });
                           setShowAddProductPage(true);
@@ -5309,6 +5366,7 @@ export default function AdminDashboard() {
                                   sku: p.sku || '',
                                   barcode: p.barcode || '',
                                   isTrending: p.isTrending || false,
+                                  isPopular: p.isPopular || false,
                                   variants: p.variants || []
                                 });
                                 setShowAddProductPage(true);
@@ -5381,6 +5439,7 @@ export default function AdminDashboard() {
                                 sku: p.sku || '',
                                 barcode: p.barcode || '',
                                 isTrending: p.isTrending || false,
+                                isPopular: p.isPopular || false,
                                 variants: p.variants || []
                               });
                               setShowAddProductPage(true);
@@ -6511,12 +6570,24 @@ export default function AdminDashboard() {
                           </div>
                         )}
                       </div>
-                      <button onClick={() => handleDeleteCategory(cat.id)} className="p-2 text-gray-300 hover:text-red-500 transition-colors">
-                        <Trash2 size={18} />
-                      </button>
+                      <div className="flex space-x-1">
+                        <button onClick={() => handleEditCategory(cat)} className="p-2 text-gray-300 hover:text-ruby transition-colors" title="Edit Category">
+                          <Edit2 size={18} />
+                        </button>
+                        <button onClick={() => handleDeleteCategory(cat.id)} className="p-2 text-gray-300 hover:text-red-500 transition-colors" title="Delete Category">
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
                     </div>
                     <div>
-                      <h3 className="font-bold text-[#1A2C54]">{cat.name}</h3>
+                      <h3 className="font-bold text-[#1A2C54] flex items-center justify-between">
+                        <span>{cat.name}</span>
+                        {cat.sortOrder !== undefined && (
+                          <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md text-[9px] font-bold font-mono">
+                            Order: {cat.sortOrder}
+                          </span>
+                        )}
+                      </h3>
                       <p className="text-[10px] text-gray-400 uppercase tracking-widest">{cat.slug}</p>
                     </div>
                   </div>
@@ -9649,6 +9720,256 @@ export default function AdminDashboard() {
                         </div>
                       </motion.div>
                     )}
+
+                    {activeSettingsTab === 'promo_ticker' && (
+                      <motion.div 
+                        key="promo_ticker"
+                        initial={{ opacity: 0, x: 10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -10 }}
+                        className="space-y-8"
+                      >
+                        <div className="flex items-center justify-between pb-4 border-b border-gray-50">
+                          <div>
+                            <h3 className="text-xl font-black text-[#1A2C54] flex items-center tracking-tight gap-2">
+                              <Megaphone size={24} className="text-ruby animate-bounce" /> Smart Promo Ticker Bar
+                            </h3>
+                            <p className="text-xs text-gray-400 mt-1">Configure an engaging promotional announcement header with real-time countdown or rolling marquee banner</p>
+                          </div>
+                        </div>
+
+                        {/* Interactive Visual Preview */}
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Live Admin Preview</label>
+                          <div 
+                            style={{ 
+                              backgroundColor: settings.promoBgColor || '#A11B35', 
+                              color: settings.promoTextColor || '#FFFFFF' 
+                            }}
+                            className="rounded-2xl p-4 text-center font-bold text-xs shadow-inner overflow-hidden relative min-h-[44px] flex items-center justify-center transition-all duration-300"
+                          >
+                            {!settings.promoEnabled ? (
+                              <span className="opacity-50 italic font-medium font-sans">Ticker Bar is currently disabled. Enable to see live preview.</span>
+                            ) : (
+                              <div className={`w-full flex items-center justify-center ${settings.promoScrolling ? 'animate-pulse' : ''}`}>
+                                <span className="font-sans mr-2">
+                                  {settings.promoMessage || '🔥 Limited Sale Ends:'}
+                                </span>
+                                {settings.promoType === 'timer' ? (
+                                  <span className="font-mono bg-black/20 px-2 py-0.5 rounded ml-1 font-bold">
+                                    02d 14h 22m 18s (Simulated)
+                                  </span>
+                                ) : (
+                                  <span className="font-sans bg-white/10 px-2 py-0.5 rounded ml-1 text-xs">
+                                    {settings.promoScrolling ? 'Scrolling Mode ⚡' : 'Static Mode ⚡'}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                          {/* Left Column: Basic Settings */}
+                          <div className="space-y-6">
+                            {/* Toggle: Enable Bar */}
+                            <div className="flex items-center justify-between p-5 bg-gray-50 rounded-2xl border border-gray-100">
+                              <div>
+                                <p className="text-sm font-bold text-[#1A2C54]">Enable Ticker Bar</p>
+                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Toggle ON the promo header on user screens</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setSettings({ ...settings, promoEnabled: !settings.promoEnabled })}
+                                className={`w-12 h-6 rounded-full transition-all relative flex-shrink-0 ${settings.promoEnabled ? 'bg-ruby' : 'bg-gray-300'}`}
+                              >
+                                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.promoEnabled ? 'left-7' : 'left-1'}`} />
+                              </button>
+                            </div>
+
+                            {/* Bar Type Selector */}
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 font-sans">Bar Feature Mode</label>
+                              <div className="grid grid-cols-2 gap-3">
+                                {[
+                                  { id: 'timer', label: '⏳ Live Countdown', description: 'Interactive end-time ticking timer' },
+                                  { id: 'text', label: '📢 Scrolling Message', description: 'Moving marquee / static message info' }
+                                ].map((type) => (
+                                  <button
+                                    key={type.id}
+                                    type="button"
+                                    onClick={() => setSettings({ ...settings, promoType: type.id as any })}
+                                    className={`p-4 rounded-2xl border text-left transition-all flex flex-col gap-1 ${
+                                      settings.promoType === type.id 
+                                        ? 'border-ruby bg-ruby/5 text-ruby' 
+                                        : 'border-gray-100 hover:bg-gray-50 text-gray-700'
+                                    }`}
+                                  >
+                                    <span className="font-bold text-xs">{type.label}</span>
+                                    <span className="text-[9px] text-gray-400 font-sans leading-none">{type.description}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Promo Message */}
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Promotional Text Message</label>
+                              <input 
+                                type="text"
+                                value={settings.promoMessage}
+                                onChange={(e) => setSettings({ ...settings, promoMessage: e.target.value })}
+                                className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 text-sm font-bold text-[#1A2C54] outline-none focus:bg-white focus:ring-4 focus:ring-ruby/5 transition-all animate-none"
+                                placeholder="e.g. 🔥 Mega Deal Ends In:"
+                              />
+                            </div>
+
+                            {/* End Date (Timer Mode Only) */}
+                            {settings.promoType === 'timer' && (
+                              <div className="space-y-2">
+                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Campaign End DateTime</label>
+                                <input 
+                                  type="datetime-local"
+                                  value={settings.promoEndDate ? settings.promoEndDate.substring(0, 19) : ''}
+                                  onChange={(e) => setSettings({ ...settings, promoEndDate: e.target.value })}
+                                  className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 text-sm font-bold text-[#1A2C54] outline-none focus:bg-white focus:ring-4 focus:ring-ruby/5 transition-all font-mono animate-none"
+                                />
+                                <p className="text-[9px] text-[#A2A4B0] leading-tight font-medium">Once this time concludes on visitors' screens, the bar will automatically toggle off or display standard announcements gracefully.</p>
+                              </div>
+                            )}
+
+                            {/* Moving text / Scrolling Toggle */}
+                            <div className="flex items-center justify-between p-5 bg-gray-50 rounded-2xl border border-gray-100">
+                              <div>
+                                <p className="text-sm font-bold text-[#1A2C54]">Enable Scrolling Animation</p>
+                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Make marquee text slide horizontally in loops</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setSettings({ ...settings, promoScrolling: !settings.promoScrolling })}
+                                className={`w-12 h-6 rounded-full transition-all relative flex-shrink-0 ${settings.promoScrolling ? 'bg-ruby' : 'bg-gray-300'}`}
+                              >
+                                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.promoScrolling ? 'left-7' : 'left-1'}`} />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Right Column: Colors & Styling */}
+                          <div className="space-y-6">
+                            {/* Background Color Picker & Presets */}
+                            <div className="space-y-4 p-5 bg-gray-50/50 rounded-3xl border border-gray-100">
+                              <div>
+                                <p className="text-xs font-bold text-[#1A2C54] uppercase tracking-widest leading-none">Background Style</p>
+                                <p className="text-[9px] text-gray-400 font-sans mt-0.5">Set branding banner shade</p>
+                              </div>
+
+                              <div className="flex items-center gap-4">
+                                <input 
+                                  type="color"
+                                  value={settings.promoBgColor || '#A11B35'}
+                                  onChange={(e) => setSettings({ ...settings, promoBgColor: e.target.value })}
+                                  className="w-12 h-12 rounded-xl border border-gray-200 cursor-pointer p-1 bg-white"
+                                />
+                                <div className="flex-grow">
+                                  <input 
+                                    type="text"
+                                    value={settings.promoBgColor || '#A11B35'}
+                                    onChange={(e) => setSettings({ ...settings, promoBgColor: e.target.value })}
+                                    className="w-full bg-white border border-gray-100 rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-700 outline-none animate-none"
+                                    placeholder="#A11B35"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Presets */}
+                              <div className="space-y-1.5">
+                                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-none">Cool Presets</p>
+                                <div className="flex flex-wrap gap-2 mt-1">
+                                  {[
+                                    { name: 'Saree Crimson', hex: '#A11B35' },
+                                    { name: 'Velvet Midnight', hex: '#111827' },
+                                    { name: 'Luxury Gold', hex: '#c4a882' },
+                                    { name: 'Emerald Forest', hex: '#065F46' },
+                                    { name: 'Amber Copper', hex: '#D97706' },
+                                    { name: 'Oceanic Indigo', hex: '#3730A3' }
+                                  ].map((pColor) => (
+                                    <button
+                                      key={pColor.hex}
+                                      type="button"
+                                      onClick={() => setSettings({ ...settings, promoBgColor: pColor.hex })}
+                                      className="flex items-center gap-1.5 px-2 py-1 rounded bg-white border border-gray-200 hover:bg-gray-50 text-[10px] font-bold font-sans transition-all text-gray-700"
+                                    >
+                                      <span style={{ backgroundColor: pColor.hex }} className="w-2.5 h-2.5 rounded-full border border-black/10 inline-block shrink-0" />
+                                      <span>{pColor.name}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Text Color Picker & Presets */}
+                            <div className="space-y-4 p-5 bg-gray-50/50 rounded-3xl border border-gray-100">
+                              <div>
+                                <p className="text-xs font-bold text-[#1A2C54] uppercase tracking-widest leading-none">Text & Symbol Shade</p>
+                                <p className="text-[9px] text-gray-400 font-sans mt-0.5">Set countdown text color</p>
+                              </div>
+
+                              <div className="flex items-center gap-4">
+                                <input 
+                                  type="color"
+                                  value={settings.promoTextColor || '#FFFFFF'}
+                                  onChange={(e) => setSettings({ ...settings, promoTextColor: e.target.value })}
+                                  className="w-12 h-12 rounded-xl border border-gray-200 cursor-pointer p-1 bg-white"
+                                />
+                                <div className="flex-grow">
+                                  <input 
+                                    type="text"
+                                    value={settings.promoTextColor || '#FFFFFF'}
+                                    onChange={(e) => setSettings({ ...settings, promoTextColor: e.target.value })}
+                                    className="w-full bg-white border border-gray-100 rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-700 outline-none animate-none"
+                                    placeholder="#FFFFFF"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Presets */}
+                              <div className="space-y-1.5">
+                                <p className="text-[9px] font-bold text-gray-400 tracking-widest uppercase leading-none">Cool Presets</p>
+                                <div className="flex flex-wrap gap-2 mt-1">
+                                  {[
+                                    { name: 'Pristine White', hex: '#FFFFFF' },
+                                    { name: 'Cream Ivory', hex: '#FDFBF7' },
+                                    { name: 'Warm Charcoal', hex: '#1F2937' },
+                                    { name: 'Soft Mustard', hex: '#FEF08A' },
+                                    { name: 'Rich Peach', hex: '#FFEDD5' }
+                                  ].map((pColor) => (
+                                    <button
+                                      key={pColor.hex}
+                                      type="button"
+                                      onClick={() => setSettings({ ...settings, promoTextColor: pColor.hex })}
+                                      className="flex items-center gap-1.5 px-2 py-1 rounded bg-white border border-gray-200 hover:bg-gray-50 text-[10px] font-bold font-sans transition-all text-gray-700"
+                                    >
+                                      <span style={{ backgroundColor: pColor.hex }} className="w-2.5 h-2.5 rounded-full border border-black/10 inline-block shrink-0" />
+                                      <span>{pColor.name}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Save Action */}
+                        <div className="pt-6 border-t border-gray-50 flex justify-end">
+                          <button 
+                            onClick={handleSaveSettings}
+                            className="bg-ruby text-white px-10 py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 active:scale-95 flex items-center gap-2"
+                          >
+                            <Save size={16} /> Save Ticker configurations
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
                   </AnimatePresence>
                 </div>
               </div>
@@ -9694,7 +10015,7 @@ export default function AdminDashboard() {
               className="relative bg-white w-full max-w-md p-6 md:p-8 rounded-3xl shadow-2xl space-y-6"
             >
               <div className="flex justify-between items-center border-b border-gray-50 pb-4">
-                <h2 className="text-xl font-bold text-gray-800">Add Category</h2>
+                <h2 className="text-xl font-bold text-gray-800">{editingCategory ? "Edit Category" : "Add Category"}</h2>
                 <button onClick={() => setIsCategoryModalOpen(false)} className="p-2 hover:text-ruby transition-colors bg-gray-50 rounded-full">
                   <X size={20} />
                 </button>
@@ -9730,7 +10051,7 @@ export default function AdminDashboard() {
                         <div className="p-3 bg-gray-50 rounded-xl text-gray-400 mb-2">
                           <ImageIcon size={24} />
                         </div>
-                        <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Click to upload image</p>
+                        <p className="text-xs text-gray-400 font-bold uppercase tracking-widest font-sans">Click to upload image</p>
                       </>
                     )}
                     <input 
@@ -9754,6 +10075,18 @@ export default function AdminDashboard() {
                       className="absolute inset-0 opacity-0 cursor-pointer"
                     />
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Sort Order (Sequence Number)</label>
+                  <input 
+                    type="number" 
+                    value={categoryForm.sortOrder || ''}
+                    onChange={e => setCategoryForm({...categoryForm, sortOrder: e.target.value})}
+                    className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent font-mono"
+                    placeholder="e.g. 1 (lower numbers show first)"
+                    min="0"
+                  />
+                  <p className="text-[9px] text-[#A2A4B0] leading-tight">Specify a numeric order value. Smaller numbers are displayed first (e.g. 1, 2, 3).</p>
                 </div>
                 <button 
                   type="submit" 

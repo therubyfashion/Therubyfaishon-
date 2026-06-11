@@ -12,6 +12,7 @@ import { db, auth } from '../firebase';
 import { Product, Category } from '../types';
 import ProductCard from '../components/ProductCard';
 import { ProductCardSkeleton } from '../components/Skeleton';
+import PromoTickerBar from '../components/PromoTickerBar';
 import { toast } from 'sonner';
 import { compressImage } from '../utils/imageUtils';
 import { useAuth } from '../contexts/AuthContext';
@@ -23,6 +24,8 @@ export default function Home() {
   const { user, profile } = useAuth();
   const [unreadCount] = useState(0); // Notifications context fallback if needed
   const [trendingProducts, setTrendingProducts] = useState<Product[]>([]);
+  const [popularProducts, setPopularProducts] = useState<Product[]>([]);
+  const [promoConfig, setPromoConfig] = useState<any>(null);
   const [categories, setCategories] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,9 +87,15 @@ export default function Home() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const productsQuery = query(
+        const trendingQuery = query(
           collection(db, 'products'), 
           where('isTrending', '==', true),
+          limit(8)
+        );
+
+        const popularQuery = query(
+          collection(db, 'products'), 
+          where('isPopular', '==', true),
           limit(8)
         );
 
@@ -94,22 +103,55 @@ export default function Home() {
           collection(db, 'fabric_reviews')
         );
 
-        const [productsSnap, categoriesSnap, bannersSnap, reviewsSnap] = await Promise.all([
-          getDocs(productsQuery),
+        const [trendingSnap, popularSnap, categoriesSnap, bannersSnap, reviewsSnap, settingsSnap] = await Promise.all([
+          getDocs(trendingQuery),
+          getDocs(popularQuery),
           getDocs(collection(db, 'categories')),
           getDocs(collection(db, 'banners')),
-          getDocs(reviewsQuery)
+          getDocs(reviewsQuery),
+          getDocs(collection(db, 'settings'))
         ]);
 
-        // Handle products with fallback
-        let productsData = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
-        if (productsData.length === 0) {
-          const fallbackProductsQuery = query(collection(db, 'products'), limit(8));
-          const fallbackProductsSnap = await getDocs(fallbackProductsQuery);
-          productsData = fallbackProductsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+        // Process Settings for Promo Ticker
+        if (!settingsSnap.empty) {
+          const rawSettings = settingsSnap.docs[0].data();
+          setPromoConfig({
+            promoEnabled: rawSettings.promoEnabled ?? false,
+            promoType: rawSettings.promoType ?? 'timer',
+            promoMessage: rawSettings.promoMessage ?? '🔥 Mega Sale Ends In:',
+            promoEndDate: rawSettings.promoEndDate ?? '',
+            promoScrolling: rawSettings.promoScrolling ?? false,
+            promoBgColor: rawSettings.promoBgColor ?? '#A11B35',
+            promoTextColor: rawSettings.promoTextColor ?? '#FFFFFF',
+          });
         }
-        setTrendingProducts(productsData);
-        setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+
+        // Handle products with base fallback
+        let trendingData = trendingSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+        let popularData = popularSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+
+        if (trendingData.length === 0 || popularData.length === 0) {
+          const fallbackSnap = await getDocs(query(collection(db, 'products'), limit(12)));
+          const totalFallback = fallbackSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+
+          if (trendingData.length === 0) {
+            trendingData = totalFallback.slice(0, 8);
+          }
+          if (popularData.length === 0) {
+            popularData = totalFallback.slice(4, 12).length > 0 ? totalFallback.slice(4, 12) : totalFallback.slice(0, 8);
+          }
+        }
+
+        setTrendingProducts(trendingData);
+        setPopularProducts(popularData);
+
+        const sortedCats = categoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+        sortedCats.sort((a, b) => {
+          const orderA = a.sortOrder !== undefined ? Number(a.sortOrder) : 1000;
+          const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
+          return orderA - orderB;
+        });
+        setCategories(sortedCats);
         
         const bannerData = bannersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         const activeBanners = bannerData.filter((b: any) => b.active !== false && b.active !== 'false');
@@ -261,9 +303,13 @@ export default function Home() {
     }
   };
 
-  const filteredProducts = activeFilter === 'All' 
+  const filteredTrendingProducts = activeFilter === 'All' 
     ? trendingProducts 
     : trendingProducts.filter(p => Array.isArray(p.category) ? p.category.includes(activeFilter) : p.category === activeFilter);
+
+  const filteredPopularProducts = activeFilter === 'All' 
+    ? popularProducts 
+    : popularProducts.filter(p => Array.isArray(p.category) ? p.category.includes(activeFilter) : p.category === activeFilter);
 
   const categoryIcons: Record<string, any> = {
     'Clothes': Shirt,
@@ -432,7 +478,38 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Most Popular / Trending */}
+        {/* Trending Products */}
+        <div className="space-y-5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[17px] font-bold text-[#111]">Trending Products</h3>
+            <Link to="/shop" className="text-[13px] font-medium text-gray-600">See All</Link>
+          </div>
+          
+          {loading ? (
+            <div className="grid grid-cols-2 gap-4">
+              {[1, 2, 3, 4].map(i => <ProductCardSkeleton key={i} />)}
+            </div>
+          ) : filteredTrendingProducts.length > 0 ? (
+            <div className="grid grid-cols-2 gap-4">
+              {filteredTrendingProducts.map(product => (
+                <ProductCard key={product.id} product={product} />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-10 bg-white rounded-3xl border border-dashed border-gray-200">
+              <p className="text-gray-400 text-sm italic">No trending products found in this category.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Smart Promo Ticker Bar */}
+        {promoConfig && promoConfig.promoEnabled && (
+          <div className="my-6">
+            <PromoTickerBar config={promoConfig} />
+          </div>
+        )}
+
+        {/* Most Popular */}
         <div className="space-y-5">
           <div className="flex items-center justify-between">
             <h3 className="text-[17px] font-bold text-[#111]">Most Popular</h3>
@@ -443,15 +520,15 @@ export default function Home() {
             <div className="grid grid-cols-2 gap-4">
               {[1, 2, 3, 4].map(i => <ProductCardSkeleton key={i} />)}
             </div>
-          ) : filteredProducts.length > 0 ? (
+          ) : filteredPopularProducts.length > 0 ? (
             <div className="grid grid-cols-2 gap-4">
-              {filteredProducts.map(product => (
+              {filteredPopularProducts.map(product => (
                 <ProductCard key={product.id} product={product} />
               ))}
             </div>
           ) : (
             <div className="text-center py-10 bg-white rounded-3xl border border-dashed border-gray-200">
-              <p className="text-gray-400 text-sm italic">No trending products found in this category.</p>
+              <p className="text-gray-400 text-sm italic">No popular products found in this category.</p>
             </div>
           )}
         </div>

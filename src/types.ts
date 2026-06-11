@@ -4,6 +4,7 @@ export interface Category {
   image?: string;
   slug?: string;
   createdAt?: string;
+  sortOrder?: number;
 }
 
 export interface Product {
@@ -26,6 +27,7 @@ export interface Product {
   sku?: string;
   barcode?: string;
   isTrending?: boolean;
+  isPopular?: boolean;
   variants?: { size: string; color: string; stock: number }[];
   viewCount?: number;
   wishlistCount?: number;

@@ -37,8 +37,14 @@ export default function Shop() {
           getDocs(collection(db, 'categories'))
         ]);
 
-        // Handle categories
-        const catNames = categoriesSnap.docs.map(doc => doc.data().name);
+        // Handle categories sorted by sortOrder
+        const sortedCategoryDocs = categoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+        sortedCategoryDocs.sort((a, b) => {
+          const orderA = a.sortOrder !== undefined ? Number(a.sortOrder) : 1000;
+          const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
+          return orderA - orderB;
+        });
+        const catNames = sortedCategoryDocs.map(c => c.name);
         setCategories(['All', ...catNames]);
 
         let fetchedProducts = productsSnap.docs.map(doc => ({
