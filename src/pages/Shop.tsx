@@ -24,9 +24,29 @@ export default function Shop() {
     { id: 'price-high', label: 'Price: High to Low' },
   ];
 
+  // Preload from cache where available to load instantly
+  useEffect(() => {
+    try {
+      const cacheKey = `ruby_shop_cache_${activeCategory}_${sortBy}`;
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.products) setProducts(parsed.products);
+        if (parsed.categories) setCategories(parsed.categories);
+        setLoading(false);
+      }
+    } catch (e) {
+      console.warn("Failed to load shop cache:", e);
+    }
+  }, [activeCategory, sortBy]);
+
   useEffect(() => {
     const fetchProducts = async () => {
-      setLoading(true);
+      const cacheKey = `ruby_shop_cache_${activeCategory}_${sortBy}`;
+      const hasCache = localStorage.getItem(cacheKey) !== null;
+      if (!hasCache) {
+        setLoading(true);
+      }
       try {
         const productsQuery = activeCategory !== 'All' 
           ? query(collection(db, 'products'), where('category', 'array-contains', activeCategory), limit(24))
@@ -45,7 +65,8 @@ export default function Shop() {
           return orderA - orderB;
         });
         const catNames = sortedCategoryDocs.map(c => c.name);
-        setCategories(['All', ...catNames]);
+        const finalCategories = ['All', ...catNames];
+        setCategories(finalCategories);
 
         let fetchedProducts = productsSnap.docs.map(doc => ({
           id: doc.id,
@@ -67,6 +88,18 @@ export default function Shop() {
         });
 
         setProducts(fetchedProducts);
+
+        // Save to cache
+        try {
+          const cacheData = {
+            products: fetchedProducts,
+            categories: finalCategories,
+            savedAt: Date.now()
+          };
+          localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+        } catch (e) {
+          console.warn("Failed to write shop cache:", e);
+        }
       } catch (error) {
         console.error("Error fetching products:", error);
       } finally {

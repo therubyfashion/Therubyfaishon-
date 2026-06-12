@@ -78,6 +78,25 @@ export default function Home() {
     }
   ];
 
+  // Load initial cached values to avoid showing skeleton loading and render instantly
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem('ruby_home_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.trendingProducts) setTrendingProducts(parsed.trendingProducts);
+        if (parsed.popularProducts) setPopularProducts(parsed.popularProducts);
+        if (parsed.categories) setCategories(parsed.categories);
+        if (parsed.banners) setBanners(parsed.banners);
+        if (parsed.reviews) setReviews(parsed.reviews);
+        if (parsed.promoConfig) setPromoConfig(parsed.promoConfig);
+        setLoading(false); // Instantly turn off the skeleton loaders
+      }
+    } catch (e) {
+      console.warn("Failed to load home cache:", e);
+    }
+  }, []);
+
   useEffect(() => {
     // Scroll to top
     window.scrollTo(0, 0);
@@ -85,7 +104,10 @@ export default function Home() {
 
   useEffect(() => {
     const fetchData = async () => {
-      setLoading(true);
+      const hasCache = localStorage.getItem('ruby_home_cache') !== null;
+      if (!hasCache) {
+        setLoading(true);
+      }
       try {
         const trendingQuery = query(
           collection(db, 'products'), 
@@ -113,9 +135,10 @@ export default function Home() {
         ]);
 
         // Process Settings for Promo Ticker
+        let promoConfigData = null;
         if (!settingsSnap.empty) {
           const rawSettings = settingsSnap.docs[0].data();
-          setPromoConfig({
+          promoConfigData = {
             promoEnabled: rawSettings.promoEnabled ?? false,
             promoType: rawSettings.promoType ?? 'timer',
             promoMessage: rawSettings.promoMessage ?? '🔥 Mega Sale Ends In:',
@@ -123,7 +146,8 @@ export default function Home() {
             promoScrolling: rawSettings.promoScrolling ?? false,
             promoBgColor: rawSettings.promoBgColor ?? '#A11B35',
             promoTextColor: rawSettings.promoTextColor ?? '#FFFFFF',
-          });
+          };
+          setPromoConfig(promoConfigData);
         }
 
         // Handle products with base fallback
@@ -159,13 +183,30 @@ export default function Home() {
 
         // Handle reviews with fallback
         const firestoreReviews = reviewsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-        // Sort client-side to avoid needing an index and to show docs even if createdAt is missing (though we add it now)
+        // Sort client-side to avoid needing an index and to show docs even if createdAt is missing
         firestoreReviews.sort((a, b) => {
           const dateA = a.createdAt ? (a.createdAt.toDate ? a.createdAt.toDate() : new Date(a.createdAt)) : new Date(0);
           const dateB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt)) : new Date(0);
           return dateB.getTime() - dateA.getTime();
         });
-        setReviews(firestoreReviews.length > 0 ? firestoreReviews : fallbackReviews);
+        const finalReviews = firestoreReviews.length > 0 ? firestoreReviews : fallbackReviews;
+        setReviews(finalReviews);
+
+        // Save fresh sync to cache
+        try {
+          const cacheData = {
+            trendingProducts: trendingData,
+            popularProducts: popularData,
+            categories: sortedCats,
+            banners: activeBanners,
+            reviews: finalReviews,
+            promoConfig: promoConfigData,
+            cachedAt: Date.now()
+          };
+          localStorage.setItem('ruby_home_cache', JSON.stringify(cacheData));
+        } catch (e) {
+          console.warn("Failed to write home cache:", e);
+        }
 
       } catch (error: any) {
         if (error.code === 'resource-exhausted') {

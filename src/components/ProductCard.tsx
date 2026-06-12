@@ -103,12 +103,19 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           )}
         </div>
         
-        <div className="product-rating flex items-center gap-1 mt-1 text-[12px] text-gray-400">
-          <div className="flex text-yellow-400">
-            <Star size={10} fill="currentColor" />
-          </div>
-          <span>4.5</span>
-        </div>
+        {/* Deterministic count matching product details page logic */}
+        {(() => {
+          const dummyCount = 42 + ((product.id || '').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 97);
+          return (
+            <div className="product-rating flex items-center gap-1 mt-1 text-[12px] text-gray-400">
+              <div className="flex text-yellow-400">
+                <Star size={10} fill="currentColor" />
+              </div>
+              <span className="font-semibold text-gray-700">{(4.2 + (((product.id || '').split('').reduce((acc, char) => acc + char.charCodeAt(0) * 31, 0) % 8) / 10)).toFixed(1)}</span>
+              <span className="text-[10px] text-gray-400 leading-none">({dummyCount})</span>
+            </div>
+          );
+        })()}
       </div>
     </Link>
   );

@@ -329,17 +329,47 @@ export default function ProductDetail() {
   const [starFilter, setStarFilter] = useState<number | null>(null);
   const [sortBy, setSortBy] = useState<'newest' | 'highest' | 'lowest'>('newest');
 
+  // Load initial cached product values to avoid showing skeleton loading and render instantly
+  useEffect(() => {
+    if (!id) return;
+    try {
+      const cached = localStorage.getItem(`ruby_product_cache_${id}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.product) {
+          setProduct(parsed.product);
+          if (parsed.product.sizes && parsed.product.sizes.length > 0) setSelectedSize(parsed.product.sizes[0]);
+          if (parsed.product.variants && parsed.product.variants.length > 0) setSelectedColor(parsed.product.variants[0].color);
+        }
+        if (parsed.relatedProducts) setRelatedProducts(parsed.relatedProducts);
+        if (parsed.reviews) setReviews(parsed.reviews);
+        setLoading(false); // Instantly turn off the skeleton loaders
+      } else {
+        setLoading(true);
+      }
+    } catch (e) {
+      console.warn("Failed to load product detail cache:", e);
+    }
+  }, [id]);
+
   useEffect(() => {
     const fetchProduct = async () => {
       if (!id) return;
+      const cacheKey = `ruby_product_cache_${id}`;
+      const hasCache = localStorage.getItem(cacheKey) !== null;
+      if (!hasCache) {
+        setLoading(true);
+      }
       try {
         const docRef = doc(db, 'products', id);
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           const data = { id: docSnap.id, ...docSnap.data() } as Product;
           setProduct(data);
-          if (data.sizes && data.sizes.length > 0) setSelectedSize(data.sizes[0]);
-          if (data.variants && data.variants.length > 0) setSelectedColor(data.variants[0].color);
+          
+          // Preselect sizes/colors if not already set by cache or UI
+          setSelectedSize(prev => prev || (data.sizes && data.sizes.length > 0 ? data.sizes[0] : ''));
+          setSelectedColor(prev => prev || (data.variants && data.variants.length > 0 ? data.variants[0].color : ''));
           
           // Fetch Related Products
           const relatedQuery = query(
@@ -348,10 +378,20 @@ export default function ProductDetail() {
             limit(5)
           );
           const relatedSnap = await getDocs(relatedQuery);
-          const related = relatedSnap.docs
+          let related = relatedSnap.docs
             .map(doc => ({ id: doc.id, ...doc.data() } as Product))
             .filter(p => p.id !== id)
             .slice(0, 4);
+
+          // Fallback to fetch other products if none or too few found in same category
+          if (related.length < 3) {
+            const fallbackQuery = query(collection(db, 'products'), limit(10));
+            const fallbackSnap = await getDocs(fallbackQuery);
+            const fallbackList = fallbackSnap.docs
+              .map(doc => ({ id: doc.id, ...doc.data() } as Product))
+              .filter(p => p.id !== id && !related.some(r => r.id === p.id));
+            related = [...related, ...fallbackList].slice(0, 4);
+          }
           setRelatedProducts(related);
 
           // Track Recently Viewed
@@ -372,6 +412,19 @@ export default function ProductDetail() {
           } catch (e) {
             console.error("Error updating recently viewed:", e);
           }
+
+          // Save fresh details to cache
+          try {
+            const existingReviews = JSON.parse(localStorage.getItem(cacheKey) || '{}').reviews || [];
+            localStorage.setItem(cacheKey, JSON.stringify({
+              product: data,
+              relatedProducts: related,
+              reviews: existingReviews,
+              savedAt: Date.now()
+            }));
+          } catch (e) {
+            console.warn("Failed to write product cache:", e);
+          }
         } else {
           toast.error("Product not found");
           navigate('/shop');
@@ -382,8 +435,10 @@ export default function ProductDetail() {
         setLoading(false);
       }
     };
+
     const fetchReviews = async () => {
       if (!id) return;
+      const cacheKey = `ruby_product_cache_${id}`;
       try {
         const q = query(
           collection(db, 'reviews'),
@@ -394,6 +449,18 @@ export default function ProductDetail() {
         // Sort client-side to avoid needing a composite index
         fetchedReviews.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setReviews(fetchedReviews);
+
+        // Update the cache with reviews too
+        try {
+          const rawCache = localStorage.getItem(cacheKey);
+          if (rawCache) {
+            const parsed = JSON.parse(rawCache);
+            parsed.reviews = fetchedReviews;
+            localStorage.setItem(cacheKey, JSON.stringify(parsed));
+          }
+        } catch (e) {
+          console.warn("Failed to update reviews in product cache:", e);
+        }
       } catch (error) {
         console.error("Error fetching reviews:", error);
       }
@@ -440,8 +507,30 @@ export default function ProductDetail() {
     }
   };
 
-  const averageRating = reviews.length > 0
-    ? (reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)
+  // Deterministic stable dummy reviews
+  const dummyCount = 42 + ((product?.id || '').split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0) % 97);
+  
+  // Deterministic dummy split
+  const dummy1Stars = Math.max(1, Math.floor(dummyCount * 0.01));
+  const dummy2Stars = Math.max(1, Math.floor(dummyCount * 0.03));
+  const dummy3Stars = Math.max(2, Math.floor(dummyCount * 0.07));
+  const dummy4Stars = Math.max(5, Math.floor(dummyCount * 0.15));
+  const dummy5Stars = dummyCount - (dummy1Stars + dummy2Stars + dummy3Stars + dummy4Stars);
+
+  const getStarCount = (star: number) => {
+    const realCount = reviews.filter(r => r.rating === star).length;
+    if (star === 5) return dummy5Stars + realCount;
+    if (star === 4) return dummy4Stars + realCount;
+    if (star === 3) return dummy3Stars + realCount;
+    if (star === 2) return dummy2Stars + realCount;
+    return dummy1Stars + realCount;
+  };
+
+  const totalReviewsCount = dummyCount + reviews.length;
+
+  const totalRatingSum = (dummy5Stars * 5 + dummy4Stars * 4 + dummy3Stars * 3 + dummy2Stars * 2 + dummy1Stars * 1) + reviews.reduce((acc, r) => acc + r.rating, 0);
+  const averageRating = totalReviewsCount > 0
+    ? (totalRatingSum / totalReviewsCount).toFixed(1)
     : "0.0";
 
   const filteredReviews = starFilter 
@@ -588,7 +677,7 @@ export default function ProductDetail() {
                 <Star key={i} size={16} fill={i < Math.round(Number(averageRating)) ? "currentColor" : "none"} className={i < Math.round(Number(averageRating)) ? "" : "text-gray-200"} />
               ))}
             </div>
-            <span className="font-medium">{averageRating} ({reviews.length} Reviews)</span>
+            <span className="font-medium">{averageRating} ({totalReviewsCount} Reviews)</span>
           </div>
 
           <div className="flex items-center gap-[14px] mb-2">
@@ -749,7 +838,7 @@ export default function ProductDetail() {
       </div>
 
       {/* Reviews Section */}
-      <div className="max-w-7xl mx-auto px-[5%] pb-15">
+      <div className="max-w-7xl mx-auto px-[5%] pb-6">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
           <div className="space-y-2">
             <h2 className="text-[28px] font-serif font-bold text-[#1A2C54]">Customer Reviews</h2>
@@ -826,8 +915,8 @@ export default function ProductDetail() {
               <h4 className="text-[13px] font-bold uppercase tracking-widest text-gray-400 mb-6">Rating Distribution</h4>
               <div className="space-y-4">
                 {[5, 4, 3, 2, 1].map((star) => {
-                  const count = reviews.filter(r => r.rating === star).length;
-                  const percentage = reviews.length > 0 ? (count / reviews.length) * 100 : 0;
+                  const count = getStarCount(star);
+                  const percentage = totalReviewsCount > 0 ? (count / totalReviewsCount) * 100 : 0;
                   return (
                     <div key={star} className="flex items-center gap-4">
                       <span className="text-[12px] font-bold text-gray-600 w-3">{star}</span>
@@ -846,11 +935,11 @@ export default function ProductDetail() {
 
       {/* Related Products */}
       {relatedProducts.length > 0 && (
-        <div className="max-w-7xl mx-auto px-[5%] pb-20">
-          <div className="flex items-center justify-between mb-10">
-            <div className="space-y-2">
-              <h2 className="text-[28px] font-serif font-bold text-[#1A2C54]">You May Also Like</h2>
-              <p className="text-gray-400 text-sm font-medium">Handpicked recommendations for you.</p>
+        <div className="max-w-7xl mx-auto px-[5%] pb-12 pt-4">
+          <div className="flex items-center justify-between mb-6">
+            <div className="space-y-1">
+              <h2 className="text-[24px] font-serif font-bold text-[#1A2C54]">You May Also Like</h2>
+              <p className="text-gray-400 text-xs font-medium">Handpicked recommendations for you.</p>
             </div>
             <button 
               onClick={() => navigate('/shop')}
@@ -859,7 +948,7 @@ export default function ProductDetail() {
               View All
             </button>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-16">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-10">
             {relatedProducts.map(p => (
               <ProductCard key={p.id} product={p} />
             ))}
