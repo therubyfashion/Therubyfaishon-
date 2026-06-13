@@ -53,49 +53,6 @@ export default function Profile() {
   const uploadPromiseRef = React.useRef<Promise<string> | null>(null);
   const [notificationStatus, setNotificationStatus] = React.useState<string>('default');
 
-  const [notifPrefs, setNotifPrefs] = React.useState({
-    orderUpdates: true,
-    newArrivals: true,
-    couponsAlert: true,
-    newsletter: false,
-  });
-
-  React.useEffect(() => {
-    try {
-      const stored = localStorage.getItem('ruby_notification_preferences');
-      if (stored) {
-        setNotifPrefs(JSON.parse(stored));
-      } else if (profile?.notifications) {
-        setNotifPrefs({
-          orderUpdates: profile.notifications.orderUpdates ?? true,
-          newArrivals: profile.notifications.newArrivals ?? true,
-          couponsAlert: profile.notifications.couponsAlert ?? true,
-          newsletter: profile.notifications.newsletter ?? false,
-        });
-      }
-    } catch (e) {
-      console.warn("Could not read notifications cache:", e);
-    }
-  }, [profile]);
-
-  const toggleNotifPref = async (key: keyof typeof notifPrefs) => {
-    const nextPrefs = { ...notifPrefs, [key]: !notifPrefs[key] };
-    setNotifPrefs(nextPrefs);
-    localStorage.setItem('ruby_notification_preferences', JSON.stringify(nextPrefs));
-    toast.success("Preferences updated! ✨", { duration: 1500 });
-    
-    if (user) {
-      try {
-        const userRef = doc(db, 'users', user.uid);
-        await updateDoc(userRef, {
-          [`notifications.${String(key)}`]: nextPrefs[key]
-        });
-      } catch (e) {
-        console.warn("Firestore notification sync update skipped:", e);
-      }
-    }
-  };
-
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
       // @ts-ignore
@@ -577,51 +534,6 @@ export default function Profile() {
               <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Account Type</p>
               <p className="text-xs font-bold text-ruby uppercase tracking-widest">{profile?.role || 'User'}</p>
             </div>
-          </div>
-        </motion.div>
-
-        {/* Customer Notification Preferences Panel (Toggles) */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-[2.5rem] shadow-[0_20px_50px_-20px_rgba(0,0,0,0.08)] border border-gray-50 space-y-6 text-left"
-        >
-          <div>
-            <h3 className="text-sm font-bold text-[#1A2C54] uppercase tracking-wider flex items-center gap-2 font-syne">
-              <Bell size={16} className="text-ruby" /> Notification Alerts
-            </h3>
-            <p className="text-xs text-gray-400 mt-1">Configure which alerts or message notifications you wish to receive from The Ruby store.</p>
-          </div>
-
-          <div className="space-y-4 pt-2">
-            {[
-              { id: 'newArrivals', label: 'New Arrivals & Style Drops', desc: 'Alerts when we release limited-edition apparel & designer wear.', icon: '⚡' },
-              { id: 'couponsAlert', label: 'Coupons & Price Reductions', desc: 'Get notified immediately about special discounts, cashbacks, and sales.', icon: '🏷️' },
-              { id: 'orderUpdates', label: 'Order Status & Tracking', desc: 'Step-by-step pipeline tracking of your shipments and deliveries.', icon: '📦' },
-              { id: 'newsletter', label: 'Weekly Fashion Lookbooks', desc: 'Weekly digests styled by our expert in-house design directors.', icon: '✉️' },
-            ].map((item) => {
-              const active = (notifPrefs as any)[item.id] ?? true;
-              return (
-                <div key={item.id} className="flex items-center justify-between gap-4 p-4 hover:bg-gray-50 rounded-2xl transition-all border border-transparent hover:border-gray-100">
-                  <div className="flex items-start gap-4">
-                    <span className="text-xl shrink-0 mt-0.5">{item.icon}</span>
-                    <div className="text-left">
-                      <p className="text-xs font-bold text-[#1A2C54] tracking-tight">{item.label}</p>
-                      <p className="text-[10px] text-gray-400 max-w-sm font-medium mt-0.5 leading-relaxed">{item.desc}</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => toggleNotifPref(item.id as any)}
-                    className={cn(
-                      "w-12 h-6 rounded-full p-1 transition-all flex shrink-0 items-center border",
-                      active ? "bg-ruby border-ruby justify-end" : "bg-gray-100 border-gray-200 justify-start"
-                    )}
-                  >
-                    <motion.div layout className="w-4 h-4 bg-white rounded-full shadow-md" />
-                  </button>
-                </div>
-              );
-            })}
           </div>
         </motion.div>
 
