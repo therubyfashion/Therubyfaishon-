@@ -7,6 +7,7 @@ import { useWishlist } from '../contexts/WishlistContext';
 import { trackPixelEvent } from '../lib/pixel';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
+import { formatPrice } from '../utils/currency';
 
 interface ProductCardProps {
   product: Product;
@@ -97,9 +98,9 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
         <h3 className="product-name text-sm font-medium text-[#1A2C54] mb-1.5 line-clamp-1 group-hover:text-ruby transition-colors">{product.name}</h3>
         
         <div className="product-price-row flex items-center gap-2">
-          <span className="product-price text-base font-bold text-ruby">₹{Number(product.price || 0).toLocaleString()}</span>
+          <span className="product-price text-base font-bold text-ruby">{formatPrice(Number(product.price || 0))}</span>
           {product.comparePrice && product.comparePrice > product.price && (
-            <span className="product-original text-xs text-gray-400 line-through">₹{Number(product.comparePrice || 0).toLocaleString()}</span>
+            <span className="product-original text-xs text-gray-400 line-through">{formatPrice(Number(product.comparePrice || 0))}</span>
           )}
         </div>
         

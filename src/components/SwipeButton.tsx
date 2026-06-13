@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { ChevronRight, Check } from 'lucide-react';
+import { formatPrice } from '../utils/currency';
 
 interface SwipeButtonProps {
   onConfirm: () => void;
@@ -83,7 +84,7 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
           style={{ color: textColor }}
           className="text-[15px] font-black uppercase tracking-widest"
         >
-          {isComplete ? 'ORDER CONFIRMED' : `₹${price.toLocaleString()}`}
+          {isComplete ? 'ORDER CONFIRMED' : formatPrice(price)}
         </motion.span>
         {!isComplete && (
           <motion.span 

@@ -5,6 +5,7 @@ import { Product } from '../types';
 import { Search as SearchIcon, X, ArrowRight, ShoppingBag } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
+import { formatPrice } from '../utils/currency';
 
 export default function Search() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -124,7 +125,7 @@ export default function Search() {
                         <p className="text-xs text-gray-400 font-medium">
                           {Array.isArray(product.category) ? product.category.join(', ') : product.category}
                         </p>
-                        <p className="text-sm font-bold text-ruby mt-1">₹{Number(product.price || 0).toLocaleString()}</p>
+                        <p className="text-sm font-bold text-ruby mt-1">{formatPrice(Number(product.price || 0))}</p>
                       </div>
                       <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-ruby group-hover:text-white transition-all">
                         <ArrowRight size={18} />

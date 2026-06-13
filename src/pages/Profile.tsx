@@ -53,6 +53,49 @@ export default function Profile() {
   const uploadPromiseRef = React.useRef<Promise<string> | null>(null);
   const [notificationStatus, setNotificationStatus] = React.useState<string>('default');
 
+  const [notifPrefs, setNotifPrefs] = React.useState({
+    orderUpdates: true,
+    newArrivals: true,
+    couponsAlert: true,
+    newsletter: false,
+  });
+
+  React.useEffect(() => {
+    try {
+      const stored = localStorage.getItem('ruby_notification_preferences');
+      if (stored) {
+        setNotifPrefs(JSON.parse(stored));
+      } else if (profile?.notifications) {
+        setNotifPrefs({
+          orderUpdates: profile.notifications.orderUpdates ?? true,
+          newArrivals: profile.notifications.newArrivals ?? true,
+          couponsAlert: profile.notifications.couponsAlert ?? true,
+          newsletter: profile.notifications.newsletter ?? false,
+        });
+      }
+    } catch (e) {
+      console.warn("Could not read notifications cache:", e);
+    }
+  }, [profile]);
+
+  const toggleNotifPref = async (key: keyof typeof notifPrefs) => {
+    const nextPrefs = { ...notifPrefs, [key]: !notifPrefs[key] };
+    setNotifPrefs(nextPrefs);
+    localStorage.setItem('ruby_notification_preferences', JSON.stringify(nextPrefs));
+    toast.success("Preferences updated! ✨", { duration: 1500 });
+    
+    if (user) {
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        await updateDoc(userRef, {
+          [`notifications.${String(key)}`]: nextPrefs[key]
+        });
+      } catch (e) {
+        console.warn("Firestore notification sync update skipped:", e);
+      }
+    }
+  };
+
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
       // @ts-ignore
@@ -537,50 +580,49 @@ export default function Profile() {
           </div>
         </motion.div>
 
-        {/* Push Notification Status & Activation Widget */}
+        {/* Customer Notification Preferences Panel (Toggles) */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-50 flex flex-col md:flex-row items-center justify-between gap-4"
+          className="bg-white p-8 rounded-[2.5rem] shadow-[0_20px_50px_-20px_rgba(0,0,0,0.08)] border border-gray-50 space-y-6 text-left"
         >
-          <div className="flex items-start gap-4 text-left w-full md:w-auto">
-            <div className={cn(
-              "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm",
-              notificationStatus === 'granted' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-500'
-            )}>
-              <Bell size={22} className={notificationStatus === 'granted' ? 'animate-none' : 'animate-bounce'} />
-            </div>
-            <div className="space-y-1 min-w-0">
-              <h4 className="text-sm font-bold text-[#1A2C54] uppercase tracking-wider flex items-center gap-2">
-                Push Notifications 
-                {notificationStatus === 'granted' && (
-                  <span className="inline-block w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse" />
-                )}
-              </h4>
-              <p className="text-xs text-gray-400 leading-relaxed">
-                {notificationStatus === 'granted' 
-                  ? 'Active and fully configured on this device! ✅' 
-                  : 'Important: To receive test custom notifications, you MUST allow permission in a New Tab representation.'}
-              </p>
-              {window.self !== window.top && (
-                <p className="text-[10px] text-amber-600 bg-amber-50 px-2.5 py-1 rounded-lg inline-block font-semibold">
-                  ⚠️ Open app in a New Tab to enable subscription prompt!
-                </p>
-              )}
-            </div>
+          <div>
+            <h3 className="text-sm font-bold text-[#1A2C54] uppercase tracking-wider flex items-center gap-2 font-syne">
+              <Bell size={16} className="text-ruby" /> Notification Alerts
+            </h3>
+            <p className="text-xs text-gray-400 mt-1">Configure which alerts or message notifications you wish to receive from The Ruby store.</p>
           </div>
-          
-          <button
-            onClick={requestNotificationPermission}
-            className={cn(
-              "w-full md:w-auto px-6 py-3 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all transform duration-200 shrink-0",
-              notificationStatus === 'granted'
-                ? "bg-emerald-50 text-emerald-600 hover:bg-emerald-100/50 cursor-pointer border border-emerald-200"
-                : "bg-ruby text-white hover:bg-ruby/90 hover:scale-[1.02] shadow-lg shadow-ruby/20 active:scale-95 cursor-pointer"
-            )}
-          >
-            {notificationStatus === 'granted' ? 'Sync ID 🔄' : 'Activate 🔔'}
-          </button>
+
+          <div className="space-y-4 pt-2">
+            {[
+              { id: 'newArrivals', label: 'New Arrivals & Style Drops', desc: 'Alerts when we release limited-edition apparel & designer wear.', icon: '⚡' },
+              { id: 'couponsAlert', label: 'Coupons & Price Reductions', desc: 'Get notified immediately about special discounts, cashbacks, and sales.', icon: '🏷️' },
+              { id: 'orderUpdates', label: 'Order Status & Tracking', desc: 'Step-by-step pipeline tracking of your shipments and deliveries.', icon: '📦' },
+              { id: 'newsletter', label: 'Weekly Fashion Lookbooks', desc: 'Weekly digests styled by our expert in-house design directors.', icon: '✉️' },
+            ].map((item) => {
+              const active = (notifPrefs as any)[item.id] ?? true;
+              return (
+                <div key={item.id} className="flex items-center justify-between gap-4 p-4 hover:bg-gray-50 rounded-2xl transition-all border border-transparent hover:border-gray-100">
+                  <div className="flex items-start gap-4">
+                    <span className="text-xl shrink-0 mt-0.5">{item.icon}</span>
+                    <div className="text-left">
+                      <p className="text-xs font-bold text-[#1A2C54] tracking-tight">{item.label}</p>
+                      <p className="text-[10px] text-gray-400 max-w-sm font-medium mt-0.5 leading-relaxed">{item.desc}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => toggleNotifPref(item.id as any)}
+                    className={cn(
+                      "w-12 h-6 rounded-full p-1 transition-all flex shrink-0 items-center border",
+                      active ? "bg-ruby border-ruby justify-end" : "bg-gray-100 border-gray-200 justify-start"
+                    )}
+                  >
+                    <motion.div layout className="w-4 h-4 bg-white rounded-full shadow-md" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </motion.div>
 
         {/* Edit Profile Modal */}

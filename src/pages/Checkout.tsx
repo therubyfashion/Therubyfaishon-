@@ -13,6 +13,7 @@ import { io } from 'socket.io-client';
 import { LoadingSpinner } from '../components/Skeleton';
 import SwipeButton from '../components/SwipeButton';
 import { trackPixelEvent } from '../lib/pixel';
+import { formatPrice } from '../utils/currency';
 
 const STEPS = [
   { id: 1, label: 'Address' },
@@ -1064,7 +1065,7 @@ export default function Checkout() {
                                 Size {item.selectedSize} • {item.selectedColor || 'Default'} • Qty {item.quantity}
                               </p>
                             </div>
-                            <p className="text-sm font-bold text-ruby">₹{(item.price * item.quantity).toLocaleString()}</p>
+                            <p className="text-sm font-bold text-ruby">{formatPrice(Number(item.price * item.quantity))}</p>
                           </div>
                         ))}
                       </div>
@@ -1076,23 +1077,23 @@ export default function Checkout() {
                       <div className="space-y-4">
                         <div className="flex justify-between text-sm font-medium text-gray-400">
                           <span>Subtotal</span>
-                          <span className="font-bold text-[#1A2C54]">₹{subtotal.toLocaleString()}</span>
+                          <span className="font-bold text-[#1A2C54]">{formatPrice(subtotal)}</span>
                         </div>
                         {discount > 0 && (
                           <div className="flex justify-between text-sm font-bold text-ruby">
                             <span>Discount</span>
-                            <span>-₹{discount.toLocaleString()}</span>
+                            <span>-{formatPrice(discount)}</span>
                           </div>
                         )}
                         <div className="flex justify-between text-sm font-medium text-gray-400">
                           <span>Shipping</span>
                           <span className={cn("font-bold", shippingCost === 0 ? "text-green-500" : "text-[#1A2C54]")}>
-                            {shippingCost === 0 ? 'FREE' : `₹${shippingCost.toLocaleString()}`}
+                            {shippingCost === 0 ? 'FREE' : formatPrice(shippingCost)}
                           </span>
                         </div>
                         <div className="pt-6 border-t border-gray-200 flex justify-between items-end">
                           <p className="text-lg font-bold text-[#1A2C54]">Order Total</p>
-                          <p className="text-2xl font-bold text-ruby">₹{finalTotal.toLocaleString()}</p>
+                          <p className="text-2xl font-bold text-ruby">{formatPrice(finalTotal)}</p>
                         </div>
                       </div>
                     </div>

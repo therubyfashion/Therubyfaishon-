@@ -71,10 +71,12 @@ export default function Settings() {
   // Preferences State
   const [prefs, setPrefs] = React.useState({
     orderUpdates: true,
-    promotions: true,
+    newArrivals: true,
+    couponsAlert: true,
     newsletter: false,
     darkMode: false,
     biometrics: false,
+    aiCuration: true,
     language: 'English',
     currency: 'INR (₹)',
     privacyMode: false,
@@ -83,6 +85,43 @@ export default function Settings() {
   // Security Form States
   const [passForm, setPassForm] = React.useState({ current: '', new: '', confirm: '' });
   const [showPass, setShowPass] = React.useState(false);
+
+  React.useEffect(() => {
+    try {
+      const savedLang = localStorage.getItem('ruby_language') || 'English';
+      const savedCurr = localStorage.getItem('ruby_currency') || 'INR (₹)';
+      const savedAiCuration = localStorage.getItem('ruby_ai_curation') !== 'false';
+      const savedPrivacyMode = localStorage.getItem('ruby_privacy_mode') === 'true';
+      
+      const stored = localStorage.getItem('ruby_notification_preferences');
+      let notifVal = { orderUpdates: true, newArrivals: true, couponsAlert: true, newsletter: false };
+      if (stored) {
+        notifVal = { ...notifVal, ...JSON.parse(stored) };
+      } else if (profile?.notifications) {
+        notifVal = {
+          orderUpdates: profile.notifications.orderUpdates ?? true,
+          newArrivals: profile.notifications.newArrivals ?? true,
+          couponsAlert: profile.notifications.couponsAlert ?? true,
+          newsletter: profile.notifications.newsletter ?? false
+        };
+      }
+
+      setPrefs({
+        orderUpdates: notifVal.orderUpdates,
+        newArrivals: notifVal.newArrivals,
+        couponsAlert: notifVal.couponsAlert,
+        newsletter: notifVal.newsletter,
+        darkMode: false,
+        biometrics: false,
+        aiCuration: savedAiCuration,
+        language: savedLang,
+        currency: savedCurr,
+        privacyMode: savedPrivacyMode,
+      });
+    } catch (e) {
+      console.warn("Error loading settings preferences:", e);
+    }
+  }, [profile]);
 
   React.useEffect(() => {
     const timer = setInterval(() => {
@@ -95,55 +134,73 @@ export default function Settings() {
     const newVal = !prefs[key];
     setPrefs(prev => ({ ...prev, [key]: newVal }));
     
-    // Simulate cloud sync with a "cool" toast
-    toast.promise(new Promise(res => setTimeout(res, 800)), {
-      loading: 'Syncing preferences...',
-      success: 'Cloud Vault Updated',
-      error: 'Sync Failed',
-    });
+    // Save locally
+    if (key === 'aiCuration') {
+      localStorage.setItem('ruby_ai_curation', String(newVal));
+    } else if (key === 'privacyMode') {
+      localStorage.setItem('ruby_privacy_mode', String(newVal));
+    } else if (['orderUpdates', 'newArrivals', 'couponsAlert', 'newsletter'].includes(String(key))) {
+      const stored = localStorage.getItem('ruby_notification_preferences');
+      const parsed = stored ? JSON.parse(stored) : { orderUpdates: true, newArrivals: true, couponsAlert: true, newsletter: false };
+      parsed[key as string] = newVal;
+      localStorage.setItem('ruby_notification_preferences', JSON.stringify(parsed));
+    }
 
-    if (user && typeof key === 'string' && ['orderUpdates', 'promotions', 'newsletter'].includes(key)) {
+    toast.success('Preference updated!');
+
+    if (user && typeof key === 'string' && ['orderUpdates', 'newArrivals', 'couponsAlert', 'newsletter'].includes(key)) {
       try {
         await updateDoc(doc(db, 'users', user.uid), {
-          [`notifications.${key}`]: newVal
+          [`notifications.${String(key)}`]: newVal
         });
       } catch (e) {
-        console.error("Firebase sync failed");
+        console.error("Firebase notification sync failed");
       }
     }
   };
 
   const handleLangChange = (lang: string) => {
     setPrefs(prev => ({ ...prev, language: lang }));
+    localStorage.setItem('ruby_language', lang);
     toast.success(`Language set to ${lang}`, { icon: <Globe size={14} className="text-blue-500" /> });
   };
 
   const handleCurrencyChange = (curr: string) => {
     setPrefs(prev => ({ ...prev, currency: curr }));
+    localStorage.setItem('ruby_currency', curr);
+    // Dispatch custom event to notify components that currency was modified
+    window.dispatchEvent(new Event('ruby_currency_changed'));
     toast.success(`Currency set to ${curr}`, { icon: <CreditCard size={14} className="text-emerald-500" /> });
   };
 
   const handlePasswordUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !user.email) return;
+    if (!user) return;
     if (passForm.new !== passForm.confirm) return toast.error("Passwords don't match");
     setLoading(true);
     try {
-      const credential = EmailAuthProvider.credential(user.email, passForm.current);
-      await reauthenticateWithCredential(user, credential);
-      await updatePassword(user, passForm.new);
-      toast.success("Security vault updated!");
+      const isOfflineUser = user.uid.startsWith('offline_');
+      if (isOfflineUser) {
+        localStorage.setItem(`ruby_sandbox_pass_${user.uid}`, passForm.new);
+        toast.success("Security Vault updated: Sandboxed credentials saved! 🔒");
+      } else {
+        if (!user.email) throw new Error("No email linked to authentication profile.");
+        const credential = EmailAuthProvider.credential(user.email, passForm.current);
+        await reauthenticateWithCredential(user, credential);
+        await updatePassword(user, passForm.new);
+        toast.success("Master password updated successfully! 🔒");
+      }
       setPassForm({ current: '', new: '', confirm: '' });
       setActiveView('main');
     } catch (err: any) {
-      toast.error(err.message || "Shield check failed.");
+      toast.error(err.message || "Shield check validation failed.");
     } finally {
       setLoading(false);
     }
   };
 
   const handleClearSessions = () => {
-    toast.promise(new Promise(res => setTimeout(res, 1500)), {
+    toast.promise(new Promise(res => setTimeout(res, 1000)), {
       loading: 'Revoking all other active sessions...',
       success: 'All other devices logged out safely',
       error: 'Failed to revoke sessions',
@@ -151,12 +208,48 @@ export default function Settings() {
   };
 
   const handleDownloadData = () => {
-    toast.info("Preparing your data archive. We will email you a secure link within 24 hours.");
+    try {
+      const dataDump = {
+        profileId: user?.uid,
+        email: user?.email,
+        name: localStorage.getItem(`user_name_${user?.uid}`) || profile?.displayName,
+        wishlist: JSON.parse(localStorage.getItem('wishlist') || '[]'),
+        cart: JSON.parse(localStorage.getItem('cart') || '[]'),
+        recentlyViewed: JSON.parse(localStorage.getItem('recentlyViewed') || '[]'),
+        notificationPreferences: prefs,
+        timestamp: new Date().toISOString()
+      };
+      const blob = new Blob([JSON.stringify(dataDump, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ruby_store_data_${user?.uid?.slice(0, 8)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success("Your store data archive has been downloaded successfully! 📊");
+    } catch (e) {
+      toast.error("Failed to compile data archive.");
+    }
   };
 
   const handleClearCache = () => {
-    toast.success("Local cache cleared. Reloading assets...");
-    setTimeout(() => window.location.reload(), 1500);
+    try {
+      // Clean up home, shop, product caches
+      localStorage.removeItem('ruby_home_cache');
+      
+      // Clean up dynamic keys
+      const keys = Object.keys(localStorage);
+      keys.forEach(k => {
+        if (k.startsWith('ruby_shop_cache_') || k.startsWith('ruby_product_cache_')) {
+          localStorage.removeItem(k);
+        }
+      });
+      
+      toast.success("All store local assets & page caches cleared successfully! ⚡");
+      setTimeout(() => window.location.reload(), 1000);
+    } catch (e) {
+      toast.error("Failed to clean browser caches completely.");
+    }
   };
 
   const menuItems = [
@@ -457,9 +550,10 @@ export default function Settings() {
                className="space-y-4"
             >
               {[
-                { id: 'orderUpdates', label: 'Order Pipeline', desc: 'Every milestone of your delivery journey', icon: Zap },
-                { id: 'promotions', label: 'Ruby Drops', desc: 'Curated exclusivity & seasonal events', icon: Sparkles },
-                { id: 'newsletter', label: 'The Edit', desc: 'Weekly lookbooks by our creative directors', icon: Mail },
+                { id: 'newArrivals', label: 'New Arrivals & Style Drops', desc: 'Alerts when fresh limited-edition style collections drop', icon: Sparkles },
+                { id: 'couponsAlert', label: 'Coupons & Price Reductions', desc: 'Immediate notifications for sales, cashback, & offers', icon: Tag },
+                { id: 'orderUpdates', label: 'Order Pipeline Status', desc: 'Step-by-step pipeline tracking of your shipments', icon: Zap },
+                { id: 'newsletter', label: 'The Edit Lookbook', desc: 'Weekly digests styled by our expert design directors', icon: Mail },
               ].map((item) => (
                 <button 
                   key={item.id}
@@ -472,12 +566,12 @@ export default function Settings() {
                     </div>
                     <div className="text-left">
                       <h4 className="text-sm font-bold tracking-tight text-[#1A2C54]">{item.label}</h4>
-                      <p className="text-[10px] text-gray-400 leading-relaxed">{item.desc}</p>
+                      <p className="text-[10px] text-gray-400 leading-relaxed font-medium mt-0.5">{item.desc}</p>
                     </div>
                   </div>
                   <div className={cn(
-                    "w-12 h-6 rounded-full p-1 transition-all flex border border-gray-100",
-                    (prefs as any)[item.id] ? "bg-ruby justify-end" : "bg-gray-100 justify-start"
+                    "w-12 h-6 rounded-full p-1 transition-all flex border border-gray-100 items-center",
+                    (prefs as any)[item.id] ? "bg-ruby border-ruby justify-end" : "bg-gray-100 border-gray-200 justify-start"
                   )}>
                     <motion.div layout className="w-4 h-4 bg-white rounded-full shadow-md" />
                   </div>

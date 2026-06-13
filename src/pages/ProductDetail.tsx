@@ -19,6 +19,7 @@ import type { Swiper as SwiperType } from 'swiper';
 import { ProductDetailSkeleton } from '../components/Skeleton';
 import ProductCard from '../components/ProductCard';
 import { compressImage } from '../utils/imageUtils';
+import { formatPrice } from '../utils/currency';
 
 function ReviewForm({ productId, onReviewAdded }: { productId: string; onReviewAdded: () => void }) {
   const { user, profile } = useAuth();
@@ -681,10 +682,10 @@ export default function ProductDetail() {
           </div>
 
           <div className="flex items-center gap-[14px] mb-2">
-            <span className="text-[32px] font-bold text-ruby">₹{Number(product.price || 0).toLocaleString()}</span>
+            <span className="text-[32px] font-bold text-ruby">{formatPrice(Number(product.price || 0))}</span>
             {product.comparePrice && product.comparePrice > product.price && (
               <>
-                <span className="text-[18px] text-gray-400 line-through">₹{Number(product.comparePrice || 0).toLocaleString()}</span>
+                <span className="text-[18px] text-gray-400 line-through">{formatPrice(Number(product.comparePrice || 0))}</span>
                 <span className="px-3 py-1 bg-[#d1fae5] text-[#065f46] rounded-[6px] text-[13px] font-semibold">
                   {Math.round(((product.comparePrice - product.price) / product.comparePrice) * 100)}% OFF
                 </span>
