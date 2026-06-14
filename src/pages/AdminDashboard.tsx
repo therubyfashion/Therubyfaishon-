@@ -2904,7 +2904,7 @@ export default function AdminDashboard() {
         return nextNum;
       });
 
-      const orderId = `#${orderNumber.toString().padStart(4, '0')}`;
+      const orderId = `#TRF${orderNumber.toString().padStart(4, '0')}`;
       const newOrder = {
         orderId,
         address: {

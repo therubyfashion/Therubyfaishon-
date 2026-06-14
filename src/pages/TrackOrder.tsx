@@ -47,11 +47,25 @@ export default function TrackOrder() {
       const cleanOid = oid.trim();
       const cleanEmail = emailStr.trim().toLowerCase();
       
-      // We try 3 variations of orderId format since users might enter with/without # or uppercase/lowercase
+      // We try multiple variations of orderId format since users might enter with/without #, with/without TRF, or uppercase/lowercase
+      const cleanDigits = cleanOid.replace(/^#/, '').replace(/^TRF/i, '');
+      const defaultId = `#TRF${cleanDigits.padStart(4, '0')}`;
+
       const idVariations = [
         cleanOid,
+        cleanOid.toUpperCase(),
+        cleanOid.toLowerCase(),
         cleanOid.startsWith('#') ? cleanOid : `#${cleanOid}`,
-        cleanOid.startsWith('#') ? cleanOid.substring(1) : cleanOid
+        cleanOid.startsWith('#') ? cleanOid.substring(1) : cleanOid,
+        `#TRF${cleanDigits}`,
+        `TRF${cleanDigits}`,
+        `#TRF${cleanDigits.toUpperCase()}`,
+        `TRF${cleanDigits.toUpperCase()}`,
+        `#TRF${cleanDigits.toLowerCase()}`,
+        `TRF${cleanDigits.toLowerCase()}`,
+        `#TRF${cleanDigits.padStart(4, '0')}`,
+        `TRF${cleanDigits.padStart(4, '0')}`,
+        defaultId
       ];
 
       console.log("🔍 Looking for order with variations:", idVariations, "Email:", cleanEmail);

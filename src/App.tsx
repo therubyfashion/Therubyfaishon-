@@ -1,11 +1,11 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { Toaster } from 'sonner';
+import { Toaster, toast } from 'sonner';
 import { collection, getDocs, query, limit, doc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SettingsProvider, useSettings } from './contexts/SettingsContext';
-import { NotificationProvider } from './contexts/NotificationContext';
+import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
 import { CartProvider } from './contexts/CartContext';
 import { WishlistProvider } from './contexts/WishlistContext';
 import Footer from './components/Footer';
@@ -96,6 +96,54 @@ function AppContent() {
 
   const { user, profile, isAdmin, loading: authLoading } = useAuth();
   const { settings, loading: settingsLoading } = useSettings();
+  const { createNotification, notifications } = useNotifications();
+
+  // Loyalty points milestone threshold notifications
+  useEffect(() => {
+    if (authLoading || !user || !profile || typeof profile.loyaltyPoints !== 'number') return;
+    
+    const points = profile.loyaltyPoints;
+    const thresholds = [100, 250, 500, 1000];
+    
+    // Find the highest threshold currently reached by the user
+    const achievedThresholds = thresholds.filter(t => points >= t);
+    if (achievedThresholds.length === 0) return;
+    
+    achievedThresholds.forEach(threshold => {
+      // Form unique Title and Body
+      const title = `Loyalty Milestone Achieved: ${threshold} Points! ⚜️`;
+      const body = `Fantastic! You have accumulated ${points} loyalty points. Convert them now to unlock a Special ₹${threshold === 500 ? 550 : threshold === 1000 ? 1200 : threshold} cash discount voucher for the shop! 🎟️`;
+      
+      // Check if the user was already notified of this specific threshold in their notifications database
+      const alreadyNotified = notifications.some(
+        n => (n.title === title || n.title?.includes(`Loyalty Milestone Achieved: ${threshold}`)) && n.userId === user.uid
+      );
+      
+      if (!alreadyNotified) {
+        // Create persistent in-app notifications in Firestore database
+        createNotification({
+          userId: user.uid,
+          title,
+          body,
+          type: 'promotion',
+          iconType: 'coupon',
+          link: '/settings?tab=coupons'
+        }).then(() => {
+          // Trigger a beautiful interactive real-time visual Sonner toast
+          toast.success(`🎉 Milestone Unlocked: ${threshold} Loyalty Points!`, {
+            description: `Convert your points into a store credit voucher now.`,
+            duration: 9000,
+            action: {
+              label: "Redeem",
+              onClick: () => navigate('/settings?tab=coupons')
+            },
+          });
+        }).catch(err => {
+          console.error("Failed to create milestone notification:", err);
+        });
+      }
+    });
+  }, [profile?.loyaltyPoints, notifications, user, authLoading, createNotification, navigate]);
 
   // Handle unverified email redirect
   useEffect(() => {

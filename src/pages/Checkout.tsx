@@ -283,7 +283,7 @@ export default function Checkout() {
         return nextNum;
       });
 
-      const formattedOrderId = `#${orderNumber.toString().padStart(4, '0')}`;
+      const formattedOrderId = `#TRF${orderNumber.toString().padStart(4, '0')}`;
       
       const orderData = {
         orderId: formattedOrderId,
@@ -368,7 +368,7 @@ export default function Checkout() {
               }
             }
 
-            // Send internal notification
+            // Send internal notification (Firestore DB)
             if (user?.uid) {
               try {
                 await sendNotification({
@@ -384,157 +384,193 @@ export default function Checkout() {
               }
             }
 
-            // Trigger Admin Push Notification via OneSignal
+            // 1. Trigger User Push Notification via OneSignal (Individual)
+            if (user?.uid) {
+              try {
+                await fetch('/api/send-user-push', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    userId: user.uid,
+                    title: 'Order Successfully Placed! 🎉',
+                    body: `Your order ${finalOrderData.orderId} of ₹${Number(finalOrderData.total).toLocaleString()} has been successfully placed. We are preparing it!`,
+                    url: '/my-orders'
+                  })
+                });
+                console.log("Sent user push notification with Order ID:", finalOrderData.orderId);
+              } catch (userPushErr) {
+                console.error('Failed to send user push notification:', userPushErr);
+              }
+            }
+
+            // 2. Trigger Admin Push Notification via OneSignal
             try {
+              const mainItemName = finalOrderData.items[0]?.name || 'Premium Product';
+              const firstImage = finalOrderData.items[0]?.image || '';
+              const itemCount = finalOrderData.items.reduce((sum: number, item: any) => sum + (item.quantity || 1), 0);
+              const itemsText = itemCount > 1 ? `${mainItemName} (+${itemCount - 1} item${itemCount > 2 ? 's' : ''})` : `${mainItemName}`;
+              
+              const adminPushBody = `You have a new order ${finalOrderData.orderId}\nfor ₹${Number(finalOrderData.total).toLocaleString()} from ${finalOrderData.customerName} (${finalOrderData.address?.city || 'Patna'}, ${finalOrderData.address?.state || 'Bihar'})\n\n📦 Order Details:\n• Order ID   : ${finalOrderData.orderId}\n• Product    : ${itemsText}\n• Quantity   : ${itemCount}\n• Amount     : ₹${Number(finalOrderData.total).toLocaleString()}\n• Payment    : ${finalOrderData.paymentMethod}`;
+              
               await fetch('/api/send-admin-push', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  title: 'New Order Received! 🛍️',
-                  body: `You received order ${finalOrderData.orderId} from ${finalOrderData.address.name}`,
+                  title: '🛒 New Order Received',
+                  body: adminPushBody,
+                  imageUrl: firstImage,
                   url: '/admin'
                 })
               });
+              console.log("Sent admin push notification with rich layout & image");
             } catch (pushErr) {
               console.error('Failed to send admin push notification:', pushErr);
             }
 
-            // Send Email Notifications
+            // 3. Send Email Notifications (Direct Client-to-Server trigger for durability)
             try {
               const settingsSnap = await getDocs(collection(db, 'settings'));
-              if (!settingsSnap.empty) {
-                const settingsData = settingsSnap.docs[0].data();
-                if ((settingsData.resendApiKey || (settingsData.smtpUser && settingsData.smtpPass))) {
-                  const emailHtml = `
-                    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #000000; padding: 40px 20px; color: #FFFFFF; line-height: 1.5;">
-                      <div style="max-width: 500px; margin: 0 auto;">
-                        <!-- Header -->
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 60px;">
-                          <span style="font-size: 18px; font-weight: 500; color: #FFFFFF;">Order ${finalOrderData.orderId}</span>
-                          <span style="font-size: 18px; font-weight: 500; color: #888888; text-transform: lowercase;">confirmed</span>
-                        </div>
+              const settingsData = !settingsSnap.empty ? settingsSnap.docs[0].data() : {};
+              const storeName = settingsData.storeName || 'The Ruby Fashion';
 
-                        <!-- Logo -->
-                        <div style="text-align: center; margin-bottom: 60px;">
-                          ${settingsData.storeLogo ? `<img src="${settingsData.storeLogo}" alt="Logo" style="width: 80px; height: 80px; object-fit: contain;">` : `
-                            <div style="width: 80px; height: 80px; background-color: #1A1A1A; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; overflow: hidden;">
-                              <img src="https://images.unsplash.com/photo-1614732414444-096e5f1122d5?q=80&w=2574&auto=format&fit=crop" style="width: 100%; height: 100%; object-fit: cover; opacity: 0.8;">
-                            </div>
-                          `}
-                        </div>
+              // Build high-compatibility 100%-bulletproof HTML Table email summary (Outlook / Gmail safe)
+              const emailHtml = `
+                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #000000; padding: 40px 20px; color: #FFFFFF; line-height: 1.5;">
+                  <div style="max-width: 500px; margin: 0 auto;">
+                    <!-- Header -->
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 60px;">
+                      <span style="font-size: 18px; font-weight: 500; color: #FFFFFF;">Order ${finalOrderData.orderId}</span>
+                      <span style="font-size: 18px; font-weight: 500; color: #888888; text-transform: lowercase;">confirmed</span>
+                    </div>
 
-                        <!-- Main Message -->
-                        <div style="margin-bottom: 40px;">
-                          <h1 style="font-size: 24px; font-weight: 500; margin: 0 0 16px 0;">Thank you for your purchase!</h1>
-                          <p style="font-size: 16px; color: #888888; margin: 0;">We're getting your order ready to be shipped. We will notify you when it has been sent.</p>
+                    <!-- Logo -->
+                    <div style="text-align: center; margin-bottom: 60px;">
+                      ${settingsData.storeLogo ? `<img src="${settingsData.storeLogo}" alt="Logo" style="width: 80px; height: 80px; object-fit: contain;">` : `
+                        <div style="width: 80px; height: 80px; background-color: #1A1A1A; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; overflow: hidden;">
+                          <img src="https://images.unsplash.com/photo-1614732414444-096e5f1122d5?q=80&w=2574&auto=format&fit=crop" style="width: 100%; height: 100%; object-fit: cover; opacity: 0.8;">
                         </div>
+                      `}
+                    </div>
 
-                        <!-- Action Buttons -->
-                        <div style="margin-bottom: 60px; text-align: center;">
-                          <a href="${window.location.origin}/track/${(finalOrderData.orderId || '').replace('#', '')}?email=${encodeURIComponent(finalOrderData.address?.email || '')}" 
-                             style="display: block; background-color: #FFFFFF; color: #000000; padding: 18px; border-radius: 4px; text-decoration: none; font-size: 16px; font-weight: 500; text-align: center; margin-bottom: 16px;">
-                            View your order
-                          </a>
-                          <p style="font-size: 14px; color: #888888;">or <a href="${window.location.origin}" style="color: #FFFFFF; text-decoration: underline;">Visit our store</a></p>
-                        </div>
+                    <!-- Main Message -->
+                    <div style="margin-bottom: 40px;">
+                      <h1 style="font-size: 24px; font-weight: 500; margin: 0 0 16px 0;">Thank you for your purchase!</h1>
+                      <p style="font-size: 16px; color: #888888; margin: 0;">We're getting your order ready to be shipped. We will notify you when it has been sent.</p>
+                    </div>
 
-                        <!-- Order Summary -->
-                        <div style="border-top: 1px solid #1A1A1A; padding-top: 40px;">
-                          <h2 style="font-size: 18px; font-weight: 500; margin: 0 0 24px 0;">Order summary</h2>
-                          
-                          ${finalOrderData.items.map((item: any) => `
-                            <div style="display: flex; margin-bottom: 24px;">
-                              <div style="width: 80px; height: 80px; background-color: #1A1A1A; overflow: hidden; margin-right: 16px;">
+                    <!-- Action Buttons -->
+                    <div style="margin-bottom: 60px; text-align: center;">
+                      <a href="${window.location.origin}/track/${(finalOrderData.orderId || '').replace('#', '')}?email=${encodeURIComponent(finalOrderData.address?.email || '')}" 
+                         style="display: block; background-color: #FFFFFF; color: #000000; padding: 18px; border-radius: 4px; text-decoration: none; font-size: 16px; font-weight: 500; text-align: center; margin-bottom: 16px;">
+                        View your order
+                      </a>
+                      <p style="font-size: 14px; color: #888888;">or <a href="${window.location.origin}" style="color: #FFFFFF; text-decoration: underline;">Visit our store</a></p>
+                    </div>
+
+                    <!-- Order Summary Table (Safe across all clients including Gmail & Outlook) -->
+                    <div style="border-top: 1px solid #1A1A1A; padding-top: 40px;">
+                      <h2 style="font-size: 18px; font-weight: 500; margin: 0 0 24px 0;">Order summary</h2>
+                      
+                      <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 30px;">
+                        ${finalOrderData.items.map((item: any) => `
+                          <tr>
+                            <td style="padding: 12px 0; width: 70px; vertical-align: top;">
+                              <div style="width: 60px; height: 60px; background-color: #1A1A1A; overflow: hidden; border-radius: 4px;">
                                 ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 100%; height: 100%; object-fit: cover;">` : ''}
                               </div>
-                              <div style="flex: 1;">
-                                <p style="font-size: 16px; font-weight: 500; margin: 0;">${item.name} × ${item.quantity}</p>
-                                <p style="font-size: 14px; color: #888888; margin: 4px 0 0 0;">${item.selectedSize || 'Standard'}</p>
-                              </div>
-                              <div style="text-align: right;">
-                                <p style="font-size: 16px; font-weight: 500; margin: 0;">₹${Number(item.price * item.quantity).toLocaleString()}</p>
-                              </div>
-                            </div>
-                          `).join('')}
+                            </td>
+                            <td style="padding: 12px 12px; vertical-align: top; text-align: left;">
+                              <p style="font-size: 15px; font-weight: 500; color: #FFFFFF; margin: 0;">${item.name} &times; ${item.quantity}</p>
+                              <p style="font-size: 13px; color: #888888; margin: 4px 0 0 0;">Size: ${item.selectedSize || 'Standard'}${item.selectedColor ? ` | Color: ${item.selectedColor}` : ''}</p>
+                            </td>
+                            <td style="padding: 12px 0; vertical-align: top; text-align: right; width: 90px;">
+                              <p style="font-size: 15px; font-weight: 500; color: #FFFFFF; margin: 0;">₹${Number(item.price * item.quantity).toLocaleString()}</p>
+                            </td>
+                          </tr>
+                        `).join('')}
+                      </table>
 
-                          <!-- Totals -->
-                          <div style="border-top: 1px solid #1A1A1A; padding-top: 24px;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                              <p style="font-size: 14px; color: #888888; margin: 0;">Subtotal</p>
-                              <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">₹${Number(finalOrderData.subtotal || 0).toLocaleString()}</p>
-                            </div>
-                            ${finalOrderData.discount > 0 ? `
-                              <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                                <p style="font-size: 14px; color: #888888; margin: 0;">Discount</p>
-                                <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">-₹${Number(finalOrderData.discount || 0).toLocaleString()}</p>
-                              </div>
-                            ` : ''}
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                              <p style="font-size: 14px; color: #888888; margin: 0;">Shipping</p>
-                              <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">${finalOrderData.shippingCost === 0 ? 'FREE' : `₹${Number(finalOrderData.shippingCost || 0).toLocaleString()}`}</p>
-                            </div>
-                            ${finalOrderData.codFee > 0 ? `
-                              <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                                <p style="font-size: 14px; color: #888888; margin: 0;">COD Handling Fee</p>
-                                <p style="font-size: 14px; font-weight: 500; color: #FFFFFF; margin: 0;">₹${Number(finalOrderData.codFee || 0).toLocaleString()}</p>
-                              </div>
-                            ` : ''}
-                            <div style="display: flex; justify-content: space-between; border-top: 1px solid #1A1A1A; padding-top: 24px; margin-top: 24px;">
-                              <p style="font-size: 18px; font-weight: 600; color: #FFFFFF; margin: 0;">Total</p>
-                              <p style="font-size: 24px; font-weight: 600; color: #FFFFFF; margin: 0;">₹${Number(finalOrderData.total || 0).toLocaleString()}</p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <!-- Footer -->
-                        <div style="margin-top: 80px; text-align: center; border-top: 1px solid #1A1A1A; padding-top: 40px; padding-bottom: 40px;">
-                          <p style="font-size: 12px; color: #444444; margin: 0;">
-                            &copy; ${new Date().getFullYear()} ${settingsData.storeName || 'The Ruby Fashion'}. All rights reserved.<br/>
-                            Secure payment processing. You're receiving this because you placed an order on our store.
-                          </p>
-                        </div>
+                      <!-- Totals -->
+                      <div style="border-top: 1px solid #1A1A1A; padding-top: 24px;">
+                        <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                          <tr>
+                            <td style="font-size: 14px; color: #888888; padding: 6px 0;">Subtotal</td>
+                            <td style="font-size: 14px; font-weight: 500; color: #FFFFFF; text-align: right; padding: 6px 0;">₹${Number(finalOrderData.subtotal || 0).toLocaleString()}</td>
+                          </tr>
+                          ${finalOrderData.discount > 0 ? `
+                            <tr>
+                              <td style="font-size: 14px; color: #888888; padding: 6px 0;">Discount</td>
+                              <td style="font-size: 14px; font-weight: 500; color: #FFFFFF; text-align: right; padding: 6px 0;">-₹${Number(finalOrderData.discount || 0).toLocaleString()}</td>
+                            </tr>
+                          ` : ''}
+                          <tr>
+                            <td style="font-size: 14px; color: #888888; padding: 6px 0;">Shipping</td>
+                            <td style="font-size: 14px; font-weight: 500; color: #FFFFFF; text-align: right; padding: 6px 0;">${finalOrderData.shippingCost === 0 ? 'FREE' : `₹${Number(finalOrderData.shippingCost || 0).toLocaleString()}`}</td>
+                          </tr>
+                          ${finalOrderData.codFee > 0 ? `
+                            <tr>
+                              <td style="font-size: 14px; color: #888888; padding: 6px 0;">COD Handling Fee</td>
+                              <td style="font-size: 14px; font-weight: 500; color: #FFFFFF; text-align: right; padding: 6px 0;">₹${Number(finalOrderData.codFee || 0).toLocaleString()}</td>
+                            </tr>
+                          ` : ''}
+                          <tr>
+                            <td style="font-size: 18px; font-weight: 600; color: #FFFFFF; padding: 18px 0 0 0; border-top: 1px solid #1A1A1A; margin-top: 18px;">Total</td>
+                            <td style="font-size: 24px; font-weight: 600; color: #FFFFFF; text-align: right; padding: 18px 0 0 0; border-top: 1px solid #1A1A1A; margin-top: 18px;">₹${Number(finalOrderData.total || 0).toLocaleString()}</td>
+                          </tr>
+                        </table>
                       </div>
                     </div>
-                  `;
-                  
-                  // 1. Send to Customer
-                  fetch('/api/send-email', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      to: finalOrderData.address?.email,
-                      from: settingsData.fromEmail || undefined,
-                      replyTo: settingsData.supportEmail || undefined,
-                      subject: `Order Confirmed! ${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`} ✨`,
-                      html: emailHtml
-                    })
-                  }).catch(err => console.error("Customer email failed:", err));
 
-                  // 2. Send to Admin
-                  if (settingsData.supportEmail) {
-                    fetch('/api/send-email', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        to: settingsData.supportEmail,
-                        from: settingsData.fromEmail || undefined,
-                        subject: `New Order Received! ${finalOrderData.orderId} 🛍️`,
-                        html: `
-                          <div style="font-family: sans-serif; padding: 20px;">
-                            <h2>New Order Received: ${finalOrderData.orderId}</h2>
-                            <p><strong>Customer:</strong> ${finalOrderData.customerName}</p>
-                            <p><strong>Email:</strong> ${finalOrderData.address?.email}</p>
-                            <p><strong>Amount:</strong> ₹${Number(finalOrderData.total || 0).toLocaleString()}</p>
-                            <p><strong>Payment:</strong> ${finalOrderData.paymentMethod}</p>
-                            <br/>
-                            <a href="${window.location.origin}/admin" style="background: #E11D48; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Manage Order</a>
-                          </div>
-                        `
-                      })
-                    }).catch(err => console.error("Admin order email failed:", err));
-                  }
-                }
-              }
+                    <!-- Footer -->
+                    <div style="margin-top: 80px; text-align: center; border-top: 1px solid #1A1A1A; padding-top: 40px; padding-bottom: 40px;">
+                      <p style="font-size: 12px; color: #444444; margin: 0;">
+                        &copy; ${new Date().getFullYear()} ${storeName}. All rights reserved.<br/>
+                        Secure payment processing. You're receiving this because you placed an order on our store.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              `;
+              
+              // 1. Send to Customer
+              fetch('/api/send-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  to: finalOrderData.address?.email,
+                  from: settingsData.fromEmail || undefined,
+                  replyTo: settingsData.supportEmail || undefined,
+                  subject: `Order Confirmed! ${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`} ✨`,
+                  html: emailHtml
+                })
+              }).then(res => res.json())
+                .then(d => console.log("Customer order email dispatched successfully:", d))
+                .catch(err => console.error("Customer email failed:", err));
+
+              // 2. Send to Admin
+              const adminEmailDestination = settingsData.supportEmail || "mdsagaransari65670@gmail.com";
+              fetch('/api/send-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  to: adminEmailDestination,
+                  from: settingsData.fromEmail || undefined,
+                  subject: `New Order Received! ${finalOrderData.orderId} 🛍️`,
+                  html: `
+                    <div style="font-family: sans-serif; padding: 20px;">
+                      <h2>New Order Received: ${finalOrderData.orderId}</h2>
+                      <p><strong>Customer:</strong> ${finalOrderData.customerName}</p>
+                      <p><strong>Email:</strong> ${finalOrderData.address?.email}</p>
+                      <p><strong>Amount:</strong> ₹${Number(finalOrderData.total || 0).toLocaleString()}</p>
+                      <p><strong>Payment:</strong> ${finalOrderData.paymentMethod}</p>
+                      <br/>
+                      <a href="${window.location.origin}/admin" style="background: #E11D48; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Manage Order</a>
+                    </div>
+                  `
+                })
+              }).then(res => res.json())
+                .then(d => console.log("Admin order email dispatched successfully:", d))
+                .catch(err => console.error("Admin order email failed:", err));
             } catch (emailError) {
               console.error('Error in email notification flow:', emailError);
             }

@@ -109,6 +109,8 @@ service cloud.firestore {
              (!('phoneNumber' in data) || data.phoneNumber is string) &&
              (!('phoneVerified' in data) || data.phoneVerified is bool) &&
              (!('isVerified' in data) || data.isVerified is bool) &&
+             (!('loyaltyPoints' in data) || data.loyaltyPoints is number) &&
+             (!('notifications' in data) || data.notifications is map) &&
              (!('updatedAt' in data) || data.updatedAt is string);
     }
 
@@ -247,7 +249,8 @@ service cloud.firestore {
 
     match /coupons/{couponId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create: if isAuthenticated() && (isAdmin() || request.resource.data.createdBy == request.auth.uid);
+      allow update, delete: if isAdmin();
     }
 
     match /banners/{bannerId} {

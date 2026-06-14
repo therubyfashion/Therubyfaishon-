@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db, auth } from '../firebase';
 import { signOut, updatePassword, updateEmail, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
-import { doc, updateDoc, collection, query, getDocs, where } from 'firebase/firestore';
+import { doc, updateDoc, collection, query, getDocs, where, setDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -35,14 +35,18 @@ import {
   Ticket
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useCart } from '../contexts/CartContext';
 
 export default function Settings() {
   const { user, profile } = useAuth();
+  const { setAppliedPromo, total: cartTotal } = useCart();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [activeView, setActiveView] = React.useState<'main' | 'security' | 'notifications' | 'preferences' | 'privacy' | 'coupons'>('main');
   const [loading, setLoading] = React.useState(false);
   const [coupons, setCoupons] = React.useState<any[]>([]);
+  const [refreshCoupons, setRefreshCoupons] = React.useState(0);
+  const [isRedeeming, setIsRedeeming] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const tab = searchParams.get('tab');
@@ -62,7 +66,7 @@ export default function Settings() {
       }
     };
     fetchCoupons();
-  }, []);
+  }, [refreshCoupons]);
 
   // Stats for the "Cool" factor
   const [securityScore] = React.useState(85);
@@ -197,6 +201,76 @@ export default function Settings() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRedeemPoints = async (option: { id: string; name: string; cost: number; value: number }) => {
+    if (!user) {
+      toast.error("Please log in to redeem points.");
+      return;
+    }
+
+    const currentPoints = profile?.loyaltyPoints || 0;
+    if (currentPoints < option.cost) {
+      toast.error("Insufficient loyalty points for this reward.");
+      return;
+    }
+
+    setIsRedeeming(option.id);
+    const toastId = toast.loading(`Minting your ${option.name}... ⚜️`);
+
+    try {
+      const randomId = Math.random().toString(36).substring(2, 6).toUpperCase();
+      const couponCode = `LP${option.value}-${randomId}`;
+
+      const couponRef = doc(db, 'coupons', couponCode);
+      const expiry = new Date();
+      expiry.setDate(expiry.getDate() + 30); // 30 days valid
+
+      await setDoc(couponRef, {
+        code: couponCode,
+        discountType: 'fixed',
+        discountValue: option.value,
+        value: option.value,
+        isActive: true,
+        expiryDate: expiry.toISOString(),
+        createdBy: user.uid,
+        createdAt: new Date().toISOString()
+      });
+
+      const userRef = doc(db, 'users', user.uid);
+      const nextPoints = currentPoints - option.cost;
+      await updateDoc(userRef, {
+        loyaltyPoints: nextPoints
+      });
+
+      const localUserRaw = localStorage.getItem('ruby_local_user');
+      if (localUserRaw) {
+        try {
+          const parsed = JSON.parse(localUserRaw);
+          parsed.loyaltyPoints = nextPoints;
+          localStorage.setItem('ruby_local_user', JSON.stringify(parsed));
+        } catch (err) {}
+      }
+
+      toast.success(`${option.name} unlocked successfully! Code: ${couponCode} 🎉`, { id: toastId });
+      setRefreshCoupons(prev => prev + 1);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || "Redemption failed. Please try again.", { id: toastId });
+    } finally {
+      setIsRedeeming(null);
+    }
+  };
+
+  const handleApplyCouponToCart = (coupon: any) => {
+    let discountAmount = 0;
+    if (coupon.discountType === 'percentage') {
+      discountAmount = cartTotal * (Number(coupon.value || coupon.discountValue) / 100);
+    } else {
+      discountAmount = Number(coupon.value || coupon.discountValue);
+    }
+    setAppliedPromo({ code: coupon.code, discount: discountAmount });
+    toast.success(`Coupon "${coupon.code}" automatically applied to your active Cart! 🛍️`);
   };
 
   const handleClearSessions = () => {
@@ -640,7 +714,7 @@ export default function Settings() {
                className="space-y-6"
             >
               {/* Points Card */}
-              <div className="bg-[#1A2C54] rounded-[2.5rem] p-8 text-white relative overflow-hidden shadow-xl shadow-blue-900/10 mb-8">
+              <div className="bg-[#1A2C54] rounded-[2.5rem] p-8 text-white relative overflow-hidden shadow-xl shadow-blue-900/10 mb-6">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-ruby/20 rounded-full blur-3xl -mr-16 -mt-16" />
                 <div className="relative z-10 flex flex-col items-center text-center space-y-4">
                   <div className="w-16 h-16 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center text-ruby border border-white/10">
@@ -651,6 +725,69 @@ export default function Settings() {
                     <h2 className="text-5xl font-black tracking-tight">{profile?.loyaltyPoints || 0}</h2>
                   </div>
                   <p className="text-[11px] text-gray-400 max-w-[200px]">Use these points for exclusive discounts at checkout.</p>
+                </div>
+              </div>
+
+              {/* Points Redemption Section */}
+              <div className="space-y-4 mb-6">
+                <div className="px-2 text-left">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.15em] text-[#1A2C54] flex items-center gap-1.5">
+                    <Gift size={14} className="text-ruby" /> Convert Points to Cash Coupons
+                  </h3>
+                  <p className="text-[10px] text-gray-400 mt-0.5 font-medium leading-relaxed">Spend your loyalty points to instantly unlock high-value store discount vouchers.</p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {[
+                    { id: 'voucher_100', name: '₹100 Store Voucher', cost: 100, value: 100, perk: 'Flat ₹100 Off' },
+                    { id: 'voucher_250', name: '₹250 Elite Voucher', cost: 250, value: 250, perk: 'Flat ₹250 Off' },
+                    { id: 'voucher_550', name: '₹550 Prestige Voucher', cost: 500, value: 550, perk: 'Flat ₹550 Off (+₹50 Bonus!)' },
+                    { id: 'voucher_1200', name: '₹1200 Royale Voucher', cost: 1000, value: 1200, perk: 'Flat ₹1200 Off (+₹200 Bonus!)' },
+                  ].map((voucher) => {
+                    const isAffordable = (profile?.loyaltyPoints || 0) >= voucher.cost;
+                    const loadingThis = isRedeeming === voucher.id;
+
+                    return (
+                      <div 
+                        key={voucher.id} 
+                        className={cn(
+                          "bg-white p-5 rounded-3xl border transition-all relative overflow-hidden flex flex-col justify-between h-44 group text-left",
+                          isAffordable ? "border-gray-100 hover:border-ruby/30 shadow-sm hover:shadow" : "border-gray-100 opacity-75"
+                        )}
+                      >
+                        {/* Ticket notch curves */}
+                        <div className="absolute left-0 top-1/2 -ml-2 w-4 h-4 rounded-full bg-gray-50 border-r border-gray-100 shrink-0 z-10" />
+                        <div className="absolute right-0 top-1/2 -mr-2 w-4 h-4 rounded-full bg-gray-50 border-l border-gray-100 shrink-0 z-10" />
+
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 text-xs text-amber-500 font-bold">
+                              <Gift size={14} />
+                              <span>{voucher.cost} Points</span>
+                            </div>
+                            <span className="text-[9px] font-black uppercase tracking-widest text-[#1A2C54]/50 group-hover:text-ruby group-hover:opacity-100 transition-colors">Voucher</span>
+                          </div>
+                          <h4 className="text-sm font-black text-[#1A2C54] tracking-tight mt-1">{voucher.name}</h4>
+                          <p className="text-[10px] font-medium text-emerald-600">{voucher.perk}</p>
+                        </div>
+
+                        <button
+                          disabled={!isAffordable || isRedeeming !== null}
+                          onClick={() => handleRedeemPoints(voucher)}
+                          className={cn(
+                            "w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center",
+                            loadingThis 
+                              ? "bg-gray-100 text-gray-400 cursor-not-allowed" 
+                              : isAffordable 
+                                ? "bg-ruby text-white hover:bg-[#1A2C54] shadow-sm hover:shadow" 
+                                : "bg-gray-50 text-gray-400 cursor-not-allowed"
+                          )}
+                        >
+                          {loadingThis ? 'Minting...' : isAffordable ? 'Redeem Voucher' : 'Not Enough Points'}
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -668,12 +805,12 @@ export default function Settings() {
                     <p className="text-xs font-bold text-gray-400 uppercase tracking-widest leading-relaxed">No special coupons available<br/>right now. Check back soon!</p>
                   </div>
                 ) : (
-                  <div className="grid gap-4">
+                  <div className="grid gap-4 text-left">
                     {coupons.map((coupon) => (
-                      <div key={coupon.id} className="bg-white p-6 rounded-[2rem] border border-gray-100 flex items-center justify-between group overflow-hidden relative">
+                      <div key={coupon.id} className="bg-white p-6 rounded-[2rem] border border-gray-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group overflow-hidden relative">
                         <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-ruby opacity-20 group-hover:opacity-100 transition-opacity" />
                         <div className="flex items-center gap-5">
-                          <div className="w-12 h-12 bg-ruby/5 text-ruby rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                          <div className="w-12 h-12 bg-ruby/5 text-ruby rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform shrink-0">
                             <Tag size={20} />
                           </div>
                           <div>
@@ -681,17 +818,30 @@ export default function Settings() {
                             <p className="text-[10px] text-ruby font-bold uppercase tracking-wider">
                               {coupon.discountType === 'percentage' ? `${coupon.discountValue}% OFF` : `₹${coupon.discountValue} OFF`}
                             </p>
+                            {coupon.expiryDate && (
+                              <p className="text-[8px] text-gray-400 font-medium mt-0.5">
+                                Expires: {new Date(coupon.expiryDate).toLocaleDateString()}
+                              </p>
+                            )}
                           </div>
                         </div>
-                        <button 
-                          onClick={() => {
-                            navigator.clipboard.writeText(coupon.code);
-                            toast.success("Coupon code copied!");
-                          }}
-                          className="px-4 py-2 bg-gray-50 hover:bg-[#1A2C54] hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm"
-                        >
-                          Copy
-                        </button>
+                        <div className="flex items-center gap-2 w-full sm:w-auto self-stretch shrink-0">
+                          <button 
+                            onClick={() => {
+                              navigator.clipboard.writeText(coupon.code);
+                              toast.success("Coupon code copied!");
+                            }}
+                            className="flex-1 sm:flex-none px-4 py-2.5 bg-gray-50 hover:bg-[#1A2C54] hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm"
+                          >
+                            Copy
+                          </button>
+                          <button 
+                            onClick={() => handleApplyCouponToCart(coupon)}
+                            className="flex-1 sm:flex-none px-4 py-2.5 bg-[#1A2C54] hover:bg-ruby text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm"
+                          >
+                            Apply to Cart
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>

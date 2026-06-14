@@ -24,7 +24,8 @@ if (typeof window !== 'undefined') {
 
 // Initialize Firestore with long-polling to prevent WebSocket connection failures inside browser iframes
 export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true
+  experimentalForceLongPolling: true,
+  experimentalAutoDetectLongPolling: false
 }, firebaseConfig.firestoreDatabaseId);
 
 // Connection Verification Probe on App Initiation
