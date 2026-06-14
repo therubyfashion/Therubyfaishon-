@@ -1222,6 +1222,8 @@ export default function AdminDashboard() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const dashboardLoadTime = useRef(new Date().toISOString());
+  const isInitialOrdersRef = useRef(true);
 
   useEffect(() => {
     // Initialize audio
@@ -1230,6 +1232,59 @@ export default function AdminDashboard() {
     } else if (audioRef.current && settings.notificationSound) {
       audioRef.current.src = settings.notificationSound;
     }
+  }, [settings.notificationSound]);
+
+  useEffect(() => {
+    // Live subscriber for brand new orders that plays custom selected sound
+    const q = query(
+      collection(db, 'orders'),
+      orderBy('createdAt', 'desc'),
+      limit(10)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (isInitialOrdersRef.current) {
+        isInitialOrdersRef.current = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const orderData = change.doc.data();
+          // Verify with load time that it's a completely new active order
+          if (orderData.createdAt && new Date(orderData.createdAt) > new Date(dashboardLoadTime.current)) {
+            // 1. Play selected premium alert sound from Settings!
+            if (audioRef.current && settings.notificationSound) {
+              audioRef.current.play().catch(playErr => {
+                console.warn("Audio autoplay blocked/failed:", playErr);
+              });
+            }
+
+            // 2. Show beautiful Sonner Live Alert with Action to view/manage
+            toast.success(`🛒 Live Order Received: ${orderData.orderId || 'New Order'}`, {
+              description: `${orderData.customerName || 'Customer'} placed an order of ₹${Number(orderData.total || 0).toLocaleString()} via ${orderData.paymentMethod || 'COD'}`,
+              duration: 12000,
+              action: {
+                label: "Manage",
+                onClick: () => {
+                  setActiveTab('orders');
+                  if (typeof fetchDashboardData === 'function') {
+                    fetchDashboardData();
+                  }
+                }
+              }
+            });
+
+            // 3. Incrementally refresh metrics
+            fetchDashboardData();
+          }
+        }
+      });
+    }, (error) => {
+      console.error("Live order listener error:", error);
+    });
+
+    return () => unsubscribe();
   }, [settings.notificationSound]);
 
   useEffect(() => {
