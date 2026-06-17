@@ -5,9 +5,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { ShoppingBag, AlertTriangle, TrendingUp, Package, ChevronRight, Search } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { OrderItemSkeleton, Skeleton } from '../components/Skeleton';
+import { useNavigate } from 'react-router-dom';
 
 export default function MyOrders() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -151,8 +153,8 @@ export default function MyOrders() {
                     {order.items?.map((item: any, idx: number) => (
                       <div key={idx} className="flex items-center space-x-4">
                         <div className="w-16 h-20 bg-gray-50 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100">
-                          {item.images?.[0] ? (
-                            <img src={item.images[0]} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          {(item.image || item.images?.[0]) ? (
+                            <img src={item.image || item.images[0]} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-gray-300">
                               <ShoppingBag size={20} />
@@ -163,7 +165,7 @@ export default function MyOrders() {
                           <h4 className="text-sm font-bold text-[#1A2C54]">{item.name}</h4>
                           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Size: {item.selectedSize} • Qty: {item.quantity}</p>
                         </div>
-                        <p className="text-sm font-bold text-[#1A2C54]">₹{Number(item.price * item.quantity).toLocaleString()}</p>
+                        <p className="text-sm font-bold text-[#1A2C54]">₹{Number((item.price || 0) * (item.quantity || 1)).toLocaleString()}</p>
                       </div>
                     ))}
                   </div>
@@ -175,13 +177,16 @@ export default function MyOrders() {
                     </div>
                     <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
                       <button 
-                        onClick={() => window.location.href = `/track/${order.orderId || order.id}`}
+                        onClick={() => navigate(`/track/${order.orderId || order.id}`, { state: { email: order.email || order.address?.email } })}
                         className="w-full sm:w-auto px-8 py-3 bg-ruby/[0.05] text-ruby rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-ruby hover:text-white transition-all flex items-center justify-center space-x-2 border border-ruby/10"
                       >
                         <TrendingUp size={14} />
                         <span>Track Order</span>
                       </button>
-                      <button className="w-full sm:w-auto px-8 py-3 bg-gray-50 text-[#1A2C54] rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-100 transition-all flex items-center justify-center space-x-2 group">
+                      <button 
+                        onClick={() => navigate('/order-success', { state: order })}
+                        className="w-full sm:w-auto px-8 py-3 bg-gray-50 text-[#1A2C54] rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-100 transition-all flex items-center justify-center space-x-2 group"
+                      >
                         <span>View Details</span>
                         <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
                       </button>

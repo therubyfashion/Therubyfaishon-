@@ -1,13 +1,42 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Mail, Phone, MapPin, Send } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
+import { db } from '../firebase';
+import { collection, addDoc } from 'firebase/firestore';
 
 export default function Contact() {
-  const handleSubmit = (e: React.FormEvent) => {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [subject, setSubject] = useState('General Inquiry');
+  const [message, setMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    toast.success("Message sent! We'll get back to you shortly.");
-    (e.target as HTMLFormElement).reset();
+    setIsSubmitting(true);
+    try {
+      await addDoc(collection(db, 'tickets'), {
+        name: `${firstName} ${lastName}`.trim(),
+        email,
+        subject,
+        message,
+        createdAt: new Date().toISOString(),
+        status: 'open'
+      });
+      toast.success("Message sent! We'll get back to you shortly.");
+      setFirstName('');
+      setLastName('');
+      setEmail('');
+      setSubject('General Inquiry');
+      setMessage('');
+    } catch (err: any) {
+      console.error("Failed to submit support ticket:", err.message);
+      toast.error("Could not send message. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -72,6 +101,8 @@ export default function Contact() {
                 <input 
                   type="text" 
                   required
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
                   className="w-full border-b border-gray-200 bg-transparent py-3 text-sm focus:outline-none focus:border-ruby transition-colors"
                 />
               </div>
@@ -80,6 +111,8 @@ export default function Contact() {
                 <input 
                   type="text" 
                   required
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
                   className="w-full border-b border-gray-200 bg-transparent py-3 text-sm focus:outline-none focus:border-ruby transition-colors"
                 />
               </div>
@@ -89,12 +122,18 @@ export default function Contact() {
               <input 
                 type="email" 
                 required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="w-full border-b border-gray-200 bg-transparent py-3 text-sm focus:outline-none focus:border-ruby transition-colors"
               />
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Subject</label>
-              <select className="w-full border-b border-gray-200 bg-transparent py-3 text-sm focus:outline-none focus:border-ruby transition-colors">
+              <select 
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className="w-full border-b border-gray-200 bg-transparent py-3 text-sm focus:outline-none focus:border-ruby transition-colors"
+              >
                 <option>General Inquiry</option>
                 <option>Order Support</option>
                 <option>Wholesale</option>
@@ -106,14 +145,17 @@ export default function Contact() {
               <textarea 
                 required
                 rows={4}
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
                 className="w-full border border-gray-200 bg-transparent p-4 text-sm focus:outline-none focus:border-ruby transition-colors"
               />
             </div>
             <button 
               type="submit"
-              className="w-full bg-black text-white py-5 text-sm font-bold uppercase tracking-widest hover:bg-ruby transition-all flex items-center justify-center group"
+              disabled={isSubmitting}
+              className="w-full bg-black text-white py-5 text-sm font-bold uppercase tracking-widest hover:bg-ruby transition-all flex items-center justify-center group disabled:opacity-55 disabled:hover:bg-black"
             >
-              Send Message
+              {isSubmitting ? "Sending..." : "Send Message"}
               <Send size={16} className="ml-3 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
             </button>
           </form>

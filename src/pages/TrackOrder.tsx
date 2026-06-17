@@ -47,66 +47,19 @@ export default function TrackOrder() {
       const cleanOid = oid.trim();
       const cleanEmail = emailStr.trim().toLowerCase();
       
-      // We try multiple variations of orderId format since users might enter with/without #, with/without TRF, or uppercase/lowercase
-      const cleanDigits = cleanOid.replace(/^#/, '').replace(/^TRF/i, '');
-      const defaultId = `#TRF${cleanDigits.padStart(4, '0')}`;
+      console.log("🔍 Fetching order details via secure server proxy...");
+      const response = await fetch('/api/track-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: cleanOid, email: cleanEmail })
+      });
 
-      const idVariations = [
-        cleanOid,
-        cleanOid.toUpperCase(),
-        cleanOid.toLowerCase(),
-        cleanOid.startsWith('#') ? cleanOid : `#${cleanOid}`,
-        cleanOid.startsWith('#') ? cleanOid.substring(1) : cleanOid,
-        `#TRF${cleanDigits}`,
-        `TRF${cleanDigits}`,
-        `#TRF${cleanDigits.toUpperCase()}`,
-        `TRF${cleanDigits.toUpperCase()}`,
-        `#TRF${cleanDigits.toLowerCase()}`,
-        `TRF${cleanDigits.toLowerCase()}`,
-        `#TRF${cleanDigits.padStart(4, '0')}`,
-        `TRF${cleanDigits.padStart(4, '0')}`,
-        defaultId
-      ];
-
-      console.log("🔍 Looking for order with variations:", idVariations, "Email:", cleanEmail);
-
-      const ordersRef = collection(db, 'orders');
-      let foundOrder = null;
-
-      // Primary query: Strict match on ID and Email
-      const q = query(
-        ordersRef, 
-        where('orderId', 'in', idVariations),
-        where('email', '==', cleanEmail),
-        limit(1)
-      );
-
-      const querySnapshot = await getDocs(q);
-      
-      if (!querySnapshot.empty) {
-        foundOrder = { id: querySnapshot.docs[0].id, ...querySnapshot.docs[0].data() };
-      } else {
-        // Fallback: Some orders might store email in address.email
-        const q2 = query(
-          ordersRef,
-          where('orderId', 'in', idVariations),
-          limit(10) // Small limit to filter client-side
-        );
-        const snapshot2 = await getDocs(q2);
-        const match = snapshot2.docs.find(doc => {
-          const data = doc.data();
-          const addrEmail = data.address?.email;
-          return addrEmail?.toLowerCase() === cleanEmail.toLowerCase();
-        });
-        
-        if (match) {
-          foundOrder = { id: match.id, ...match.data() };
-        }
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || "Order not found. Please verify that the Order ID and Email are correct.");
       }
 
-      if (!foundOrder) {
-        throw new Error("Order not found. Please verify that the Order ID and Email are correct. (Note: Order ID may be case-sensitive)");
-      }
+      const foundOrder = await response.json();
 
       setOrder(foundOrder);
       setShowSearch(false);
@@ -481,9 +434,10 @@ export default function TrackOrder() {
             >
               <div className="w-24 h-24 bg-white rounded-2xl overflow-hidden shadow-sm flex-shrink-0 border border-gray-100 p-1">
                 <img 
-                  src={order.items?.[0]?.image || 'https://via.placeholder.com/150'} 
+                  src={order.items?.[0]?.image || order.items?.[0]?.images?.[0] || 'https://via.placeholder.com/150'} 
                   alt={order.items?.[0]?.name}
                   className="w-full h-full object-cover rounded-xl"
+                  referrerPolicy="no-referrer"
                 />
               </div>
               <div className="flex-grow flex flex-col justify-between py-1">

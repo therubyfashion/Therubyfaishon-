@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 import admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
 import { initializeApp as initClientApp, getApps as getClientApps } from 'firebase/app';
-import { getFirestore as getClientFirestore, doc as cDoc, getDoc as cGetDoc, collection as cCollection, getDocs as cGetDocs, limit as cLimit, query as cQuery, where as cWhere } from 'firebase/firestore';
+import { getFirestore as getClientFirestore, doc as cDoc, getDoc as cGetDoc, collection as cCollection, getDocs as cGetDocs, limit as cLimit, query as cQuery, where as cWhere, addDoc as cAddDoc, updateDoc as cUpdateDoc, onSnapshot as cOnSnapshot } from 'firebase/firestore';
 import fs from 'fs';
 import axios from 'axios';
 import * as OneSignal from 'onesignal-node';
@@ -244,7 +244,16 @@ const seedSettingsIfEmpty = async (targetDb: any) => {
 
 // Start initialization in background to avoid blocking
 setTimeout(() => {
-  initializeFirebase().catch(() => {});
+  initializeFirebase()
+    .then(() => {
+      console.log("🔥 [push-service] Firebase drivers online. Starting background push listeners...");
+      initializeAutoPushes().catch((err: any) => {
+        console.error("❌ Failed to initiate auto push listeners:", err.message);
+      });
+    })
+    .catch((err: any) => {
+      console.error("❌ Failed to initialize resilient Firebase backend:", err.message);
+    });
 }, 2000);
 
 // Helper to send OneSignal notifications via axios
@@ -318,6 +327,601 @@ async function sendOneSignalNotification(notification: any, config?: { appId?: s
     
     throw axiosErr;
   }
+}
+
+async function logNotificationToDatabase(title: string, body: string, recipient: string, status: string) {
+  const logData = {
+    title,
+    body,
+    recipient,
+    status,
+    timestamp: new Date().toISOString()
+  };
+  try {
+    if (clientDb && isClientDbReady) {
+      await cAddDoc(cCollection(clientDb, 'push_notification_logs'), logData);
+    } else if (db && isDbWriteable !== false) {
+      await db.collection('push_notification_logs').add(logData);
+    }
+    console.log(`📝 Logged notification: [${status}] ${title}`);
+  } catch (err: any) {
+    console.error("Failed to log notification:", err.message);
+  }
+}
+
+async function sendAdminNotification(title: string, body: string, url: string = '/') {
+  try {
+    console.log(`[push-service] Triggering sendAdminNotification: "${title}" - "${body}"`);
+    
+    const notification: any = {
+      contents: { en: body },
+      headings: { en: title },
+      url: url,
+    };
+
+    let adminPlayerIds: string[] = [];
+    if (db) {
+      try {
+        const adminsSnap = await db.collection('users').where('role', '==', 'admin').get();
+        if (adminsSnap && !adminsSnap.empty) {
+          adminsSnap.forEach((doc: any) => {
+            const uData = doc.data();
+            if (uData && uData.onesignalId) {
+              adminPlayerIds.push(String(uData.onesignalId).trim());
+            }
+          });
+        }
+      } catch (dbErr: any) {
+        console.warn("sendAdminNotification: Firestore Admin lookup failed:", dbErr.message);
+      }
+    }
+    
+    if (adminPlayerIds.length === 0 && clientDb && isClientDbReady) {
+      try {
+        const adminsSnap = await cGetDocs(cQuery(
+          cCollection(clientDb, 'users'),
+          cWhere('role', '==', 'admin')
+        ));
+        if (!adminsSnap.empty) {
+          adminsSnap.forEach((doc: any) => {
+            const uData = doc.data();
+            if (uData && uData.onesignalId) {
+              adminPlayerIds.push(String(uData.onesignalId).trim());
+            }
+          });
+        }
+      } catch (clientDbErr: any) {
+        console.warn("sendAdminNotification: Client SDK Admin lookup failed:", clientDbErr.message);
+      }
+    }
+
+    let resultStatus = "success";
+
+    try {
+      const filterNotif = {
+        ...notification,
+        filters: [{ field: "tag", key: "role", relation: "=", value: "admin" }]
+      };
+      await sendOneSignalNotification(filterNotif);
+    } catch (fErr: any) {
+      console.warn("sendAdminNotification tag filter warning:", fErr.message);
+      resultStatus = "warning";
+    }
+
+    if (adminPlayerIds.length > 0) {
+      try {
+        const directNotif = {
+          ...notification,
+          include_player_ids: adminPlayerIds,
+          include_subscription_ids: adminPlayerIds
+        };
+        await sendOneSignalNotification(directNotif);
+        resultStatus = "success";
+      } catch (dErr: any) {
+        console.warn("sendAdminNotification direct player trigger warning:", dErr.message);
+      }
+    }
+
+    await logNotificationToDatabase(title, body, "admin", resultStatus);
+    return { success: true, status: resultStatus };
+  } catch (err: any) {
+    console.error("sendAdminNotification error:", err.message);
+    await logNotificationToDatabase(title, body, "admin", "failed");
+    return { success: false, error: err.message };
+  }
+}
+
+async function sendCustomerNotification(userId: string, title: string, body: string, url: string = '/') {
+  try {
+    if (!userId) {
+      console.warn("[push-service] sendCustomerNotification: missing userId");
+      return { success: false, error: "userId is required" };
+    }
+    console.log(`[push-service] Triggering sendCustomerNotification to ${userId}: "${title}" - "${body}"`);
+
+    let onesignalId = null;
+    let userEmail = "";
+    if (db) {
+      try {
+        const userDoc = await db.collection('users').doc(String(userId)).get();
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          onesignalId = userData?.onesignalId || null;
+          userEmail = userData?.email || "";
+        }
+      } catch (dbErr: any) {
+        console.warn("sendCustomerNotification: Admin SDK lookup warning:", dbErr.message);
+      }
+    }
+
+    if (!onesignalId && clientDb && isClientDbReady) {
+      try {
+        const userDocSnapshot = await cGetDoc(cDoc(clientDb, 'users', String(userId)));
+        if (userDocSnapshot.exists()) {
+          const userData = userDocSnapshot.data();
+          onesignalId = userData?.onesignalId || null;
+          userEmail = userData?.email || "";
+        }
+      } catch (clientDbErr: any) {
+        console.warn("sendCustomerNotification: Client SDK lookup warning:", clientDbErr.message);
+      }
+    }
+
+    const notification: any = {
+      contents: { en: body },
+      headings: { en: title },
+      url: url,
+      include_external_user_ids: [String(userId)],
+      include_aliases: {
+        external_id: [String(userId)]
+      }
+    };
+
+    if (onesignalId) {
+      if (String(onesignalId).startsWith('simulated_push_')) {
+        console.log(`[push-service] Simulating push delivery to: ${onesignalId}`);
+        await logNotificationToDatabase(title, body, userEmail || userId, "simulated");
+        return { success: true, status: "simulated" };
+      }
+      notification.include_player_ids = [onesignalId];
+      notification.include_subscription_ids = [onesignalId];
+    }
+
+    const response = await sendOneSignalNotification(notification);
+    const responseData = response?.data;
+    
+    let resultStatus = "success";
+    if (responseData?.errors && Array.isArray(responseData.errors)) {
+      const errorMsg = responseData.errors.join(', ');
+      if (errorMsg.includes("not subscribed") || errorMsg.includes("not found") || errorMsg.includes("players are not subscribed")) {
+        resultStatus = "warning";
+      }
+    }
+
+    await logNotificationToDatabase(title, body, userEmail || userId, resultStatus);
+    return { success: true, status: resultStatus };
+  } catch (err: any) {
+    console.error("sendCustomerNotification error:", err.message);
+    const errLower = String(err.message || '').toLowerCase();
+    let finalStatus = "failed";
+    if (errLower.includes("not subscribed") || errLower.includes("players are not subscribed") || errLower.includes("not found")) {
+      finalStatus = "warning";
+    }
+    await logNotificationToDatabase(title, body, userId, finalStatus);
+    return { success: false, error: err.message };
+  }
+}
+
+async function runCartAbandonmentRecovery() {
+  let carts: any[] = [];
+  if (clientDb && isClientDbReady) {
+    try {
+      const snap = await cGetDocs(cQuery(
+        cCollection(clientDb, 'carts'),
+        cWhere('status', '==', 'active')
+      ));
+      snap.forEach(doc => {
+        carts.push({ id: doc.id, ...doc.data() });
+      });
+    } catch (e: any) {
+      console.warn("Recovery cart query failed:", e.message);
+    }
+  }
+
+  const now = Date.now();
+  for (const cart of carts) {
+    if (!cart.userId || !cart.items || cart.items.length === 0) continue;
+    const updatedAt = cart.updatedAt ? new Date(cart.updatedAt).getTime() : now;
+    const minutesElapsed = (now - updatedAt) / (60 * 1000);
+    if (minutesElapsed >= 5 && !cart.abandonedAlertSent) {
+      console.log(`🛒 Recovering abandoned cart for user ${cart.userId}`);
+      await sendCustomerNotification(
+        cart.userId,
+        "Complete Your Purchase 🛍️",
+        "Your clothing items are waiting in your cart. Shop now before they sell out!",
+        "/cart"
+      );
+      try {
+        if (clientDb && isClientDbReady) {
+          await cUpdateDoc(cDoc(clientDb, 'carts', cart.id), { abandonedAlertSent: true });
+        }
+      } catch (err) {}
+    }
+  }
+}
+
+let isPushServiceInitialized = false;
+
+async function initializeAutoPushes() {
+  if (isPushServiceInitialized) return;
+  
+  let retries = 0;
+  while (!clientDb && retries < 15) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    retries++;
+  }
+
+  if (!clientDb) {
+    console.warn("⚠️ [push-service] clientDb is inactive. Automatic events suspended.");
+    return;
+  }
+
+  console.log("🚀 [push-service] Booting database trackers...");
+  isPushServiceInitialized = true;
+
+  const orderStatusCache = new Map<string, string>();
+  const userPointsCache = new Map<string, number>();
+  const productStockCache = new Map<string, number>();
+  const productPriceCache = new Map<string, number>();
+
+  let isOrdersLoaded = false;
+  let isUsersLoaded = false;
+  let isReviewsLoaded = false;
+  let isTicketsLoaded = false;
+  let isProductsLoaded = false;
+  let isCouponsLoaded = false;
+  let isPromotionsLoaded = false;
+
+  // 1. Orders
+  try {
+    cOnSnapshot(cCollection(clientDb, 'orders'), (snapshot) => {
+      if (!isOrdersLoaded) {
+        snapshot.docs.forEach(doc => {
+          const order = doc.data();
+          orderStatusCache.set(doc.id, order.status || '');
+        });
+        isOrdersLoaded = true;
+        console.log(`📡 [push-service] Orders listener cached ${snapshot.size} entries.`);
+        return;
+      }
+
+      snapshot.docChanges().forEach(async (change) => {
+        const orderId = change.doc.id;
+        const order = change.doc.data();
+
+        if (change.type === 'added') {
+          orderStatusCache.set(orderId, order.status || '');
+          
+          await sendAdminNotification(
+            "New Order Received 🛍️",
+            `Order #${orderId} of ₹${order.total || 0} has been placed.`,
+            `/admin?tab=orders`
+          );
+
+          if (order.userId) {
+            await sendCustomerNotification(
+              order.userId,
+              "Order Successfully Placed 🎉",
+              "Your order has been received. Track status using view details!",
+              `/track/${orderId}`
+            );
+          }
+
+          if (Number(order.total || 0) >= 5000) {
+            await sendAdminNotification(
+              "High Value Order Alert! ⚠️",
+              `Large order received: Order #${orderId} total is ₹${order.total}!`,
+              `/admin?tab=orders`
+            );
+          }
+        }
+
+        if (change.type === 'modified') {
+          const oldStatus = orderStatusCache.get(orderId) || '';
+          const newStatus = order.status || '';
+          orderStatusCache.set(orderId, newStatus);
+
+          if (oldStatus !== newStatus && newStatus) {
+            console.log(`[push-service] Status updated: ${orderId} (${oldStatus} -> ${newStatus})`);
+
+            switch (String(newStatus).trim()) {
+              case 'Confirmed':
+              case 'Paid':
+                await sendAdminNotification("Payment Received 💳", `Payment received for Order #${orderId}.`);
+                if (order.userId) {
+                  await sendCustomerNotification(order.userId, "Order Confirmed ✅", "Your order is confirmed.");
+                }
+                break;
+              case 'Processing':
+                if (order.userId) {
+                  await sendCustomerNotification(order.userId, "Order Processing ⚙️", "We are preparing your order.");
+                }
+                break;
+              case 'Shipped':
+                if (order.userId) {
+                  await sendCustomerNotification(order.userId, "Order Shipped 🚚", "Your package is on the way!");
+                }
+                break;
+              case 'In Delivery':
+              case 'Out for Delivery':
+                if (order.userId) {
+                  await sendCustomerNotification(order.userId, "Out For Delivery 📍", "Your order will arrive soon.");
+                }
+                break;
+              case 'Delivered':
+                if (order.userId) {
+                  await sendCustomerNotification(order.userId, "Order Delivered 🎁", "Your package has been delivered.");
+                  await sendCustomerNotification(order.userId, "Rate Your Purchase ⭐", "Share your experience with the product.");
+                }
+                break;
+              case 'Cancelled':
+                await sendAdminNotification("Cancellation Request ❌", `Order #${orderId} was cancelled.`);
+                if (order.userId) {
+                  await sendCustomerNotification(order.userId, "Order Cancelled 🚫", "Your order has been cancelled.");
+                }
+                break;
+              case 'Refunded':
+                if (order.userId) {
+                  await sendCustomerNotification(order.userId, "Refund Initiated 💰", "Refund process has started.");
+                  await sendCustomerNotification(order.userId, "Refund Completed ✅", "Refund has been completed.");
+                }
+                break;
+            }
+          }
+        }
+      });
+    }, (err) => {
+      console.error("Orders listener error:", err.message);
+    });
+  } catch (err: any) {
+    console.error("Orders listener setup error:", err.message);
+  }
+
+  // 2. Users
+  try {
+    cOnSnapshot(cCollection(clientDb, 'users'), (snapshot) => {
+      if (!isUsersLoaded) {
+        snapshot.docs.forEach(doc => {
+          const u = doc.data();
+          userPointsCache.set(doc.id, u.loyaltyPoints || 0);
+        });
+        isUsersLoaded = true;
+        return;
+      }
+
+      snapshot.docChanges().forEach(async (change) => {
+        const userId = change.doc.id;
+        const user = change.doc.data();
+
+        if (change.type === 'added') {
+          userPointsCache.set(userId, user.loyaltyPoints || 0);
+          await sendAdminNotification(
+            "New User Registered 👤",
+            `${user.displayName || user.email || 'A user'} joined The Ruby Fashion.`
+          );
+
+          await sendCustomerNotification(
+            userId,
+            "Welcome to The Ruby Fashion! ✨",
+            "Thank you for joining us. Check out our latest selection!",
+            "/"
+          );
+        }
+
+        if (change.type === 'modified') {
+          const oldPoints = userPointsCache.get(userId) ?? 0;
+          const newPoints = user.loyaltyPoints ?? 0;
+          userPointsCache.set(userId, newPoints);
+
+          if (oldPoints !== newPoints) {
+            const thresholds = [100, 250, 500, 1000];
+            for (const t of thresholds) {
+              if (oldPoints < t && newPoints >= t) {
+                await sendCustomerNotification(
+                  userId,
+                  `Loyalty Milestone Achieved: ${t} Points! ⚜️`,
+                  `Fantastic! You have accumulated ${newPoints} points. Convert them inside settings now to unlock special cash vouchers. 🎟️`,
+                  '/settings?tab=coupons'
+                );
+              }
+            }
+          }
+        }
+      });
+    }, (err) => {
+      console.error("Users listener error:", err.message);
+    });
+  } catch (err: any) {
+    console.error("Users listener setup error:", err.message);
+  }
+
+  // 3. Reviews
+  try {
+    cOnSnapshot(cCollection(clientDb, 'reviews'), (snapshot) => {
+      if (!isReviewsLoaded) {
+        isReviewsLoaded = true;
+        return;
+      }
+
+      snapshot.docChanges().forEach(async (change) => {
+        if (change.type === 'added') {
+          const review = change.doc.data();
+          await sendAdminNotification(
+            "New Product Review 💬",
+            `A customer submitted a review for Product ID: ${review.productId || 'Unknown'}.`
+          );
+          await sendAdminNotification(
+            "New Rating Received ⭐",
+            `Product received a new rating of ${review.rating || 5} Stars!`
+          );
+        }
+      });
+    }, (err) => {
+      console.error("Reviews listener error:", err.message);
+    });
+  } catch (err: any) {
+    console.error("Reviews listener setup error:", err.message);
+  }
+
+  // 4. Tickets / Support Messages
+  try {
+    cOnSnapshot(cCollection(clientDb, 'tickets'), (snapshot) => {
+      if (!isTicketsLoaded) {
+        isTicketsLoaded = true;
+        return;
+      }
+
+      snapshot.docChanges().forEach(async (change) => {
+        if (change.type === 'added') {
+          await sendAdminNotification(
+            "New Support Request 🎫",
+            "Customer needs assistance."
+          );
+        }
+      });
+    }, (err) => {
+      console.error("Tickets listener error:", err.message);
+    });
+  } catch (err: any) {
+    console.error("Tickets listener setup error:", err.message);
+  }
+
+  // 5. Products
+  try {
+    cOnSnapshot(cCollection(clientDb, 'products'), (snapshot) => {
+      if (!isProductsLoaded) {
+        snapshot.docs.forEach(doc => {
+          const p = doc.data();
+          productStockCache.set(doc.id, p.stock ?? 0);
+          productPriceCache.set(doc.id, p.price ?? 0);
+        });
+        isProductsLoaded = true;
+        return;
+      }
+
+      snapshot.docChanges().forEach(async (change) => {
+        const productId = change.doc.id;
+        const p = change.doc.data();
+
+        if (change.type === 'added') {
+          productStockCache.set(productId, p.stock ?? 0);
+          productPriceCache.set(productId, p.price ?? 0);
+        }
+
+        if (change.type === 'modified') {
+          const oldStock = productStockCache.get(productId);
+          const newStock = p.stock ?? 0;
+          productStockCache.set(productId, newStock);
+
+          const oldPrice = productPriceCache.get(productId);
+          const newPrice = p.price ?? 0;
+          productPriceCache.set(productId, newPrice);
+
+          if (oldStock !== undefined && oldStock > 0 && newStock === 0) {
+            await sendAdminNotification("Product Out of Stock ❌", `Product "${p.name || productId}" inventory reached zero.`);
+          } else if (oldStock !== undefined && oldStock > 5 && newStock <= 5 && newStock > 0) {
+            await sendAdminNotification("Low Stock Alert ⚠️", `Product "${p.name || productId}" stock is running low (${newStock} left).`);
+          } else if (oldStock !== undefined && oldStock === 0 && newStock > 0) {
+            await sendOneSignalNotification({
+              headings: { en: "Back In Stock! 🛍️" },
+              contents: { en: `Your favorite product "${p.name || 'Clothing item'}" is available again. Grab yours before it goes!` },
+              url: `/product/${productId}`,
+              included_segments: ['Subscribed Users']
+            });
+            await logNotificationToDatabase("Back In Stock", `Product "${p.name || productId}" is back in stock.`, "Subscribed Users", "success");
+          }
+
+          if (oldPrice !== undefined && newPrice < oldPrice) {
+            await sendOneSignalNotification({
+              headings: { en: "Price Drop Alert! 📉" },
+              contents: { en: `Great news! "${p.name || 'Clothing item'}" is now available at a reduced price of ₹${newPrice}. Shop now and save!` },
+              url: `/product/${productId}`,
+              included_segments: ['Subscribed Users']
+            });
+            await logNotificationToDatabase("Price Drop Alert", `Price drop for "${p.name || productId}" to ₹${newPrice}`, "Subscribed Users", "success");
+          }
+        }
+      });
+    }, (err) => {
+      console.error("Products listener error:", err.message);
+    });
+  } catch (err: any) {
+    console.error("Products listener setup error:", err.message);
+  }
+
+  // 6. Coupons
+  try {
+    cOnSnapshot(cCollection(clientDb, 'coupons'), (snapshot) => {
+      if (!isCouponsLoaded) {
+        isCouponsLoaded = true;
+        return;
+      }
+
+      snapshot.docChanges().forEach(async (change) => {
+        if (change.type === 'added') {
+          const coupon = change.doc.data();
+          await sendOneSignalNotification({
+            headings: { en: "New Coupon Available 🎟️" },
+            contents: { en: `Special offer available now! Save big with promo code: ${coupon.code || 'SAVE'}` },
+            url: "/settings?tab=coupons",
+            included_segments: ['Subscribed Users']
+          });
+          await logNotificationToDatabase("New Coupon Available", `Coupon code ${coupon.code || 'SAVE'} created.`, "Subscribed Users", "success");
+        }
+      });
+    }, (err) => {
+      console.error("Coupons listener error:", err.message);
+    });
+  } catch (err: any) {
+    console.error("Coupons listener setup error:", err.message);
+  }
+
+  // 7. Promotions
+  try {
+    cOnSnapshot(cCollection(clientDb, 'promotions'), (snapshot) => {
+      if (!isPromotionsLoaded) {
+        isPromotionsLoaded = true;
+        return;
+      }
+
+      snapshot.docChanges().forEach(async (change) => {
+        const prom = change.doc.data();
+        if (change.type === 'added' || (change.type === 'modified' && prom.status === 'active')) {
+          if (prom.status === 'active') {
+            await sendOneSignalNotification({
+              headings: { en: "Flash Sale Started! ⚡" },
+              contents: { en: `Limited time deals available: ${prom.name || 'Special sale event is active'}. Shop the best deals now!` },
+              url: "/",
+              included_segments: ['Subscribed Users']
+            });
+            await logNotificationToDatabase("Flash Sale Started", `Flash sale "${prom.name || 'Promo'}" started.`, "Subscribed Users", "success");
+          }
+        }
+      });
+    }, (err) => {
+      console.error("Promotions listener error:", err.message);
+    });
+  } catch (err: any) {
+    console.error("Promotions listener setup error:", err.message);
+  }
+
+  setInterval(async () => {
+    try {
+      await runCartAbandonmentRecovery();
+    } catch (e: any) {
+      console.error("Cart Recovery check failed:", e.message);
+    }
+  }, 10 * 60 * 1000);
 }
 
 // Cache for store settings to avoid frequent Firestore calls
@@ -900,166 +1504,247 @@ async function startServer() {
       return res.status(400).json({ error: "Order ID and Email are both required." });
     }
 
-    try {
-      if (!db) {
-        console.log("⏳ Initializing Firebase Admin for tracking...");
-        await initializeFirebase();
-      }
-      
-      if (!db) {
-        return res.status(400).json({ error: "Database is still initializing. Please try again in 2-3 minutes! 💎" });
-      }
-      
-      let orderData: any = null;
-      const inputOid = String(orderId).trim();
-      const cleanOid = inputOid.replace(/^#/, '').trim(); // Remove leading # if present
-      const hashedOid = `#${cleanOid}`;
-      const targetEmail = String(email).trim().toLowerCase();
+    // Force initialize Client Firestore fallback first
+    initializeClientFirestore();
 
-      console.log(`🔍 Tracking Attempt: ID=${inputOid} (Clean=${cleanOid}), Email=${targetEmail}`);
+    const inputOid = String(orderId).trim();
+    const cleanOid = inputOid.replace(/^#/, '').trim(); // Remove leading # if present
+    const hashedOid = `#${cleanOid}`;
+    const targetEmail = String(email).trim().toLowerCase();
 
-      // 1. Try finding by document ID first (if cleanOid looks like a Firestore ID)
-      if (cleanOid.length > 15) {
-        try {
-          const docSnap = await db.collection('orders').doc(cleanOid).get();
-          if (docSnap.exists) {
-            const data = docSnap.data();
-            const customerEmail = String(data?.email || data?.address?.email || data?.customerEmail || '').trim().toLowerCase();
-            if (customerEmail === targetEmail) {
-              orderData = { id: docSnap.id, ...data };
-            }
-          }
-        } catch (e) {
-          console.log("Doc fetch failed, moving to query search...");
-        }
-      }
+    console.log(`🔍 Tracking Attempt: ID=${inputOid} (Clean=${cleanOid}), Email=${targetEmail}`);
+    let orderData: any = null;
 
-      // 2. Query search by variants of orderId field
-      if (!orderData) {
-        // Search for both #0001 AND 0001, and case variations
-        const variants = [
-          hashedOid, 
-          cleanOid, 
-          hashedOid.toUpperCase(), 
-          cleanOid.toUpperCase(),
-          inputOid
-        ];
+    // --- STRATEGY 1: HIGHLY-RESILIENT CLIENT WEB SDK SEARCH ---
+    // Immune to Google Cloud IAM container/service-account restriction issues!
+    if (clientDb && isClientDbReady) {
+      try {
+        console.log("🔍 Resilient Track: Trying Web Client SDK search first...");
         
-        // Remove duplicates and empty strings
-        const uniqueVariants = [...new Set(variants.filter(v => v))];
-        console.log(`🔍 Checking variations: ${JSON.stringify(uniqueVariants)}`);
-
-        for (const variant of uniqueVariants) {
-          // Check 'email', 'address.email', and 'customerEmail' fields in query
-          const emailFields = ['email', 'address.email', 'customerEmail'];
-          
-          for (const emailField of emailFields) {
-            const querySnap = await db.collection('orders')
-              .where('orderId', '==', variant)
-              .where(emailField, '==', targetEmail)
-              .limit(1)
-              .get();
-            
-            if (!querySnap.empty) {
-              orderData = { id: querySnap.docs[0].id, ...querySnap.docs[0].data() };
-              console.log(`✅ Found order by orderId and ${emailField}`);
-              break;
+        // 1. Try finding by document ID first (if cleanOid looks like a Firestore ID)
+        if (cleanOid.length > 15) {
+          try {
+            const docSnap = await cGetDoc(cDoc(clientDb, 'orders', cleanOid));
+            if (docSnap.exists()) {
+              const data = docSnap.data();
+              const customerEmail = String(data?.email || data?.address?.email || data?.customerEmail || '').trim().toLowerCase();
+              if (customerEmail === targetEmail) {
+                orderData = { id: docSnap.id, ...data };
+                console.log("✅ Match found by Doc ID using Client SDK");
+              }
             }
+          } catch (e: any) {
+            console.log("Client SDK Doc ID fetch skipped:", e.message);
           }
-          if (orderData) break;
         }
-      }
 
-      // 3. Fallback: Search by EMAIL first, then filter by Order ID in memory
-      // This is helpful if the field name is slightly off or casing is weird
-      if (!orderData) {
-        console.log("🔍 Fallback: Searching by email first...");
-        const emailOptions = ['email', 'address.email', 'customerEmail'];
-        for (const field of emailOptions) {
-          const emailSnap = await db.collection('orders')
-            .where(field, '==', targetEmail) // Match the lowercase target
-            .limit(20)
-            .get();
+        // 2. Query search by variants of orderId field
+        if (!orderData) {
+          const variants = [
+            hashedOid, 
+            cleanOid, 
+            hashedOid.toUpperCase(), 
+            cleanOid.toUpperCase(),
+            inputOid
+          ];
+          const uniqueVariants = [...new Set(variants.filter(v => v))];
+          console.log(`🔍 Client SDK checking variations: ${JSON.stringify(uniqueVariants)}`);
+
+          for (const variant of uniqueVariants) {
+            const emailFields = ['email', 'address.email', 'customerEmail'];
+            for (const emailField of emailFields) {
+              try {
+                const querySnap = await cGetDocs(cQuery(
+                  cCollection(clientDb, 'orders'),
+                  cWhere('orderId', '==', variant),
+                  cWhere(emailField, '==', targetEmail),
+                  cLimit(1)
+                ));
+                if (!querySnap.empty) {
+                  const firstDoc = querySnap.docs[0];
+                  orderData = { id: firstDoc.id, ...firstDoc.data() };
+                  console.log(`✅ Found order with Client SDK by orderId and ${emailField}`);
+                  break;
+                }
+              } catch (err: any) {
+                console.warn(`Client SDK query for ${emailField} skipped:`, err.message);
+              }
+            }
+            if (orderData) break;
+          }
+        }
+
+        // 3. Fallback: Search by EMAIL first, then filter by Order ID in memory
+        if (!orderData) {
+          console.log("🔍 Client SDK Fallback: Searching by email first...");
+          const emailOptions = ['email', 'address.email', 'customerEmail'];
+          for (const field of emailOptions) {
+            try {
+              const emailSnap = await cGetDocs(cQuery(
+                cCollection(clientDb, 'orders'),
+                cWhere(field, '==', targetEmail),
+                cLimit(20)
+              ));
+              if (!emailSnap.empty) {
+                for (const doc of emailSnap.docs) {
+                  const data = doc.data();
+                  const dbOid = String(data.orderId || '').trim();
+                  const dbCleanOid = dbOid.replace(/^#/, '');
+                  
+                  if (dbOid === inputOid || dbOid === hashedOid || dbCleanOid === cleanOid || doc.id === cleanOid) {
+                    orderData = { id: doc.id, ...data };
+                    console.log(`✅ Client SDK Fallback matched order: ${dbOid}`);
+                    break;
+                  }
+                }
+              }
+            } catch (err: any) {
+              console.warn(`Client SDK email query failed:`, err.message);
+            }
+            if (orderData) break;
+          }
+        }
+      } catch (clientErr: any) {
+        console.warn("⚠️ Resilient Client Web SDK tracking failed, falling back to Admin SDK:", clientErr.message);
+      }
+    }
+
+    // --- STRATEGY 2: FALLBACK TO FIREBASE ADMIN SDK ---
+    if (!orderData) {
+      try {
+        if (!db) {
+          console.log("⏳ Initializing Firebase Admin for tracking...");
+          await initializeFirebase();
+        }
+        
+        if (!db) {
+          return res.status(400).json({ error: "Database is initializing. Please try again or refresh!" });
+        }
+
+        console.log("🔍 Resilient Track: Trying Admin SDK query fallback...");
+
+        // 1. Try finding by document ID first (if cleanOid looks like a Firestore ID)
+        if (cleanOid.length > 15) {
+          try {
+            const docSnap = await db.collection('orders').doc(cleanOid).get();
+            if (docSnap.exists) {
+              const data = docSnap.data();
+              const customerEmail = String(data?.email || data?.address?.email || data?.customerEmail || '').trim().toLowerCase();
+              if (customerEmail === targetEmail) {
+                orderData = { id: docSnap.id, ...data };
+              }
+            }
+          } catch (e) {
+            console.log("Admin Doc ID fetch failed, moving to query search...");
+          }
+        }
+
+        // 2. Query search by variants of orderId field
+        if (!orderData) {
+          const variants = [
+            hashedOid, 
+            cleanOid, 
+            hashedOid.toUpperCase(), 
+            cleanOid.toUpperCase(),
+            inputOid
+          ];
+          
+          const uniqueVariants = [...new Set(variants.filter(v => v))];
+          console.log(`🔍 Admin checking variations: ${JSON.stringify(uniqueVariants)}`);
+
+          for (const variant of uniqueVariants) {
+            const emailFields = ['email', 'address.email', 'customerEmail'];
             
-          if (!emailSnap.empty) {
-            for (const doc of emailSnap.docs) {
-              const data = doc.data();
-              const dbOid = String(data.orderId || '').trim();
-              const dbCleanOid = dbOid.replace(/^#/, '');
+            for (const emailField of emailFields) {
+              const querySnap = await db.collection('orders')
+                .where('orderId', '==', variant)
+                .where(emailField, '==', targetEmail)
+                .limit(1)
+                .get();
               
-              if (dbOid === inputOid || dbOid === hashedOid || dbCleanOid === cleanOid || doc.id === cleanOid) {
-                orderData = { id: doc.id, ...data };
-                console.log(`✅ Fallback found order: ${dbOid}`);
+              if (!querySnap.empty) {
+                orderData = { id: querySnap.docs[0].id, ...querySnap.docs[0].data() };
+                console.log(`✅ Found order by Admin orderId and ${emailField}`);
                 break;
               }
             }
+            if (orderData) break;
           }
-          if (orderData) break;
         }
-      }
 
-      if (!orderData) {
-        // One last check: maybe the user provided email is matched against the address sub-object
-        // Firestore where('address.email'...) works if address is a map. 
-        // Logic above handles it.
+        // 3. Fallback: Search by EMAIL first, then filter by Order ID in memory
+        if (!orderData) {
+          console.log("🔍 Admin Fallback: Searching by email first...");
+          const emailOptions = ['email', 'address.email', 'customerEmail'];
+          for (const field of emailOptions) {
+            const emailSnap = await db.collection('orders')
+              .where(field, '==', targetEmail)
+              .limit(20)
+              .get();
+              
+            if (!emailSnap.empty) {
+              for (const doc of emailSnap.docs) {
+                const data = doc.data();
+                const dbOid = String(data.orderId || '').trim();
+                const dbCleanOid = dbOid.replace(/^#/, '');
+                
+                if (dbOid === inputOid || dbOid === hashedOid || dbCleanOid === cleanOid || doc.id === cleanOid) {
+                  orderData = { id: doc.id, ...data };
+                  console.log(`✅ Admin Fallback found order: ${dbOid}`);
+                  break;
+                }
+              }
+            }
+            if (orderData) break;
+          }
+        }
+      } catch (error: any) {
+        console.error("Order tracking Admin error:", error);
+        const isPermissionError = error.message?.includes("PERMISSION_DENIED") || error.code === 7;
+        const isNotFoundError = error.message?.includes("NOT_FOUND") || error.code === 5;
         
-        return res.status(404).json({ 
-          error: "Order not found. Please check Order ID and Email.",
-          hint: "Either the Order ID or Email is incorrect. Did you enter these details correctly at checkout?" 
-        });
-      }
-
-      // Verification already happened in the loops above, but one final safety check
-      const customerEmail = String(orderData.email || orderData.address?.email || orderData.customerEmail || '').trim().toLowerCase();
-      
-      if (customerEmail !== targetEmail) {
-        console.log(`❌ Email mismatch: Found ${customerEmail}, expected ${targetEmail}`);
-        return res.status(403).json({ 
-          error: "Email doesn't match.",
-          details: `The registered email for this Order ID is "${customerEmail.substring(0, 3)}***${customerEmail.substring(customerEmail.indexOf('@'))}".`
-        });
-      }
-
-      // Return order (sanitized - remove sensitive internal data if any, but usually orders are fine)
-      res.json(orderData);
-    } catch (error: any) {
-      console.error("Order tracking error:", error);
-      const isPermissionError = error.message?.includes("PERMISSION_DENIED") || error.code === 7;
-      const isNotFoundError = error.message?.includes("NOT_FOUND") || error.code === 5;
-      
-      // If NOT_FOUND, maybe the database ID is wrong or not provisioned yet.
-      // We can try to re-initialize once if we haven't already
-      if (isNotFoundError && (req as any)._retryCount !== 1) {
-        console.log("NOT_FOUND detected. Re-initializing Firebase and retrying...");
-        (req as any)._retryCount = 1;
-        await initializeFirebase(true);
-        // Recursively call the same logic once
-        return res.redirect(307, req.originalUrl); 
-      }
-
-      let userFriendlyError = "Tracking failed on server. Please try again later.";
-      if (isPermissionError) {
-        userFriendlyError = `Firebase Permission Error!
-        \nProject: ${adminApp?.options.projectId || 'unknown'}
-        \nDatabase: ${currentFirestoreDatabaseId}
-        \nSolution: Go to Admin Panel and click 'Set up Firebase' to accept terms and reset permissions.`;
-      } else if (isNotFoundError) {
-        userFriendlyError = `Database NOT_FOUND Error!
-        \nDatabase ID: ${currentFirestoreDatabaseId}
-        \nThis happens when the Firebase database is not yet fully "Active" or the region is incorrect. 
-        \nSolution: Wait 2-3 minutes, or click 'Set up Firebase' again from the Dashboard.`;
-      }
-
-      res.status(500).json({ 
-        error: userFriendlyError,
-        diagnostics: {
-          projectId: adminApp?.options.projectId,
-          databaseId: currentFirestoreDatabaseId,
-          errorCode: error.code,
-          errorMessage: error.message
+        if (isNotFoundError && (req as any)._retryCount !== 1) {
+          console.log("NOT_FOUND detected. Re-initializing Firebase and retrying...");
+          (req as any)._retryCount = 1;
+          await initializeFirebase(true);
+          return res.redirect(307, req.originalUrl); 
         }
+
+        let userFriendlyError = "Tracking failed on server. Please try again later.";
+        if (isPermissionError) {
+          userFriendlyError = `Firebase Permission Error!
+          \nProject: ${adminApp?.options.projectId || 'unknown'}
+          \nDatabase: ${currentFirestoreDatabaseId}
+          \nSolution: Go to Admin Panel and click 'Set up Firebase' to accept terms and reset permissions.`;
+          
+          return res.status(403).json({ 
+            error: userFriendlyError,
+            details: error.message
+          });
+        }
+        
+        return res.status(500).json({ error: userFriendlyError, details: error.message });
+      }
+    }
+
+    if (!orderData) {
+      return res.status(404).json({ 
+        error: "Order not found. Please check Order ID and Email.",
+        hint: "Either the Order ID or Email is incorrect. Did you enter these details correctly at checkout?" 
       });
     }
+
+    // Final safety check
+    const customerEmail = String(orderData.email || orderData.address?.email || orderData.customerEmail || '').trim().toLowerCase();
+    if (customerEmail !== targetEmail) {
+      console.log(`❌ Email mismatch: Found ${customerEmail}, expected ${targetEmail}`);
+      return res.status(403).json({ 
+        error: "Email doesn't match.",
+        details: `The registered email for this Order ID is "${customerEmail.substring(0, 3)}***${customerEmail.substring(customerEmail.indexOf('@'))}".`
+      });
+    }
+
+    res.json(orderData);
   });
 
   app.get("/api/firebase-status", async (req, res) => {

@@ -23,26 +23,27 @@ export default function OrderSuccess() {
     };
   }, []);
 
-  const orderData = location.state || {
-    orderId: '#LF-2025-84729',
-    deliveryDate: 'Apr 5-7, 2025',
-    total: 1978,
-    subtotal: 2198,
-    discount: 220,
-    shippingCost: 0,
-    paymentMethod: 'UPI',
-    shippingMethod: 'Standard Delivery',
+  const stateData = location.state || {};
+  const orderData = {
+    orderId: stateData.orderId || '#TRF0001',
+    deliveryDate: stateData.deliveryDate || 'Within 5-10 Days',
+    total: stateData.total || 0,
+    subtotal: stateData.subtotal || 0,
+    discount: stateData.discount || 0,
+    shippingCost: stateData.shippingCost || 0,
+    codFee: stateData.codFee || 0,
+    paymentMethod: stateData.paymentMethod || 'COD',
+    shippingMethod: stateData.shippingMethod || 'Standard Delivery',
+    email: stateData.email || stateData.address?.email || '',
     address: {
-      name: 'Priya Sharma',
-      address: 'Flat 402, Sunshine Apartments, Bandra West, Mumbai',
-      city: 'Mumbai',
-      state: 'Maharashtra',
-      pincode: '400050'
+      name: stateData.address?.name || stateData.customerName || 'Customer',
+      address: stateData.address?.address || 'No address specified',
+      city: stateData.address?.city || '',
+      state: stateData.address?.state || '',
+      pincode: stateData.address?.pincode || '',
+      email: stateData.address?.email || stateData.email || ''
     },
-    items: [
-      { name: 'Floral Summer Dress', selectedSize: 'S', price: 1299, quantity: 1 },
-      { name: 'Embroidered Kurti', selectedSize: 'M', price: 899, quantity: 1 }
-    ]
+    items: stateData.items || []
   };
 
   const downloadReceipt = () => {

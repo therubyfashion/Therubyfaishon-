@@ -2605,6 +2605,41 @@ export default function AdminDashboard() {
     return () => unsubscribe();
   }, []);
 
+  // Real-time listener for customer chats
+  useEffect(() => {
+    const q = query(
+      collection(db, 'chats'),
+      orderBy('lastMessageAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const chatsList = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setChats(chatsList);
+    }, (error) => {
+      console.error("Chats listener error:", error);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Keep selectedChat updated when chats list changes
+  useEffect(() => {
+    if (!selectedChat) return;
+    const latestChat = chats.find(c => c.id === selectedChat.id);
+    if (latestChat) {
+      if (
+        latestChat.lastMessageAt?.seconds !== selectedChat.lastMessageAt?.seconds ||
+        latestChat.unreadCountAdmin !== selectedChat.unreadCountAdmin ||
+        latestChat.lastMessage !== selectedChat.lastMessage
+      ) {
+        setSelectedChat(latestChat);
+      }
+    }
+  }, [chats, selectedChat]);
+
   const [isCleaningUp, setIsCleaningUp] = useState(false);
   const [showWipeModal, setShowWipeModal] = useState(false);
   const [wipePassword, setWipePassword] = useState('');
@@ -7580,7 +7615,7 @@ export default function AdminDashboard() {
                           <div className="flex justify-between items-center mb-1">
                             <h3 className="text-sm font-bold text-[#1A2C54] truncate group-hover:text-ruby transition-colors">{chat.userName}</h3>
                             <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">
-                              {chat.lastMessageAt ? new Date(chat.lastMessageAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                              {chat.lastMessageAt && typeof chat.lastMessageAt.toDate === 'function' ? new Date(chat.lastMessageAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (chat.lastMessageAt ? new Date(chat.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')}
                             </span>
                           </div>
                           <p className="text-[11px] text-gray-500 truncate font-medium leading-tight">{chat.lastMessage}</p>
@@ -7661,9 +7696,9 @@ export default function AdminDashboard() {
                                 <p className="leading-relaxed font-medium whitespace-pre-wrap">{msg.text}</p>
                               )}
                             </div>
-                            <div className={`flex items-center space-x-2 px-1 ${msg.senderId === 'admin' ? 'justify-end' : 'justify-start'}`}>
+                             <div className={`flex items-center space-x-2 px-1 ${msg.senderId === 'admin' ? 'justify-end' : 'justify-start'}`}>
                               <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">
-                                {msg.createdAt ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
+                                {msg.createdAt && typeof msg.createdAt.toDate === 'function' ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...')}
                               </span>
                               {msg.senderId === 'admin' && <CheckCheck size={12} className="text-ruby" />}
                             </div>

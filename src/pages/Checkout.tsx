@@ -583,6 +583,27 @@ export default function Checkout() {
       };
 
       if (selectedPayment === 'upi') {
+        // Dynamic On-The-Fly Razorpay Script Loader
+        await new Promise((resolve) => {
+          if ((window as any).Razorpay) {
+            resolve(true);
+            return;
+          }
+          console.log("🔗 Dynamically loading Razorpay checkout script...");
+          const script = document.createElement("script");
+          script.src = "https://checkout.razorpay.com/v1/checkout.js";
+          script.async = true;
+          script.onload = () => {
+            console.log("✅ Razorpay script loaded successfully");
+            resolve(true);
+          };
+          script.onerror = () => {
+            console.error("❌ Failed to load Razorpay script");
+            resolve(false);
+          };
+          document.body.appendChild(script);
+        });
+
         let razorpayKey = (import.meta as any).env.VITE_RAZORPAY_KEY_ID;
         
         // If not in env, try to fetch from server

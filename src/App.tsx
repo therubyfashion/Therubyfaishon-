@@ -98,53 +98,6 @@ function AppContent() {
   const { settings, loading: settingsLoading } = useSettings();
   const { createNotification, notifications } = useNotifications();
 
-  // Loyalty points milestone threshold notifications
-  useEffect(() => {
-    if (authLoading || !user || !profile || typeof profile.loyaltyPoints !== 'number') return;
-    
-    const points = profile.loyaltyPoints;
-    const thresholds = [100, 250, 500, 1000];
-    
-    // Find the highest threshold currently reached by the user
-    const achievedThresholds = thresholds.filter(t => points >= t);
-    if (achievedThresholds.length === 0) return;
-    
-    achievedThresholds.forEach(threshold => {
-      // Form unique Title and Body
-      const title = `Loyalty Milestone Achieved: ${threshold} Points! ⚜️`;
-      const body = `Fantastic! You have accumulated ${points} loyalty points. Convert them now to unlock a Special ₹${threshold === 500 ? 550 : threshold === 1000 ? 1200 : threshold} cash discount voucher for the shop! 🎟️`;
-      
-      // Check if the user was already notified of this specific threshold in their notifications database
-      const alreadyNotified = notifications.some(
-        n => (n.title === title || n.title?.includes(`Loyalty Milestone Achieved: ${threshold}`)) && n.userId === user.uid
-      );
-      
-      if (!alreadyNotified) {
-        // Create persistent in-app notifications in Firestore database
-        createNotification({
-          userId: user.uid,
-          title,
-          body,
-          type: 'promotion',
-          iconType: 'coupon',
-          link: '/settings?tab=coupons'
-        }).then(() => {
-          // Trigger a beautiful interactive real-time visual Sonner toast
-          toast.success(`🎉 Milestone Unlocked: ${threshold} Loyalty Points!`, {
-            description: `Convert your points into a store credit voucher now.`,
-            duration: 9000,
-            action: {
-              label: "Redeem",
-              onClick: () => navigate('/settings?tab=coupons')
-            },
-          });
-        }).catch(err => {
-          console.error("Failed to create milestone notification:", err);
-        });
-      }
-    });
-  }, [profile?.loyaltyPoints, notifications, user, authLoading, createNotification, navigate]);
-
   // Handle unverified email redirect
   useEffect(() => {
     if (authLoading) return;
@@ -219,12 +172,37 @@ function AppContent() {
                 OS.initialize(appId);
               }
 
-              // In v5+ we need to opt-in or check permission
-              if (OS.promptForPushNotificationsWithUserResponse) {
+              // Support modern v5 permission request
+              if (OS.Notifications && typeof OS.Notifications.requestPermission === 'function') {
+                OS.Notifications.requestPermission(true).then((accepted: any) => {
+                  console.log("🚀 OneSignal v5 Permission Response:", accepted);
+                }).catch((err: any) => {
+                  console.warn("OneSignal v5 requestPermission error:", err);
+                });
+              } else if (OS.promptForPushNotificationsWithUserResponse) {
                 OS.promptForPushNotificationsWithUserResponse((accepted: any) => {
                   console.log("🚀 OneSignal: Permission Response:", accepted);
                 });
               }
+
+              // Explicitly force system tray display of push notifications on the device even when app is open in foreground!
+              if (OS.Notifications && typeof OS.Notifications.addEventListener === 'function') {
+                OS.Notifications.addEventListener("foregroundWillDisplay", (event: any) => {
+                  console.log("🔔 OneSignal: Foreground display hook matched:", event);
+                  try {
+                    if (event && event.getNotification) {
+                      const notification = event.getNotification();
+                      if (notification && typeof notification.display === 'function') {
+                        console.log("📣 Forcible system notification drawer display invoked");
+                        notification.display();
+                      }
+                    }
+                  } catch (e) {
+                    console.error("Failed to display foreground notification natively:", e);
+                  }
+                });
+              }
+
               isOneSignalNativeInitialized = true;
               console.log("✅ OneSignal: Native Initialization Completed");
             } catch (e) {
