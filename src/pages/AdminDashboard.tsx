@@ -2807,9 +2807,9 @@ export default function AdminDashboard() {
       setChatMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       
       // Mark as read by admin
-      updateDoc(doc(db, 'chats', selectedChat.id), {
+      setDoc(doc(db, 'chats', selectedChat.id), {
         unreadCountAdmin: 0
-      }).catch(() => {});
+      }, { merge: true }).catch(() => {});
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `chats/${selectedChat.id}/messages`);
     });
@@ -2839,11 +2839,11 @@ export default function AdminDashboard() {
         createdAt: serverTimestamp()
       });
 
-      await updateDoc(doc(db, 'chats', selectedChat.id), {
+      await setDoc(doc(db, 'chats', selectedChat.id), {
         lastMessage: imageUrl ? 'Sent an image' : text,
         lastMessageAt: serverTimestamp(),
         unreadCountUser: (selectedChat.unreadCountUser || 0) + 1
-      });
+      }, { merge: true });
     } catch (error) {
       console.error("Error sending admin message:", error);
       toast.error("Failed to send message");
@@ -7988,7 +7988,7 @@ export default function AdminDashboard() {
 
                       <div className="flex justify-between items-center pt-2">
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                          {cart.updatedAt ? new Date(cart.updatedAt.toDate()).toLocaleDateString() : 'N/A'}
+                          {cart.updatedAt ? (cart.updatedAt.toDate ? new Date(cart.updatedAt.toDate()).toLocaleDateString() : new Date(cart.updatedAt).toLocaleDateString()) : 'N/A'}
                         </p>
                         <button 
                           onClick={() => sendAbandonedCartReminder(cart)}
@@ -8054,7 +8054,7 @@ export default function AdminDashboard() {
                             </td>
                             <td className="py-6 px-8">
                               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                                {cart.updatedAt ? new Date(cart.updatedAt.toDate()).toLocaleString() : 'N/A'}
+                                {cart.updatedAt ? (cart.updatedAt.toDate ? new Date(cart.updatedAt.toDate()).toLocaleString() : new Date(cart.updatedAt).toLocaleString()) : 'N/A'}
                               </p>
                             </td>
                             <td className="py-6 px-8 text-right">

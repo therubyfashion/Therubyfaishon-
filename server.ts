@@ -91,11 +91,12 @@ const initializeClientFirestore = () => {
     const configPath = path.join(rootPath, 'firebase-applet-config.json');
     if (fs.existsSync(configPath)) {
       const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
       const apps = getClientApps();
       const cApp = apps.length === 0 ? initClientApp(firebaseConfig, 'node-server-secondary') : apps[0];
-      clientDb = getClientFirestore(cApp);
+      clientDb = getClientFirestore(cApp, dbId);
       isClientDbReady = true;
-      console.log("✅ Resilient Client Firestore SDK fallback initialized successfully.");
+      console.log(`✅ Resilient Client Firestore SDK fallback initialized successfully with database ID: ${dbId}`);
     }
   } catch (err: any) {
     console.warn("⚠️ Client SDK initialization fallback skipped:", err.message);

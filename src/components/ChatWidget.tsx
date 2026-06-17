@@ -120,11 +120,11 @@ export default function ChatWidget() {
           createdAt: serverTimestamp()
         });
       } else {
-        await updateDoc(chatRef, {
+        await setDoc(chatRef, {
           lastMessage: imageUrl ? 'Sent an image' : text,
           lastMessageAt: serverTimestamp(),
-          unreadCountAdmin: (chatDoc.data().unreadCountAdmin || 0) + 1
-        });
+          unreadCountAdmin: (chatDoc.data()?.unreadCountAdmin || 0) + 1
+        }, { merge: true });
       }
 
       await addDoc(collection(db, 'chats', chatId, 'messages'), {
