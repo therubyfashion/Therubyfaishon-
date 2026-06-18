@@ -23,20 +23,59 @@ if (typeof window !== 'undefined') {
 }
 
 // Initialize Firestore with long-polling to prevent WebSocket connection failures inside browser iframes
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-  experimentalAutoDetectLongPolling: false
-}, firebaseConfig.firestoreDatabaseId);
+let activeDb: any;
+try {
+  activeDb = initializeFirestore(app, {
+    experimentalForceLongPolling: true,
+    experimentalAutoDetectLongPolling: false
+  }, firebaseConfig.firestoreDatabaseId || '(default)');
+} catch (e: any) {
+  console.warn("⚠️ Failed to initialize Firestore with custom databaseId, fallback to default profile:", e.message);
+  activeDb = initializeFirestore(app, {
+    experimentalForceLongPolling: true,
+    experimentalAutoDetectLongPolling: false
+  });
+}
 
-// Connection Verification Probe on App Initiation
+// Transparent Proxy wrapper to support dynamic runtime database fallback
+export const db = new Proxy(activeDb, {
+  get(target, prop, receiver) {
+    const value = Reflect.get(activeDb, prop);
+    if (typeof value === 'function') {
+      return value.bind(activeDb);
+    }
+    return value;
+  },
+  set(target, prop, value, receiver) {
+    return Reflect.set(activeDb, prop, value);
+  }
+});
+
+// Connection Verification Probe on App Initiation with Auto-Fallback
 async function testConnection() {
   if (typeof window !== 'undefined') {
     try {
       // Fetch a sample document from the settings collection using getDocFromServer
-      await getDocFromServer(doc(db, 'settings', 'connection_probe_test_id'));
-      console.log("⚡ [Firebase Client] Connected successfully to Database ID:", firebaseConfig.firestoreDatabaseId);
+      await getDocFromServer(doc(activeDb, 'settings', 'connection_probe_test_id'));
+      console.log("⚡ [Firebase Client] Connected successfully to Database ID:", firebaseConfig.firestoreDatabaseId || '(default)');
     } catch (error: any) {
-      console.warn("⚠️ [Firebase Client] Initialization connectivity check result:", error.message || error);
+      console.warn("⚠️ [Firebase Client] Configured database connection failed. Dynamic fallback to '(default)' initiated. Error:", error.message || error);
+      
+      const configDbId = firebaseConfig.firestoreDatabaseId;
+      if (configDbId && configDbId !== '(default)') {
+        try {
+          const fallbackDb = initializeFirestore(app, {
+            experimentalForceLongPolling: true,
+            experimentalAutoDetectLongPolling: false
+          }); // Defaults to (default)
+          
+          await getDocFromServer(doc(fallbackDb, 'settings', 'connection_probe_test_id'));
+          activeDb = fallbackDb;
+          console.log("⚡ [Firebase Client] Successfully connected to fallback '(default)' database.");
+        } catch (fallbackErr: any) {
+          console.error("❌ [Firebase Client] Fallback to '(default)' database also failed:", fallbackErr.message || fallbackErr);
+        }
+      }
     }
   }
 }

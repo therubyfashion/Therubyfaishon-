@@ -78,6 +78,97 @@ export default function Home() {
     }
   ];
 
+  const fallbackCategories = [
+    { id: "kurti", name: "Kurti", image: "https://images.unsplash.com/photo-1621184455862-c163dfb30e0f?auto=format&fit=crop&q=80&w=300", slug: "kurti" },
+    { id: "sarees", name: "Sarees", image: "https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=300", slug: "sarees" },
+    { id: "lehengas", name: "Lehengas", image: "https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&q=80&w=300", slug: "lehengas" },
+    { id: "suits", name: "Suits", image: "https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&q=80&w=300", slug: "suits" }
+  ];
+
+  const fallbackBanners = [
+    {
+      id: "b1",
+      title: "Festive Season Collection",
+      image: "https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=1200",
+      link: "/shop",
+      active: true
+    },
+    {
+      id: "b2",
+      title: "Elegant Pure Cotton Kurtas",
+      image: "https://images.unsplash.com/photo-1621184455862-c163dfb30e0f?auto=format&fit=crop&q=80&w=1200",
+      link: "/shop?category=kurti",
+      active: true
+    }
+  ];
+
+  const fallbackProducts: Product[] = [
+    {
+      id: "fp1",
+      name: "Royal Crimson Anarkali Kurta Set",
+      price: 1899,
+      comparePrice: 2999,
+      category: ["Kurti"],
+      sizes: ["M", "L", "XL", "XXL"],
+      images: ["https://images.unsplash.com/photo-1621184455862-c163dfb30e0f?auto=format&fit=crop&q=80&w=800"],
+      stock: 25,
+      stockStatus: "In Stock",
+      isTrending: true,
+      description: "Grace any occasion with this beautiful heavy georgette crimson red Anarkali kurta set. Richly embroidered with golden zari work.",
+      viewCount: 145,
+      wishlistCount: 38,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: "fp2",
+      name: "Elegant Banarasi Red Silk Saree",
+      price: 3499,
+      comparePrice: 5999,
+      category: ["Sarees"],
+      sizes: ["M", "L"],
+      images: ["https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=800"],
+      stock: 15,
+      stockStatus: "In Stock",
+      isTrending: true,
+      description: "Impeccably handwoven silk saree featuring exquisite golden Banarasi borders.",
+      viewCount: 189,
+      wishlistCount: 52,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: "fp3",
+      name: "Sapphire Blue Velvet Lehenga Choli",
+      price: 4999,
+      comparePrice: 8999,
+      category: ["Lehengas"],
+      sizes: ["S", "M", "L"],
+      images: ["https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&q=80&w=800"],
+      stock: 10,
+      stockStatus: "In Stock",
+      isTrending: true,
+      description: "Stunning sapphire blue velvet lehenga, heavily embellished with sequins and pearl work.",
+      viewCount: 232,
+      wishlistCount: 89,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: "fp4",
+      name: "Classic Ivory Lucknowi Chikankari Kurti",
+      price: 1299,
+      comparePrice: 2299,
+      category: ["Kurti"],
+      sizes: ["S", "M", "L", "XL"],
+      images: ["https://images.unsplash.com/photo-1608933221953-c6cd6a7f0525?auto=format&fit=crop&q=80&w=800"],
+      stock: 45,
+      stockStatus: "In Stock",
+      isTrending: false,
+      description: "Traditional Lucknowi hand-embroidered georgette Chikankari kurti in ivory white.",
+      viewCount: 94,
+      wishlistCount: 22,
+      createdAt: new Date().toISOString()
+    }
+  ];
+
   // Load initial cached values to avoid showing skeleton loading and render instantly
   useEffect(() => {
     try {
@@ -126,12 +217,12 @@ export default function Home() {
         );
 
         const [trendingSnap, popularSnap, categoriesSnap, bannersSnap, reviewsSnap, settingsSnap] = await Promise.all([
-          getDocs(trendingQuery),
-          getDocs(popularQuery),
-          getDocs(collection(db, 'categories')),
-          getDocs(collection(db, 'banners')),
-          getDocs(reviewsQuery),
-          getDocs(collection(db, 'settings'))
+          getDocs(trendingQuery).catch((err) => { console.warn("Failed fetching trending:", err); return { docs: [], empty: true } as any; }),
+          getDocs(popularQuery).catch((err) => { console.warn("Failed fetching popular:", err); return { docs: [], empty: true } as any; }),
+          getDocs(collection(db, 'categories')).catch((err) => { console.warn("Failed fetching categories:", err); return { docs: [], empty: true } as any; }),
+          getDocs(collection(db, 'banners')).catch((err) => { console.warn("Failed fetching banners:", err); return { docs: [], empty: true } as any; }),
+          getDocs(reviewsQuery).catch((err) => { console.warn("Failed fetching reviews:", err); return { docs: [], empty: true } as any; }),
+          getDocs(collection(db, 'settings')).catch((err) => { console.warn("Failed fetching settings:", err); return { docs: [], empty: true } as any; })
         ]);
 
         // Process Settings for Promo Ticker
@@ -155,7 +246,10 @@ export default function Home() {
         let popularData = popularSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
 
         if (trendingData.length === 0 || popularData.length === 0) {
-          const fallbackSnap = await getDocs(query(collection(db, 'products'), limit(12)));
+          const fallbackSnap = await getDocs(query(collection(db, 'products'), limit(12))).catch((err) => {
+            console.warn("Failed fetching fallback products:", err);
+            return { docs: [] } as any;
+          });
           const totalFallback = fallbackSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
 
           if (trendingData.length === 0) {
@@ -164,6 +258,14 @@ export default function Home() {
           if (popularData.length === 0) {
             popularData = totalFallback.slice(4, 12).length > 0 ? totalFallback.slice(4, 12) : totalFallback.slice(0, 8);
           }
+        }
+
+        // Final local fail-safe if database contains absolutely 0 products
+        if (trendingData.length === 0) {
+          trendingData = fallbackProducts.filter(p => p.isTrending);
+        }
+        if (popularData.length === 0) {
+          popularData = fallbackProducts;
         }
 
         setTrendingProducts(trendingData);
@@ -175,11 +277,13 @@ export default function Home() {
           const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
           return orderA - orderB;
         });
-        setCategories(sortedCats);
+        const finalCats = sortedCats.length > 0 ? sortedCats : fallbackCategories;
+        setCategories(finalCats);
         
         const bannerData = bannersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         const activeBanners = bannerData.filter((b: any) => b.active !== false && b.active !== 'false');
-        setBanners(activeBanners);
+        const finalBanners = activeBanners.length > 0 ? activeBanners : fallbackBanners;
+        setBanners(finalBanners);
 
         // Handle reviews with fallback
         const firestoreReviews = reviewsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
