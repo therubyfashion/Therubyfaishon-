@@ -515,7 +515,21 @@ async function sendCustomerNotification(userId: string, title: string, body: str
 
 async function runCartAbandonmentRecovery() {
   let carts: any[] = [];
-  if (clientDb && isClientDbReady) {
+  let fetched = false;
+
+  if (db) {
+    try {
+      const snap = await db.collection('carts').where('status', '==', 'active').get();
+      snap.forEach(doc => {
+        carts.push({ id: doc.id, ...doc.data() });
+      });
+      fetched = true;
+    } catch (e: any) {
+      console.warn("Recovery cart query via Admin SDK failed:", e.message);
+    }
+  }
+
+  if (!fetched && clientDb && isClientDbReady) {
     try {
       const snap = await cGetDocs(cQuery(
         cCollection(clientDb, 'carts'),
@@ -525,7 +539,7 @@ async function runCartAbandonmentRecovery() {
         carts.push({ id: doc.id, ...doc.data() });
       });
     } catch (e: any) {
-      console.warn("Recovery cart query failed:", e.message);
+      console.warn("Recovery cart query via Client SDK failed:", e.message);
     }
   }
 
@@ -543,7 +557,9 @@ async function runCartAbandonmentRecovery() {
         "/cart"
       );
       try {
-        if (clientDb && isClientDbReady) {
+        if (db) {
+          await db.collection('carts').doc(cart.id).update({ abandonedAlertSent: true });
+        } else if (clientDb && isClientDbReady) {
           await cUpdateDoc(cDoc(clientDb, 'carts', cart.id), { abandonedAlertSent: true });
         }
       } catch (err) {}
