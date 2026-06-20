@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { ShoppingBag, AlertTriangle, TrendingUp, Package, ChevronRight, Search } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { ShoppingBag, AlertTriangle, TrendingUp, Package, ChevronRight, Search, RotateCcw, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { OrderItemSkeleton, Skeleton } from '../components/Skeleton';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 
 export default function MyOrders() {
   const { user } = useAuth();
@@ -13,6 +14,50 @@ export default function MyOrders() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Return request states
+  const [returningOrder, setReturningOrder] = useState<any | null>(null);
+  const [returnReason, setReturnReason] = useState('Wrong Size / Fit');
+  const [returnComments, setReturnComments] = useState('');
+  const [isSubmittingReturn, setIsSubmittingReturn] = useState(false);
+
+  const handleInitiateReturn = (order: any) => {
+    setReturningOrder(order);
+    setReturnReason('Wrong Size / Fit');
+    setReturnComments('');
+  };
+
+  const handleSubmitReturn = async () => {
+    if (!returningOrder) return;
+    setIsSubmittingReturn(true);
+    const loadingToast = toast.loading("Submitting return request...");
+    try {
+      const orderRef = doc(db, 'orders', returningOrder.id);
+      const returnDetails = {
+        status: 'Return Requested',
+        returnStatus: 'Pending',
+        returnReason,
+        returnComments,
+        returnRequestedAt: new Date().toISOString()
+      };
+      await updateDoc(orderRef, returnDetails);
+      
+      // Update local state so view re-renders instantly
+      setOrders(prevOrders => prevOrders.map(o => 
+        o.id === returningOrder.id 
+          ? { ...o, ...returnDetails } 
+          : o
+      ));
+      
+      toast.success("Return request successfully submitted! ✨", { id: loadingToast });
+      setReturningOrder(null);
+    } catch (err: any) {
+      console.error("Error submitting return request:", err);
+      toast.error("Failed to submit return request.", { id: loadingToast });
+    } finally {
+      setIsSubmittingReturn(false);
+    }
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -136,6 +181,8 @@ export default function MyOrders() {
                         <span className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full ${
                           order.status === 'Delivered' ? 'bg-green-50 text-green-600' :
                           order.status === 'Cancelled' ? 'bg-red-50 text-red-600' :
+                          order.status === 'Return Requested' ? 'bg-purple-150 text-purple-700 font-bold border border-purple-200' :
+                          order.status === 'Returned' ? 'bg-orange-50 text-orange-600 font-semibold border border-orange-100' :
                           'bg-yellow-50 text-yellow-600'
                         }`}>
                           {order.status}
@@ -148,6 +195,32 @@ export default function MyOrders() {
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total Amount</p>
                     </div>
                   </div>
+
+                  {/* Return details info banner */}
+                  {order.returnReason && (
+                    <div className="mt-6 bg-purple-50/70 border border-purple-100 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center space-x-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-purple-600 animate-pulse" />
+                          <p className="text-xs font-bold text-purple-950 uppercase tracking-widest">Return Request Submitted</p>
+                        </div>
+                        <p className="text-xs text-purple-800"><span className="font-semibold text-purple-950">Reason:</span> {order.returnReason}</p>
+                        {order.returnComments && (
+                          <p className="text-xs text-purple-700 italic bg-purple-100/30 px-3 py-2 rounded-xl border border-purple-100/50 mt-1 max-w-2xl">
+                            "{order.returnComments}"
+                          </p>
+                        )}
+                        {order.returnRequestedAt && (
+                          <p className="text-[10px] text-purple-500 font-medium">Requested on {new Date(order.returnRequestedAt).toLocaleDateString()}</p>
+                        )}
+                      </div>
+                      <div className="sm:text-right shrink-0">
+                        <span className="inline-flex px-3, py-1 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-purple-800 bg-purple-100/60 border border-purple-200/50 rounded-xl">
+                          Return Status: {order.returnStatus || 'Pending'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="py-6 space-y-6">
                     {order.items?.map((item: any, idx: number) => (
@@ -176,6 +249,15 @@ export default function MyOrders() {
                       <span className="text-xs font-bold uppercase tracking-widest">Standard Shipping</span>
                     </div>
                     <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+                      {order.status === 'Delivered' && !order.returnReason && (
+                        <button 
+                          onClick={() => handleInitiateReturn(order)}
+                          className="w-full sm:w-auto px-6 py-3 bg-purple-50 text-purple-700 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-600 hover:text-white transition-all flex items-center justify-center space-x-2 border border-purple-100/50"
+                        >
+                          <RotateCcw size={14} />
+                          <span>Return Items</span>
+                        </button>
+                      )}
                       <button 
                         onClick={() => navigate(`/track/${order.orderId || order.id}`, { state: { email: order.email || order.address?.email } })}
                         className="w-full sm:w-auto px-8 py-3 bg-ruby/[0.05] text-ruby rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-ruby hover:text-white transition-all flex items-center justify-center space-x-2 border border-ruby/10"
@@ -204,6 +286,76 @@ export default function MyOrders() {
           )}
         </div>
       </div>
+
+      {/* Return Request Modal */}
+      {returningOrder && (
+        <div className="fixed inset-0 bg-[#0c162cf0] backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5)] relative border border-gray-100">
+            <button 
+              onClick={() => setReturningOrder(null)}
+              className="absolute right-5 top-5 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-xl transition-all"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <div className="w-12 h-12 rounded-2xl bg-purple-50 flex items-center justify-center text-purple-700">
+                  <RotateCcw size={22} />
+                </div>
+                <h3 className="text-xl font-serif font-bold text-[#1A2C54]">Initiate Return</h3>
+                <p className="text-xs text-gray-400">Order {returningOrder.orderId || `#${returningOrder.id.slice(-8).toUpperCase()}`}</p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Reason for Return</label>
+                  <select 
+                    value={returnReason}
+                    onChange={(e) => setReturnReason(e.target.value)}
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-2xl text-xs font-bold uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-purple-500/20 text-gray-700 transition-all cursor-pointer"
+                  >
+                    <option value="Wrong Size / Fit">Wrong Size / Fit</option>
+                    <option value="Item damaged or defective">Item damaged or defective</option>
+                    <option value="Item does not match description">Item does not match description</option>
+                    <option value="Quality not as expected">Quality not as expected</option>
+                    <option value="Incorrect item delivered">Incorrect item delivered</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Comments or Additional Details</label>
+                  <textarea 
+                    rows={4}
+                    placeholder="Provide any additional comments or sizing issues..."
+                    value={returnComments}
+                    onChange={(e) => setReturnComments(e.target.value)}
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-2xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-purple-500/20 text-gray-700 placeholder:text-gray-300 resize-none transition-all"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setReturningOrder(null)}
+                  disabled={isSubmittingReturn}
+                  className="w-1/2 py-3.5 bg-gray-50 hover:bg-gray-100 text-[#1A2C54] rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSubmitReturn}
+                  disabled={isSubmittingReturn}
+                  className="w-1/2 py-3.5 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-md shadow-purple-500/10 hover:shadow-lg hover:shadow-purple-500/20 disabled:opacity-50 flex items-center justify-center space-x-2"
+                >
+                  <span>{isSubmittingReturn ? 'Submitting...' : 'Submit Request'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

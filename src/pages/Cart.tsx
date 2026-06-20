@@ -10,8 +10,10 @@ import { db } from '../firebase';
 import { LoadingSpinner } from '../components/Skeleton';
 
 import { useWishlist } from '../contexts/WishlistContext';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function Cart() {
+  const { user } = useAuth();
   const { 
     items, 
     removeFromCart, 
@@ -39,13 +41,15 @@ export default function Cart() {
           id: doc.id,
           ...doc.data()
         }));
-        setCoupons(couponsData);
+        // Only show public coupons or coupons created by this logged-in user
+        const filtered = couponsData.filter((c: any) => !c.createdBy || (user && c.createdBy === user.uid));
+        setCoupons(filtered);
       } catch (error) {
         console.error("Error fetching coupons:", error);
       }
     };
     fetchCoupons();
-  }, []);
+  }, [user]);
 
   const handleMoveToWishlist = (item: any) => {
     if (!isInWishlist(item.id)) {
@@ -65,6 +69,13 @@ export default function Cart() {
     const coupon = coupons.find(c => c.code.toUpperCase() === promoCode.toUpperCase());
     
     if (coupon) {
+      // Safety validation: Ensure private loyalty vouchers belong to the current user
+      if (coupon.createdBy && (!user || coupon.createdBy !== user.uid)) {
+        toast.error('This is a private coupon belonging to another account');
+        setIsApplyingPromo(false);
+        return;
+      }
+
       // Check expiry
       if (coupon.expiryDate && new Date(coupon.expiryDate) < new Date()) {
         toast.error('This coupon has expired');

@@ -60,13 +60,16 @@ export default function Settings() {
       try {
         const q = query(collection(db, 'coupons'), where('isActive', '==', true));
         const snap = await getDocs(q);
-        setCoupons(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        const allCoupons = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Only show public coupons, or coupons created by this logged in user
+        const filtered = allCoupons.filter((c: any) => !c.createdBy || (user && c.createdBy === user.uid));
+        setCoupons(filtered);
       } catch (e) {
         console.error("Error fetching coupons:", e);
       }
     };
     fetchCoupons();
-  }, [refreshCoupons]);
+  }, [refreshCoupons, user]);
 
   // Stats for the "Cool" factor
   const [securityScore] = React.useState(85);

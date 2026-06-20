@@ -571,17 +571,23 @@ export default function Login() {
       
       // Trigger Welcome Push & Email
       try {
-        // Push
-        fetch('/api/send-user-push', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: user.uid,
-            title: 'Welcome Back! ✨',
-            body: `Hi ${userData?.name || 'Gorgeous'}, we missed you! Ready to shop?`,
-            url: '/'
-          })
-        });
+        // Push (Delayed 3.5 seconds to allow OneSignal connection mapping to register fully)
+        setTimeout(() => {
+          try {
+            fetch('/api/send-user-push', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userId: user.uid,
+                title: 'Welcome Back! ✨',
+                body: `Hi ${userData?.name || 'Gorgeous'}, we missed you! Ready to shop?`,
+                url: '/'
+              })
+            }).catch(e => console.warn("Welcome push deferred error:", e));
+          } catch (pushErr) {
+            console.error("Welcome push error:", pushErr);
+          }
+        }, 3500);
 
         // Email
         if (user.email) {

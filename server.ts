@@ -573,13 +573,14 @@ async function initializeAutoPushes() {
   if (isPushServiceInitialized) return;
   
   let retries = 0;
-  while (!clientDb && retries < 15) {
+  // Wait up to 5 seconds for either db (Admin) or clientDb to initialize
+  while (!db && !clientDb && retries < 15) {
     await new Promise(resolve => setTimeout(resolve, 1000));
     retries++;
   }
 
-  if (!clientDb) {
-    console.warn("⚠️ [push-service] clientDb is inactive. Automatic events suspended.");
+  if (!db && !clientDb) {
+    console.warn("⚠️ [push-service] Neither privileged Admin DB nor clientDb fallback is active. Automatic events suspended.");
     return;
   }
 
@@ -599,11 +600,33 @@ async function initializeAutoPushes() {
   let isCouponsLoaded = false;
   let isPromotionsLoaded = false;
 
+  // Unified listener registry supporting privileged admin db or fallback clientDb
+  const registerListener = (
+    collectionName: string,
+    onSnapshotCallback: (snapshot: any) => void,
+    onErrorCallback?: (err: any) => void
+  ) => {
+    if (db) {
+      console.log(`📡 [push-service] Attaching privileged Admin SDK listener for: '${collectionName}'`);
+      return db.collection(collectionName).onSnapshot(onSnapshotCallback, onErrorCallback || ((err: any) => {
+        console.error(`❌ [push-service] Admin '${collectionName}' listener error:`, err.message);
+      }));
+    } else if (clientDb && isClientDbReady) {
+      console.log(`📡 [push-service] Attaching client fallback SDK listener for: '${collectionName}'`);
+      return cOnSnapshot(cCollection(clientDb, collectionName), onSnapshotCallback, onErrorCallback || ((err: any) => {
+        console.error(`❌ [push-service] Client '${collectionName}' listener error:`, err.message);
+      }));
+    } else {
+      console.warn(`⚠️ [push-service] No database available to register listener for: '${collectionName}'`);
+      return null;
+    }
+  };
+
   // 1. Orders
   try {
-    cOnSnapshot(cCollection(clientDb, 'orders'), (snapshot) => {
+    registerListener('orders', (snapshot) => {
       if (!isOrdersLoaded) {
-        snapshot.docs.forEach(doc => {
+        snapshot.docs.forEach((doc: any) => {
           const order = doc.data();
           orderStatusCache.set(doc.id, order.status || '');
         });
@@ -612,7 +635,7 @@ async function initializeAutoPushes() {
         return;
       }
 
-      snapshot.docChanges().forEach(async (change) => {
+      snapshot.docChanges().forEach(async (change: any) => {
         const orderId = change.doc.id;
         const order = change.doc.data();
 
@@ -704,11 +727,11 @@ async function initializeAutoPushes() {
     console.error("Orders listener setup error:", err.message);
   }
 
-  // 2. Users
+  // 2. Users (Includes real-time loyalty points push notifications)
   try {
-    cOnSnapshot(cCollection(clientDb, 'users'), (snapshot) => {
+    registerListener('users', (snapshot) => {
       if (!isUsersLoaded) {
-        snapshot.docs.forEach(doc => {
+        snapshot.docs.forEach((doc: any) => {
           const u = doc.data();
           userPointsCache.set(doc.id, u.loyaltyPoints || 0);
         });
@@ -716,7 +739,7 @@ async function initializeAutoPushes() {
         return;
       }
 
-      snapshot.docChanges().forEach(async (change) => {
+      snapshot.docChanges().forEach(async (change: any) => {
         const userId = change.doc.id;
         const user = change.doc.data();
 
@@ -741,15 +764,43 @@ async function initializeAutoPushes() {
           userPointsCache.set(userId, newPoints);
 
           if (oldPoints !== newPoints) {
+            console.log(`[push-service] Loyalty points updated for user ${userId}: ${oldPoints} -> ${newPoints} points`);
+
+            // I. Immediate, automatic push for ANY point balance modification
+            if (newPoints > oldPoints) {
+              const gained = newPoints - oldPoints;
+              await sendCustomerNotification(
+                userId,
+                "Loyalty Points Earned! 🌟",
+                `Success! You received +${gained} loyalty points. Your current status balance is ${newPoints} points. 💎`,
+                "/settings?tab=coupons"
+              );
+            } else {
+              const spent = oldPoints - newPoints;
+              await sendCustomerNotification(
+                userId,
+                "Loyalty Points Redeemed! 🎟️",
+                `Voucher claimed! Redeemed -${spent} points. Your new loyalty balance: ${newPoints} points.`,
+                "/settings?tab=coupons"
+              );
+            }
+
+            // II. Check Milestones Achieved (with a slight timeout delay to prevent overlapping push alerts)
             const thresholds = [100, 250, 500, 1000];
             for (const t of thresholds) {
               if (oldPoints < t && newPoints >= t) {
-                await sendCustomerNotification(
-                  userId,
-                  `Loyalty Milestone Achieved: ${t} Points! ⚜️`,
-                  `Fantastic! You have accumulated ${newPoints} points. Convert them inside settings now to unlock special cash vouchers. 🎟️`,
-                  '/settings?tab=coupons'
-                );
+                setTimeout(async () => {
+                  try {
+                    await sendCustomerNotification(
+                      userId,
+                      `Loyalty Milestone Achieved: ${t} Points! ⚜️`,
+                      `Fantastic! You have achieved the ${t} points milestone. Visit Settings to convert points into cash vouchers now! 🎟️`,
+                      '/settings?tab=coupons'
+                    );
+                  } catch (milestoneErr: any) {
+                    console.error("Failed to send milestone notification:", milestoneErr.message);
+                  }
+                }, 2500);
               }
             }
           }
@@ -764,13 +815,13 @@ async function initializeAutoPushes() {
 
   // 3. Reviews
   try {
-    cOnSnapshot(cCollection(clientDb, 'reviews'), (snapshot) => {
+    registerListener('reviews', (snapshot) => {
       if (!isReviewsLoaded) {
         isReviewsLoaded = true;
         return;
       }
 
-      snapshot.docChanges().forEach(async (change) => {
+      snapshot.docChanges().forEach(async (change: any) => {
         if (change.type === 'added') {
           const review = change.doc.data();
           await sendAdminNotification(
@@ -792,13 +843,13 @@ async function initializeAutoPushes() {
 
   // 4. Tickets / Support Messages
   try {
-    cOnSnapshot(cCollection(clientDb, 'tickets'), (snapshot) => {
+    registerListener('tickets', (snapshot) => {
       if (!isTicketsLoaded) {
         isTicketsLoaded = true;
         return;
       }
 
-      snapshot.docChanges().forEach(async (change) => {
+      snapshot.docChanges().forEach(async (change: any) => {
         if (change.type === 'added') {
           await sendAdminNotification(
             "New Support Request 🎫",
@@ -815,9 +866,9 @@ async function initializeAutoPushes() {
 
   // 5. Products
   try {
-    cOnSnapshot(cCollection(clientDb, 'products'), (snapshot) => {
+    registerListener('products', (snapshot) => {
       if (!isProductsLoaded) {
-        snapshot.docs.forEach(doc => {
+        snapshot.docs.forEach((doc: any) => {
           const p = doc.data();
           productStockCache.set(doc.id, p.stock ?? 0);
           productPriceCache.set(doc.id, p.price ?? 0);
@@ -826,7 +877,7 @@ async function initializeAutoPushes() {
         return;
       }
 
-      snapshot.docChanges().forEach(async (change) => {
+      snapshot.docChanges().forEach(async (change: any) => {
         const productId = change.doc.id;
         const p = change.doc.data();
 
@@ -878,13 +929,13 @@ async function initializeAutoPushes() {
 
   // 6. Coupons
   try {
-    cOnSnapshot(cCollection(clientDb, 'coupons'), (snapshot) => {
+    registerListener('coupons', (snapshot) => {
       if (!isCouponsLoaded) {
         isCouponsLoaded = true;
         return;
       }
 
-      snapshot.docChanges().forEach(async (change) => {
+      snapshot.docChanges().forEach(async (change: any) => {
         if (change.type === 'added') {
           const coupon = change.doc.data();
           await sendOneSignalNotification({
@@ -905,13 +956,13 @@ async function initializeAutoPushes() {
 
   // 7. Promotions
   try {
-    cOnSnapshot(cCollection(clientDb, 'promotions'), (snapshot) => {
+    registerListener('promotions', (snapshot) => {
       if (!isPromotionsLoaded) {
         isPromotionsLoaded = true;
         return;
       }
 
-      snapshot.docChanges().forEach(async (change) => {
+      snapshot.docChanges().forEach(async (change: any) => {
         const prom = change.doc.data();
         if (change.type === 'added' || (change.type === 'modified' && prom.status === 'active')) {
           if (prom.status === 'active') {

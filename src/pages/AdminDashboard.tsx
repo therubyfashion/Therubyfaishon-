@@ -94,6 +94,8 @@ const BADGE_CFG: Record<string, any> = {
   Cancelled: { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-500', label: 'CANCELLED' },
   'Refunded': { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-500', label: 'REFUNDED' },
   'On Hold': { bg: 'bg-gray-100', text: 'text-gray-500', dot: 'bg-gray-400', label: 'ON HOLD' },
+  'Return Requested': { bg: 'bg-purple-50', text: 'text-purple-700', dot: 'bg-purple-500', label: 'RETURN REQUESTED' },
+  'Returned': { bg: 'bg-orange-50', text: 'text-orange-700', dot: 'bg-orange-500', label: 'RETURNED' },
 };
 
 const StatusBadge = ({ status, label, className }: { status: string, label?: string, className?: string }) => {
@@ -4131,6 +4133,8 @@ export default function AdminDashboard() {
     Shipped: 'bg-[#3B82F6]/10 text-[#3B82F6] border border-[#3B82F6]/20',
     Cancelled: 'bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/20',
     Processing: 'bg-[#FACC15]/10 text-[#854D0E] border border-[#FACC15]/20',
+    'Return Requested': 'bg-purple-500/10 text-purple-600 border border-purple-500/20',
+    'Returned': 'bg-orange-500/10 text-orange-600 border border-orange-500/20',
   };
 
   const seedData = async () => {
@@ -6051,12 +6055,18 @@ export default function AdminDashboard() {
                         <span className="capitalize">{viewingCustomer.status || 'Status'}</span>
                       </button>
                       <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-shop-border rounded-xl shadow-2xl opacity-0 invisible group-hover/status:opacity-100 group-hover/status:visible transition-all z-[300] p-1.5 space-y-0.5">
-                        {['Pending', 'Paid', 'Processing', 'Shipped', 'In Delivery', 'Delivered', 'Cancelled', 'Refunded'].map(s => (
+                        {['Pending', 'Paid', 'Processing', 'Shipped', 'In Delivery', 'Delivered', 'Cancelled', 'Refunded', 'Return Requested', 'Returned'].map(s => (
                           <button 
                             key={s}
                             onClick={() => {
-                              updateDoc(doc(db, 'orders', viewingCustomer.id), { status: s });
-                              setViewingCustomer({ ...viewingCustomer, status: s });
+                              const updates: any = { status: s };
+                              if (s === 'Returned') {
+                                updates.returnStatus = 'Approved';
+                              } else if (s === 'Cancelled' || s === 'Refunded') {
+                                updates.returnStatus = 'Rejected';
+                              }
+                              updateDoc(doc(db, 'orders', viewingCustomer.id), updates);
+                              setViewingCustomer({ ...viewingCustomer, ...updates });
                               toast.success(`Order status: ${s}`);
                             }}
                             className="w-full text-left px-3.5 py-2 rounded-lg text-[13px] font-[500] hover:bg-gray-50 flex items-center justify-between"
@@ -6075,6 +6085,35 @@ export default function AdminDashboard() {
                   
                   {/* LEFT COLUMN */}
                   <div className="space-y-4">
+
+                    {/* RETURN REQUEST INFO */}
+                    {viewingCustomer.returnReason && (
+                      <div className="bg-purple-50/70 border border-purple-200/80 rounded-xl overflow-hidden shadow-sm">
+                        <div className="px-4 py-[14px] border-b border-purple-200/60 bg-purple-100/40 flex justify-between items-center">
+                          <h3 className="text-[14px] font-[700] text-purple-900 flex items-center gap-2">
+                            <span>🔄 Return Request Details</span>
+                          </h3>
+                          <span className="text-[11px] font-bold text-purple-700 bg-purple-200/50 px-2.5 py-0.5 rounded-full uppercase tracking-wider">{viewingCustomer.returnStatus || 'Pending'}</span>
+                        </div>
+                        <div className="p-4 space-y-2.5 text-[13px] text-purple-950">
+                          <div className="flex items-start gap-2">
+                            <span className="font-[600] text-purple-900 shrink-0">Reason:</span> 
+                            <span>{viewingCustomer.returnReason}</span>
+                          </div>
+                          {viewingCustomer.returnComments && (
+                            <div className="flex items-start gap-2 bg-purple-100/20 p-2.5 rounded-lg border border-purple-100/50">
+                              <span className="font-[600] text-purple-900 shrink-0">Notes:</span> 
+                              <span className="italic">"{viewingCustomer.returnComments}"</span>
+                            </div>
+                          )}
+                          {viewingCustomer.returnRequestedAt && (
+                            <div className="text-[11px] text-purple-700 font-medium">
+                              Requested on: {new Date(viewingCustomer.returnRequestedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                     
                     {/* FULFILL FROM */}
                     <div className="bg-white border border-shop-border rounded-xl shadow-sm overflow-hidden">
