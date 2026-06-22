@@ -307,16 +307,27 @@ async function sendOneSignalNotification(notification: any, config?: { appId?: s
     'Authorization': `Basic ${cleanRestKey}`
   };
 
+  const payload = { ...notification, app_id: appId };
+
+  console.log(`📡 [push-service-telemetry] Preparing OneSignal API Request...`);
+  console.log(`📡 [push-service-telemetry] URL: https://onesignal.com/api/v1/notifications`);
+  console.log(`📡 [push-service-telemetry] App ID: "${appId}"`);
+  console.log(`📡 [push-service-telemetry] REST API Key (trimmed characters): "${cleanRestKey.substring(0, 4)}...${cleanRestKey.substring(cleanRestKey.length - 4)}"`);
+  console.log(`📡 [push-service-telemetry] Request Body Payload:`, JSON.stringify(payload, null, 2));
+
   try {
     const response = await axios.post('https://onesignal.com/api/v1/notifications', 
-      { ...notification, app_id: appId },
+      payload,
       { headers }
     );
-    console.log(`✅ OneSignal SUCCESS: Notification sent. ID: ${response.data.id}`);
+    console.log(`✅ [push-service-telemetry] OneSignal API call SUCCESS! Response Status: ${response.status}`);
+    console.log(`✅ [push-service-telemetry] Response Data:`, JSON.stringify(response.data, null, 2));
     return response;
   } catch (axiosErr: any) {
     const errorData = axiosErr.response?.data;
-    console.error(`❌ OneSignal AXIOS ERROR:`, JSON.stringify(errorData || axiosErr.message));
+    const errorStatus = axiosErr.response?.status;
+    console.error(`❌ [push-service-telemetry] OneSignal API call FAILED! HTTP Status Code: ${errorStatus || 'unknown'}`);
+    console.error(`❌ [push-service-telemetry] Error Object Response:`, JSON.stringify(errorData || axiosErr.message, null, 2));
     
     // Check for specific common errors
     if (errorData?.errors?.includes("Invalid REST API Key")) {
