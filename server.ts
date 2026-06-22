@@ -147,8 +147,18 @@ const initializeFirebase = async (force = false) => {
       };
 
       try {
-        adminOptions.credential = admin.credential.applicationDefault();
-      } catch (e) {
+        if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+          console.log("🔑 Initializing Firebase Admin via custom credentials from environment variables.");
+          adminOptions.credential = admin.credential.cert({
+            projectId: process.env.FIREBASE_PROJECT_ID,
+            clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+            privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+          });
+        } else {
+          adminOptions.credential = admin.credential.applicationDefault();
+        }
+      } catch (e: any) {
+        console.warn("ℹ️ Default credential loading failed:", e.message);
         console.warn("ℹ️ Using implicit container credentials");
       }
 

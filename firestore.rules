@@ -289,7 +289,7 @@ service cloud.firestore {
     }
 
     match /carts/{cartId} {
-      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid) || (resource.data.status == 'active');
       allow write: if true;
     }
 
