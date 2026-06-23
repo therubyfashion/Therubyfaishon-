@@ -17,7 +17,7 @@ export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const saved = localStorage.getItem('ruby_wishlist');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) return parsed.filter(Boolean);
       }
       return [];
     } catch (e) {
@@ -27,23 +27,32 @@ export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    localStorage.setItem('ruby_wishlist', JSON.stringify(items));
+    if (Array.isArray(items)) {
+      localStorage.setItem('ruby_wishlist', JSON.stringify(items.filter(Boolean)));
+    }
   }, [items]);
 
   const toggleWishlist = async (product: Product) => {
-    const exists = items.find(i => i.id === product.id);
+    if (!product || !product.id) return;
     
-    if (exists) {
-      setItems(prev => prev.filter(i => i.id !== product.id));
-    } else {
-      setItems(prev => [...prev, product]);
-    }
+    setItems(prev => {
+      const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
+      const exists = safePrev.find(i => i.id === product.id);
+      if (exists) {
+        return safePrev.filter(i => i.id !== product.id);
+      } else {
+        return [...safePrev, product];
+      }
+    });
   };
 
-  const isInWishlist = (productId: string) => items.some(i => i.id === productId);
+  const isInWishlist = (productId: string) => {
+    if (!productId || !Array.isArray(items)) return false;
+    return items.filter(Boolean).some(i => i.id === productId);
+  };
 
   return (
-    <WishlistContext.Provider value={{ items, toggleWishlist, isInWishlist }}>
+    <WishlistContext.Provider value={{ items: items || [], toggleWishlist, isInWishlist }}>
       {children}
     </WishlistContext.Provider>
   );

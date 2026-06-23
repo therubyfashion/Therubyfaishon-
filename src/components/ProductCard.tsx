@@ -17,9 +17,14 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const { addToCart } = useCart();
   const { toggleWishlist, isInWishlist } = useWishlist();
 
+  if (!product || !product.id) {
+    return null;
+  }
+
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    
     addToCart(product, (product.sizes && product.sizes[0]) || 'M');
     
     // Meta Pixel Tracking
@@ -38,8 +43,11 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const handleWishlist = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    const isCurrentlyInWishlist = isInWishlist(product.id);
     toggleWishlist(product);
-    if (isInWishlist(product.id)) {
+    
+    if (isCurrentlyInWishlist) {
       toast.info(`Removed ${product.name} from wishlist`);
     } else {
       toast.success(`Added ${product.name} to wishlist`);

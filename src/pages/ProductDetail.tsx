@@ -579,6 +579,16 @@ export default function ProductDetail() {
   const colors = Array.from(new Set(product.variants?.map(v => v.color) || []));
   const isFavorite = isInWishlist(product.id);
 
+  const handleToggleWishlist = () => {
+    const isCurrentlyFavorite = isFavorite;
+    toggleWishlist(product);
+    if (isCurrentlyFavorite) {
+      toast.info(`Removed ${product.name} from wishlist`);
+    } else {
+      toast.success(`Added ${product.name} to wishlist`);
+    }
+  };
+
   return (
     <div id="product-detail" className="bg-gray-50 min-h-screen pb-20">
       <Helmet>
@@ -632,7 +642,7 @@ export default function ProductDetail() {
             {/* Quick Actions Overlay */}
             <div className="absolute top-6 right-6 flex flex-col gap-3 z-10 pointer-events-none">
               <button 
-                onClick={(e) => { e.stopPropagation(); toggleWishlist(product); }}
+                onClick={(e) => { e.stopPropagation(); handleToggleWishlist(); }}
                 className={`pointer-events-auto w-12 h-12 rounded-2xl flex items-center justify-center shadow-xl backdrop-blur-md transition-all active:scale-90 ${isFavorite ? 'bg-ruby text-white' : 'bg-white/80 text-gray-400 hover:text-ruby'}`}
               >
                 <Heart size={20} fill={isFavorite ? 'currentColor' : 'none'} />
@@ -781,7 +791,7 @@ export default function ProductDetail() {
               {product.stock > 0 ? 'Add to Shopping Bag' : 'Out of Stock'}
             </button>
             <button 
-              onClick={() => toggleWishlist(product)}
+              onClick={handleToggleWishlist}
               className={`w-[52px] h-[52px] rounded-[10px] border-[1.5px] flex items-center justify-center transition-all ${isFavorite ? 'bg-ruby/5 border-ruby/20 text-ruby' : 'bg-white border-gray-100 text-gray-400 hover:border-ruby'}`}
             >
               <Heart size={22} fill={isFavorite ? 'currentColor' : 'none'} />

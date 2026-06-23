@@ -3390,6 +3390,122 @@ async function startServer() {
     }
   });
 
+  // Dedicated verification endpoint for testing real order notification workflows
+  app.post("/api/verify-real-order-workflow", async (req, res) => {
+    const logs: string[] = [];
+    const addLog = (msg: string, detail?: any) => {
+      const fullMsg = detail ? `${msg} ${JSON.stringify(detail, null, 2)}` : msg;
+      console.log(`🧪 [TEST-RUNNER] ${fullMsg}`);
+      logs.push(fullMsg);
+    };
+
+    addLog("Starting automated workflow verification for real order notifications...");
+
+    try {
+      let targetUserId = "test_customer_verification_id";
+      let targetUserEmail = "test_customer@example.com";
+      let targetOneSignalId = null;
+
+      // 1. Identify a real user to target
+      if (db) {
+        try {
+          addLog("Scanning Firestore for user 'mdsagaransari65670@gmail.com' and subscribed devices...");
+          const userSnap = await db.collection('users').where('email', '==', 'mdsagaransari65670@gmail.com').get();
+          
+          if (!userSnap.empty) {
+            const uDoc = userSnap.docs[0];
+            targetUserId = uDoc.id;
+            targetUserEmail = uDoc.data().email || targetUserEmail;
+            targetOneSignalId = uDoc.data().onesignalId || null;
+            addLog(`Found target user profile for '${targetUserEmail}'. UserID: ${targetUserId}, OneSignal ID: ${targetOneSignalId || 'none'}`);
+          } else {
+            addLog("Target user 'mdsagaransari65670@gmail.com' not found. Searching for any user with a OneSignal subscription ID...");
+            const subUsersSnap = await db.collection('users').where('onesignalId', '!=', null).limit(1).get();
+            if (!subUsersSnap.empty) {
+              const uDoc = subUsersSnap.docs[0];
+              targetUserId = uDoc.id;
+              targetUserEmail = uDoc.data().email || "unknown";
+              targetOneSignalId = uDoc.data().onesignalId;
+              addLog(`Found alternative subscribed user: '${targetUserEmail}'. UserID: ${targetUserId}, SubscriptionID: ${targetOneSignalId}`);
+            } else {
+              addLog("No subscribed users found. Defaulting to verification placeholders.");
+            }
+          }
+        } catch (authErr: any) {
+          addLog(`Scanning users collection warned: ${authErr.message}`);
+        }
+      }
+
+      // 2. Perform automated order creation event
+      addLog("Placing a test order automatically in the real Firestore 'orders' collection...");
+      let orderId = "simulated_order_" + Date.now();
+      if (db && isDbWriteable !== false) {
+        try {
+          const newOrderDoc = await db.collection('orders').add({
+            userId: targetUserId,
+            total: 1080,
+            status: "Pending",
+            paymentStatus: "Pending",
+            createdAt: new Date().toISOString(),
+            isTestOrder: true,
+            items: [
+              { name: "Verifiable Fashion Item", price: 1080, quantity: 1 }
+            ]
+          });
+          orderId = newOrderDoc.id;
+          addLog(`✅ Order creation fired successfully. Inserted Order ID: #${orderId}`);
+        } catch (orderErr: any) {
+          addLog(`⚠️ Firestore write warned/failed (will simulate triggers manually): ${orderErr.message}`);
+        }
+      } else {
+        addLog(`🧪 Firestore DB offline or not writable. Triggering programmatic fallback test...`);
+      }
+
+      // 3. Define contents for notifications
+      const adminTitle = "New Order Received 🛍️";
+      const adminBody = `Order #${orderId} of ₹1080 has been placed.`;
+      const customerTitle = "Order Successfully Placed 🎉";
+      const customerBody = "Your order has been received. Track status using view details!";
+
+      addLog("Confirming sendAdminNotification() execution...");
+      addLog("Building Admin Notification Payload (utilizing filters)...");
+      
+      const adminResponse = await NotificationService.sendAdmin(adminTitle, adminBody, {
+        url: `/admin?tab=orders`
+      });
+      addLog("Admin Delivery Execution complete.", adminResponse);
+
+      addLog("Confirming sendCustomerNotification() execution...");
+      addLog(`Building Customer Notification Payload for target user: ${targetUserId}...`);
+      
+      const customerResponse = await NotificationService.sendCustomer(targetUserId, customerTitle, customerBody, {
+        url: `/track/${orderId}`
+      });
+      addLog("Customer Delivery Execution complete.", customerResponse);
+
+      res.json({
+        success: true,
+        logs,
+        orderId,
+        targetUser: {
+          uid: targetUserId,
+          email: targetUserEmail,
+          onesignalId: targetOneSignalId
+        },
+        adminDeliveryResult: adminResponse,
+        customerDeliveryResult: customerResponse,
+        isSubscribed: !!targetOneSignalId
+      });
+    } catch (err: any) {
+      addLog(`❌ Fatal test error during verification sequence: ${err.message}`);
+      res.status(500).json({
+        success: false,
+        error: err.message,
+        logs
+      });
+    }
+  });
+
   // Explicit route for robots.txt to ensure crawlers are NEVER blocked under any conditions
   app.get('/robots.txt', (req, res) => {
     res.type('text/plain');
@@ -3456,32 +3572,7 @@ async function startServer() {
   httpServer.listen(PORT, "0.0.0.0", async () => {
     console.log(`✅ SERVER IS LIVE: http://localhost:${PORT}`);
     
-    // VERIFICATION DISPATCH UPON BOOT
-    setTimeout(async () => {
-      console.log("\n=================================================");
-      console.log("⚡ [STARTUP PUSH VALIDATION] Executing test push dispatches...");
-      console.log("=================================================");
-      
-      try {
-        const dummyAdminTitle = "Startup Verification: Admin Check 🕵️‍♂️";
-        const dummyAdminBody = "This is a startup validation test notification sent to all administrators via segments and subscription IDs.";
-        const res = await NotificationService.sendAdmin(dummyAdminTitle, dummyAdminBody);
-        console.log("⚡ [STARTUP PUSH VALIDATION] sendAdmin Response Result:", res);
-      } catch (err: any) {
-        console.warn("⚠️ Startup test admin notification error:", err.message);
-      }
-
-      try {
-        const dummyUserTitle = "Startup Verification: User Check 🛍️";
-        const dummyUserBody = "This is a startup validation test notification sent to a demo customer to confirm direct-targeting compatibility.";
-        const res = await NotificationService.sendCustomer("test_customer_verification_id", dummyUserTitle, dummyUserBody);
-        console.log("⚡ [STARTUP PUSH VALIDATION] sendCustomer Response Result:", res);
-      } catch (err: any) {
-        console.warn("⚠️ Startup test customer notification error:", err.message);
-      }
-      
-      console.log("=================================================\n");
-    }, 4000);
+    // Startup validation removed as requested by user. Only real order flow notifications are supported.
     
     // AUTO-CLEANUP LOGIC FOR MANUAL REQUEST
     const cleanupFlag = path.join(process.cwd(), 'DO_CLEANUP');

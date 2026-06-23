@@ -30,7 +30,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const saved = localStorage.getItem('ruby_cart');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) return parsed.filter(Boolean);
       }
       return [];
     } catch (e) {
@@ -42,27 +42,30 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [promotions, setPromotions] = useState<Promotion[]>([]);
 
   useEffect(() => {
-    localStorage.setItem('ruby_cart', JSON.stringify(items));
+    if (Array.isArray(items)) {
+      localStorage.setItem('ruby_cart', JSON.stringify(items.filter(Boolean)));
+    }
     
     // Abandoned Cart Tracking Logic
-    if (user) {
+    if (user && Array.isArray(items)) {
       const syncCartToFirestore = async () => {
         try {
-          if (items.length > 0) {
+          const validItems = items.filter(Boolean);
+          if (validItems.length > 0) {
             await setDoc(doc(db, 'carts', user.uid), {
               userId: user.uid,
               userName: user.displayName || 'Guest',
               userEmail: user.email,
-              items: items.map(item => ({
-                id: item.id,
-                name: item.name,
-                price: item.price,
-                quantity: item.quantity,
-                selectedSize: item.selectedSize,
-                selectedColor: item.selectedColor,
+              items: validItems.map(item => ({
+                id: item.id || '',
+                name: item.name || '',
+                price: Number(item.price) || 0,
+                quantity: Number(item.quantity) || 1,
+                selectedSize: item.selectedSize || '',
+                selectedColor: item.selectedColor || '',
                 image: (item.images && item.images.length > 0) ? item.images[0] : ''
               })),
-              total: items.reduce((sum, i) => sum + (i.price * i.quantity), 0),
+              total: validItems.reduce((sum, i) => sum + ((Number(i.price) || 0) * (Number(i.quantity) || 1)), 0),
               updatedAt: serverTimestamp(),
               status: 'active'
             });
@@ -99,43 +102,52 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const addToCart = (product: Product, size: string, color?: string, quantity: number = 1) => {
+    if (!product || !product.id) return;
     setItems(prev => {
-      const existing = prev.find(i => 
-        i.id === product.id && 
+      const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
+      const existing = safePrev.find(i => 
+        i && i.id === product.id && 
         i.selectedSize === size && 
         i.selectedColor === color
       );
       if (existing) {
         const stockLimit = (product.stock !== undefined && product.stock !== null) ? Number(product.stock) : 99;
         const newQuantity = Math.min(stockLimit, existing.quantity + quantity);
-        return prev.map(i => 
-          (i.id === product.id && i.selectedSize === size && i.selectedColor === color) 
+        return safePrev.map(i => 
+          (i && i.id === product.id && i.selectedSize === size && i.selectedColor === color) 
             ? { ...i, quantity: newQuantity } 
             : i
         );
       }
       const stockLimit = (product.stock !== undefined && product.stock !== null) ? Number(product.stock) : 99;
       const initialQuantity = Math.min(stockLimit, quantity);
-      return [...prev, { ...product, selectedSize: size, selectedColor: color, quantity: initialQuantity }];
+      return [...safePrev, { ...product, selectedSize: size, selectedColor: color, quantity: initialQuantity }];
     });
   };
 
   const removeFromCart = (productId: string, size: string, color?: string) => {
-    setItems(prev => prev.filter(i => 
-      !(i.id === productId && i.selectedSize === size && i.selectedColor === color)
-    ));
+    if (!productId) return;
+    setItems(prev => {
+      const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
+      return safePrev.filter(i => 
+        !(i && i.id === productId && i.selectedSize === size && i.selectedColor === color)
+      );
+    });
   };
 
   const updateQuantity = (productId: string, size: string, quantity: number, color?: string) => {
-    if (quantity < 1) return;
-    setItems(prev => prev.map(i => {
-      if (i.id === productId && i.selectedSize === size && i.selectedColor === color) {
-        const stockLimit = (i.stock !== undefined && i.stock !== null) ? Number(i.stock) : 99;
-        const finalQuantity = Math.min(stockLimit, quantity);
-        return { ...i, quantity: finalQuantity };
-      }
-      return i;
-    }));
+    if (!productId || quantity < 1) return;
+    setItems(prev => {
+      const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
+      return safePrev.map(i => {
+        if (i && i.id === productId && i.selectedSize === size && i.selectedColor === color) {
+          const stockLimit = (i.stock !== undefined && i.stock !== null) ? Number(i.stock) : 99;
+          const finalQuantity = Math.min(stockLimit, quantity);
+          return { ...i, quantity: finalQuantity };
+        }
+        return i;
+      });
+    });
   };
 
   const clearCart = () => {

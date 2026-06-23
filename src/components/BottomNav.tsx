@@ -9,7 +9,9 @@ export default function BottomNav() {
   const { items } = useCart();
   const { unreadCount } = useNotifications();
   const location = useLocation();
-  const cartCount = items.reduce((acc, item) => acc + item.quantity, 0);
+  const cartCount = Array.isArray(items) 
+    ? items.filter(Boolean).reduce((acc, item) => acc + (Number(item.quantity) || 1), 0) 
+    : 0;
 
   const navItems = [
     { icon: Home, label: 'Home', path: '/' },
