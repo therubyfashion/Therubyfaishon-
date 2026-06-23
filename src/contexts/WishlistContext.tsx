@@ -15,7 +15,11 @@ export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [items, setItems] = useState<Product[]>(() => {
     try {
       const saved = localStorage.getItem('ruby_wishlist');
-      return saved ? JSON.parse(saved) : [];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+      return [];
     } catch (e) {
       console.warn("Failed to parse ruby_wishlist:", e);
       return [];

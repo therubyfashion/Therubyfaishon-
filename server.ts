@@ -267,271 +267,323 @@ setTimeout(() => {
     });
 }, 2000);
 
-// Helper to send OneSignal notifications via axios
-async function sendOneSignalNotification(notification: any, config?: { appId?: string, restKey?: string }) {
-  let appId = (config?.appId || '').trim();
-  let restKey = (config?.restKey || '').trim();
-  
-  const isPlaceholder = (val: string) => !val || val === 'dummy-id' || val === 'YOUR_ONESIGNAL_APP_ID' || val === 'placeholder';
+/**
+ * Single Reusable Notification Service
+ * Centralizes credentials checks, targeting fields (using only latest include_subscription_ids),
+ * and logging of all administrative / customer notifications.
+ */
+export const NotificationService = {
+  /**
+   * Helper to verify and log OneSignal configuration.
+   * Prompts if App ID or API Key is missing.
+   */
+  async getCredentials(config?: { appId?: string; restKey?: string }) {
+    let appId = (config?.appId || '').trim();
+    let restKey = (config?.restKey || '').trim();
+    
+    const isPlaceholder = (val: string) => !val || val === 'dummy-id' || val === 'YOUR_ONESIGNAL_APP_ID' || val === 'placeholder';
 
-  // 1. If overrides not provided, try Firestore first (Dynamic settings)
-  if (!appId || isPlaceholder(appId)) {
-    try {
-      const settings = await resilientGetSettings();
-      if (settings && settings.oneSignalAppId && !isPlaceholder(settings.oneSignalAppId)) {
-        appId = String(settings.oneSignalAppId).trim();
-        restKey = String(settings.oneSignalRestApiKey || restKey || '').trim();
-        console.log(`OneSignal: Loaded config dynamically (${appId.substring(0, 8)}...)`);
+    // 1. Dynamic check via Settings in Firestore
+    if (!appId || isPlaceholder(appId)) {
+      try {
+        const settings = await resilientGetSettings();
+        if (settings && settings.oneSignalAppId && !isPlaceholder(settings.oneSignalAppId)) {
+          appId = String(settings.oneSignalAppId).trim();
+          restKey = String(settings.oneSignalRestApiKey || restKey || '').trim();
+        }
+      } catch (e: any) {
+        console.error("NotificationService [Credentials]: Failed to fetch settings dynamically:", e.message);
       }
-    } catch (e: any) {
-      console.error("OneSignal: Failed to fetch settings:", e.message);
     }
-  }
 
-  // 2. Fallback to Environment Variables (Static settings)
-  if (!appId || isPlaceholder(appId)) {
-    appId = (process.env.ONESIGNAL_APP_ID || process.env.VITE_ONESIGNAL_APP_ID || '').trim();
+    // 2. Fallback to static Environment Variables
+    if (!appId || isPlaceholder(appId)) {
+      appId = (process.env.ONESIGNAL_APP_ID || process.env.VITE_ONESIGNAL_APP_ID || '').trim();
+      if (!restKey || isPlaceholder(restKey)) {
+        restKey = (process.env.ONESIGNAL_REST_API_KEY || '').trim();
+      }
+    }
+
+    // Validate credentials
+    if (isPlaceholder(appId)) {
+      const errMsg = "❌ OneSignal ERROR: App ID is missing or a placeholder. Push notifications will not deliver.";
+      console.error(errMsg);
+      throw new Error(errMsg);
+    }
+
     if (!restKey || isPlaceholder(restKey)) {
-      restKey = (process.env.ONESIGNAL_REST_API_KEY || '').trim();
+      const errMsg = "❌ OneSignal ERROR: REST API Key is missing or a placeholder. Push notifications will not deliver.";
+      console.error(errMsg);
+      throw new Error(errMsg);
     }
-    if (appId && !isPlaceholder(appId)) {
-      console.log(`OneSignal: Using configuration from Environment Variables (${appId.substring(0, 8)}...)`);
+
+    return { appId, restKey };
+  },
+
+  /**
+   * Core delivery engine. Publishes payload directly to OneSignal API v1 endpoint.
+   */
+  async send(notification: any, config?: { appId?: string; restKey?: string }) {
+    const { appId, restKey } = await this.getCredentials(config);
+    const cleanRestKey = restKey.replace(/Basic\s+/i, '').trim();
+
+    const headers = { 
+      'Content-Type': 'application/json',
+      'Authorization': `Basic ${cleanRestKey}`
+    };
+
+    // Clean payload of legacy, deprecated fields and enforce single targeting field
+    const payload = { ...notification, app_id: appId };
+    delete payload.include_player_ids; // Ensure complete removal of include_player_ids if mistakenly passed
+
+    console.log(`📡 [NotificationService] Submitting payload to OneSignal for App ID: ${appId}`);
+    console.log(`📡 [NotificationService] Target Field Audit:`, {
+      include_subscription_ids: payload.include_subscription_ids || 'none',
+      filters: payload.filters || 'none',
+      segments: payload.included_segments || 'none'
+    });
+
+    try {
+      const response = await axios.post('https://onesignal.com/api/v1/notifications', 
+        payload,
+        { headers }
+      );
+      console.log(`✅ [NotificationService] Delivery SUCCESS! Status: ${response.status}`, JSON.stringify(response.data, null, 2));
+      return response;
+    } catch (axiosErr: any) {
+      const errorData = axiosErr.response?.data;
+      const errorStatus = axiosErr.response?.status;
+      console.error(`❌ [NotificationService] Delivery FAILED! HTTP Status: ${errorStatus || 'unknown'}`);
+      console.error(`❌ [NotificationService] Error Response:`, JSON.stringify(errorData || axiosErr.message, null, 2));
+      
+      if (errorData?.errors?.includes("Invalid REST API Key")) {
+        throw new Error("OneSignal Error: Your REST API Key is invalid. Please check Admin Settings.");
+      }
+      if (errorData?.errors?.includes("app_id not found")) {
+        throw new Error("OneSignal Error: Your App ID is invalid or doesn't match the REST Key.");
+      }
+      throw axiosErr;
+    }
+  },
+
+  /**
+   * Safe persistent logging of dispatch statuses.
+   */
+  async log(title: string, body: string, recipient: string, status: string) {
+    const logData = {
+      title,
+      body,
+      recipient,
+      status,
+      timestamp: new Date().toISOString()
+    };
+    try {
+      if (clientDb && isClientDbReady) {
+        await cAddDoc(cCollection(clientDb, 'push_notification_logs'), logData);
+      } else if (db && isDbWriteable !== false) {
+        await db.collection('push_notification_logs').add(logData);
+      }
+      console.log(`📝 [NotificationService] Logged notification: [${status}] ${title} -> ${recipient}`);
+    } catch (err: any) {
+      console.error("❌ [NotificationService] Failed to record log:", err.message);
+    }
+  },
+
+  /**
+   * Sends order notification to Admin users.
+   */
+  async sendAdmin(title: string, body: string, options: { url?: string; imageUrl?: string } = {}) {
+    const { url = '/', imageUrl } = options;
+    try {
+      console.log(`[NotificationService] Preparing admin notification: "${title}" - "${body}"`);
+      
+      const notification: any = {
+        contents: { en: body },
+        headings: { en: title },
+        url: url,
+      };
+
+      if (imageUrl) {
+        notification.big_picture = imageUrl;
+        notification.chrome_web_image = imageUrl;
+        notification.firefox_icon = imageUrl;
+        notification.ios_attachments = { id1: imageUrl };
+      }
+
+      // 1. Fetch all admin subscription ids
+      let adminSubIds: string[] = [];
+      if (db) {
+        try {
+          const adminsSnap = await db.collection('users').where('role', '==', 'admin').get();
+          if (adminsSnap && !adminsSnap.empty) {
+            adminsSnap.forEach((doc: any) => {
+              const uData = doc.data();
+              if (uData && uData.onesignalId) {
+                adminSubIds.push(String(uData.onesignalId).trim());
+              }
+            });
+          }
+        } catch (dbErr: any) {
+          console.warn("[NotificationService] Admin lookup warning:", dbErr.message);
+        }
+      }
+      
+      if (adminSubIds.length === 0 && clientDb && isClientDbReady) {
+        try {
+          const adminsSnap = await cGetDocs(cQuery(
+            cCollection(clientDb, 'users'),
+            cWhere('role', '==', 'admin')
+          ));
+          if (!adminsSnap.empty) {
+            adminsSnap.forEach((doc: any) => {
+              const uData = doc.data();
+              if (uData && uData.onesignalId) {
+                adminSubIds.push(String(uData.onesignalId).trim());
+              }
+            });
+          }
+        } catch (clientDbErr: any) {
+          console.warn("[NotificationService] Client SDK Admin lookup warning:", clientDbErr.message);
+        }
+      }
+
+      let resultStatus = "success";
+
+      // Try tag filter delivery
+      try {
+        const filterNotif = {
+          ...notification,
+          filters: [{ field: "tag", key: "role", relation: "=", value: "admin" }]
+        };
+        await this.send(filterNotif);
+      } catch (fErr: any) {
+        console.warn("[NotificationService] Tag filter push warning:", fErr.message);
+        resultStatus = "warning";
+      }
+
+      // Try direct subscription delivery
+      if (adminSubIds.length > 0) {
+        try {
+          const directNotif = {
+            ...notification,
+            include_subscription_ids: adminSubIds
+          };
+          await this.send(directNotif);
+          resultStatus = "success";
+        } catch (dErr: any) {
+          console.warn("[NotificationService] Direct admin subscription push warning:", dErr.message);
+        }
+      }
+
+      await this.log(title, body, "admin", resultStatus);
+      return { success: true, status: resultStatus };
+    } catch (err: any) {
+      console.error("❌ [NotificationService] sendAdmin failed:", err.message);
+      await this.log(title, body, "admin", "failed");
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Sends status update notification to customer.
+   */
+  async sendCustomer(userId: string, title: string, body: string, options: { url?: string } = {}) {
+    const { url = '/' } = options;
+    try {
+      if (!userId) {
+        console.warn("[NotificationService] sendCustomer aborted: missing userId");
+        return { success: false, error: "userId is required" };
+      }
+      console.log(`[NotificationService] Preparing customer notification to User ${userId}: "${title}"`);
+
+      let onesignalId = null;
+      let userEmail = "";
+      if (db) {
+        try {
+          const userDoc = await db.collection('users').doc(String(userId)).get();
+          if (userDoc.exists) {
+            const userData = userDoc.data();
+            onesignalId = userData?.onesignalId || null;
+            userEmail = userData?.email || "";
+          }
+        } catch (dbErr: any) {
+          console.warn("[NotificationService] User lookup error:", dbErr.message);
+        }
+      }
+
+      if (!onesignalId && clientDb && isClientDbReady) {
+        try {
+          const userDocSnapshot = await cGetDoc(cDoc(clientDb, 'users', String(userId)));
+          if (userDocSnapshot.exists()) {
+            const userData = userDocSnapshot.data();
+            onesignalId = userData?.onesignalId || null;
+            userEmail = userData?.email || "";
+          }
+        } catch (clientDbErr: any) {
+          console.warn("[NotificationService] Client SDK User lookup error:", clientDbErr.message);
+        }
+      }
+
+      const notification: any = {
+        contents: { en: body },
+        headings: { en: title },
+        url: url,
+        include_external_user_ids: [String(userId)],
+        include_aliases: {
+          external_id: [String(userId)]
+        }
+      };
+
+      if (onesignalId) {
+        if (String(onesignalId).startsWith('simulated_push_')) {
+          console.log(`[NotificationService] Simulating push to simulated device: ${onesignalId}`);
+          await this.log(title, body, userEmail || userId, "simulated");
+          return { success: true, status: "simulated" };
+        }
+        notification.include_subscription_ids = [onesignalId];
+      }
+
+      const response = await this.send(notification);
+      const responseData = response?.data;
+      
+      let resultStatus = "success";
+      if (responseData?.errors && Array.isArray(responseData.errors)) {
+        const errorMsg = responseData.errors.join(', ');
+        if (errorMsg.includes("not subscribed") || errorMsg.includes("not found") || errorMsg.includes("players are not subscribed")) {
+          resultStatus = "warning";
+        }
+      }
+
+      await this.log(title, body, userEmail || userId, resultStatus);
+      return { success: true, status: resultStatus };
+    } catch (err: any) {
+      console.error(`❌ [NotificationService] sendCustomer failed:`, err.message);
+      const errLower = String(err.message || '').toLowerCase();
+      let finalStatus = "failed";
+      if (errLower.includes("not subscribed") || errLower.includes("players are not subscribed") || errLower.includes("not found")) {
+        finalStatus = "warning";
+      }
+      await this.log(title, body, userId, finalStatus);
+      return { success: false, error: err.message };
     }
   }
+};
 
-  if (isPlaceholder(appId)) {
-    console.error("❌ OneSignal ERROR: App ID is missing or a placeholder.");
-    throw new Error("OneSignal is not configured properly: App ID is missing.");
-  }
-
-  if (!restKey || isPlaceholder(restKey)) {
-    console.error("❌ OneSignal ERROR: REST API Key is missing or a placeholder.");
-    throw new Error("OneSignal is not configured properly: REST API Key is missing.");
-  }
-
-  // Clean the key (remove 'Basic ' if user accidentally copied it)
-  const cleanRestKey = restKey.replace(/Basic\s+/i, '').trim();
-
-  const headers: any = { 
-    'Content-Type': 'application/json',
-    'Authorization': `Basic ${cleanRestKey}`
-  };
-
-  const payload = { ...notification, app_id: appId };
-
-  console.log(`📡 [push-service-telemetry] Preparing OneSignal API Request...`);
-  console.log(`📡 [push-service-telemetry] URL: https://onesignal.com/api/v1/notifications`);
-  console.log(`📡 [push-service-telemetry] App ID: "${appId}"`);
-  console.log(`📡 [push-service-telemetry] REST API Key (trimmed characters): "${cleanRestKey.substring(0, 4)}...${cleanRestKey.substring(cleanRestKey.length - 4)}"`);
-  console.log(`📡 [push-service-telemetry] Request Body Payload:`, JSON.stringify(payload, null, 2));
-
-  try {
-    const response = await axios.post('https://onesignal.com/api/v1/notifications', 
-      payload,
-      { headers }
-    );
-    console.log(`✅ [push-service-telemetry] OneSignal API call SUCCESS! Response Status: ${response.status}`);
-    console.log(`✅ [push-service-telemetry] Response Data:`, JSON.stringify(response.data, null, 2));
-    return response;
-  } catch (axiosErr: any) {
-    const errorData = axiosErr.response?.data;
-    const errorStatus = axiosErr.response?.status;
-    console.error(`❌ [push-service-telemetry] OneSignal API call FAILED! HTTP Status Code: ${errorStatus || 'unknown'}`);
-    console.error(`❌ [push-service-telemetry] Error Object Response:`, JSON.stringify(errorData || axiosErr.message, null, 2));
-    
-    // Check for specific common errors
-    if (errorData?.errors?.includes("Invalid REST API Key")) {
-      throw new Error("OneSignal Error: Your REST API Key is invalid. Please check Admin Settings.");
-    }
-    if (errorData?.errors?.includes("app_id not found")) {
-      throw new Error("OneSignal Error: Your App ID is invalid or doesn't match the REST Key.");
-    }
-    
-    throw axiosErr;
-  }
+// Compatible standalone wrappers delegating to the unified NotificationService
+async function sendOneSignalNotification(notification: any, config?: { appId?: string, restKey?: string }) {
+  return NotificationService.send(notification, config);
 }
 
 async function logNotificationToDatabase(title: string, body: string, recipient: string, status: string) {
-  const logData = {
-    title,
-    body,
-    recipient,
-    status,
-    timestamp: new Date().toISOString()
-  };
-  try {
-    if (clientDb && isClientDbReady) {
-      await cAddDoc(cCollection(clientDb, 'push_notification_logs'), logData);
-    } else if (db && isDbWriteable !== false) {
-      await db.collection('push_notification_logs').add(logData);
-    }
-    console.log(`📝 Logged notification: [${status}] ${title}`);
-  } catch (err: any) {
-    console.error("Failed to log notification:", err.message);
-  }
+  return NotificationService.log(title, body, recipient, status);
 }
 
 async function sendAdminNotification(title: string, body: string, url: string = '/') {
-  try {
-    console.log(`[push-service] Triggering sendAdminNotification: "${title}" - "${body}"`);
-    
-    const notification: any = {
-      contents: { en: body },
-      headings: { en: title },
-      url: url,
-    };
-
-    let adminPlayerIds: string[] = [];
-    if (db) {
-      try {
-        const adminsSnap = await db.collection('users').where('role', '==', 'admin').get();
-        if (adminsSnap && !adminsSnap.empty) {
-          adminsSnap.forEach((doc: any) => {
-            const uData = doc.data();
-            if (uData && uData.onesignalId) {
-              adminPlayerIds.push(String(uData.onesignalId).trim());
-            }
-          });
-        }
-      } catch (dbErr: any) {
-        console.warn("sendAdminNotification: Firestore Admin lookup failed:", dbErr.message);
-      }
-    }
-    
-    if (adminPlayerIds.length === 0 && clientDb && isClientDbReady) {
-      try {
-        const adminsSnap = await cGetDocs(cQuery(
-          cCollection(clientDb, 'users'),
-          cWhere('role', '==', 'admin')
-        ));
-        if (!adminsSnap.empty) {
-          adminsSnap.forEach((doc: any) => {
-            const uData = doc.data();
-            if (uData && uData.onesignalId) {
-              adminPlayerIds.push(String(uData.onesignalId).trim());
-            }
-          });
-        }
-      } catch (clientDbErr: any) {
-        console.warn("sendAdminNotification: Client SDK Admin lookup failed:", clientDbErr.message);
-      }
-    }
-
-    let resultStatus = "success";
-
-    try {
-      const filterNotif = {
-        ...notification,
-        filters: [{ field: "tag", key: "role", relation: "=", value: "admin" }]
-      };
-      await sendOneSignalNotification(filterNotif);
-    } catch (fErr: any) {
-      console.warn("sendAdminNotification tag filter warning:", fErr.message);
-      resultStatus = "warning";
-    }
-
-    if (adminPlayerIds.length > 0) {
-      try {
-        const directNotif = {
-          ...notification,
-          include_player_ids: adminPlayerIds,
-          include_subscription_ids: adminPlayerIds
-        };
-        await sendOneSignalNotification(directNotif);
-        resultStatus = "success";
-      } catch (dErr: any) {
-        console.warn("sendAdminNotification direct player trigger warning:", dErr.message);
-      }
-    }
-
-    await logNotificationToDatabase(title, body, "admin", resultStatus);
-    return { success: true, status: resultStatus };
-  } catch (err: any) {
-    console.error("sendAdminNotification error:", err.message);
-    await logNotificationToDatabase(title, body, "admin", "failed");
-    return { success: false, error: err.message };
-  }
+  return NotificationService.sendAdmin(title, body, { url });
 }
 
 async function sendCustomerNotification(userId: string, title: string, body: string, url: string = '/') {
-  try {
-    if (!userId) {
-      console.warn("[push-service] sendCustomerNotification: missing userId");
-      return { success: false, error: "userId is required" };
-    }
-    console.log(`[push-service] Triggering sendCustomerNotification to ${userId}: "${title}" - "${body}"`);
-
-    let onesignalId = null;
-    let userEmail = "";
-    if (db) {
-      try {
-        const userDoc = await db.collection('users').doc(String(userId)).get();
-        if (userDoc.exists) {
-          const userData = userDoc.data();
-          onesignalId = userData?.onesignalId || null;
-          userEmail = userData?.email || "";
-        }
-      } catch (dbErr: any) {
-        console.warn("sendCustomerNotification: Admin SDK lookup warning:", dbErr.message);
-      }
-    }
-
-    if (!onesignalId && clientDb && isClientDbReady) {
-      try {
-        const userDocSnapshot = await cGetDoc(cDoc(clientDb, 'users', String(userId)));
-        if (userDocSnapshot.exists()) {
-          const userData = userDocSnapshot.data();
-          onesignalId = userData?.onesignalId || null;
-          userEmail = userData?.email || "";
-        }
-      } catch (clientDbErr: any) {
-        console.warn("sendCustomerNotification: Client SDK lookup warning:", clientDbErr.message);
-      }
-    }
-
-    const notification: any = {
-      contents: { en: body },
-      headings: { en: title },
-      url: url,
-      include_external_user_ids: [String(userId)],
-      include_aliases: {
-        external_id: [String(userId)]
-      }
-    };
-
-    if (onesignalId) {
-      if (String(onesignalId).startsWith('simulated_push_')) {
-        console.log(`[push-service] Simulating push delivery to: ${onesignalId}`);
-        await logNotificationToDatabase(title, body, userEmail || userId, "simulated");
-        return { success: true, status: "simulated" };
-      }
-      notification.include_player_ids = [onesignalId];
-      notification.include_subscription_ids = [onesignalId];
-    }
-
-    const response = await sendOneSignalNotification(notification);
-    const responseData = response?.data;
-    
-    let resultStatus = "success";
-    if (responseData?.errors && Array.isArray(responseData.errors)) {
-      const errorMsg = responseData.errors.join(', ');
-      if (errorMsg.includes("not subscribed") || errorMsg.includes("not found") || errorMsg.includes("players are not subscribed")) {
-        resultStatus = "warning";
-      }
-    }
-
-    await logNotificationToDatabase(title, body, userEmail || userId, resultStatus);
-    return { success: true, status: resultStatus };
-  } catch (err: any) {
-    console.error("sendCustomerNotification error:", err.message);
-    const errLower = String(err.message || '').toLowerCase();
-    let finalStatus = "failed";
-    if (errLower.includes("not subscribed") || errLower.includes("players are not subscribed") || errLower.includes("not found")) {
-      finalStatus = "warning";
-    }
-    await logNotificationToDatabase(title, body, userId, finalStatus);
-    return { success: false, error: err.message };
-  }
+  return NotificationService.sendCustomer(userId, title, body, { url });
 }
 
 async function runCartAbandonmentRecovery() {
@@ -2965,9 +3017,8 @@ async function startServer() {
             id: "simulated-msg-id-2026-" + Date.now() 
           });
         }
-        notification.include_player_ids = [playerId];
         notification.include_subscription_ids = [playerId];
-        console.log(`OneSignal: Targeting player and subscription ID: ${playerId}`);
+        console.log(`OneSignal: Targeting subscription ID: ${playerId}`);
       } else {
         notification.included_segments = type === 'all' ? ['Subscribed Users'] : (type === 'active' ? ['Active Users'] : ['Subscribed Users']);
       }
@@ -3079,7 +3130,6 @@ async function startServer() {
             id: "simulated-msg-id-2026-" + Date.now() 
           });
         }
-        notification.include_player_ids = [onesignalId];
         notification.include_subscription_ids = [onesignalId];
       }
 
@@ -3185,7 +3235,6 @@ async function startServer() {
         try {
           const directNotif = {
             ...notification,
-            include_player_ids: adminPlayerIds,
             include_subscription_ids: adminPlayerIds
           };
           const r2 = await sendOneSignalNotification(directNotif);

@@ -28,7 +28,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [items, setItems] = useState<CartItem[]>(() => {
     try {
       const saved = localStorage.getItem('ruby_cart');
-      return saved ? JSON.parse(saved) : [];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+      return [];
     } catch (e) {
       console.warn("Failed to parse ruby_cart:", e);
       return [];
@@ -146,77 +150,91 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let promoDiscount = 0;
     let autoOfferDiscount = 0;
 
-    items.forEach(item => {
-      const price = Number(item.price);
-      if (!isNaN(price)) {
-        subtotal += price * item.quantity;
-      }
-    });
+    if (Array.isArray(items)) {
+      items.forEach(item => {
+        if (!item) return;
+        const price = Number(item.price);
+        if (!isNaN(price)) {
+          subtotal += price * (Number(item.quantity) || 1);
+        }
+      });
+    }
 
     // Strategy 1: Legacy Settings-based Discounts (Optional/Fallback)
-    if (settings?.buy2Get1Free) {
+    if (settings?.buy2Get1Free && Array.isArray(items)) {
       items.forEach(item => {
-        const freeItems = Math.floor(item.quantity / 3);
-        autoOfferDiscount += freeItems * item.price;
+        if (!item) return;
+        const freeItems = Math.floor((Number(item.quantity) || 0) / 3);
+        autoOfferDiscount += freeItems * (Number(item.price) || 0);
       });
-    } else if (settings?.buy2GetPercentEnabled && settings?.buy2GetPercentOff) {
+    } else if (settings?.buy2GetPercentEnabled && settings?.buy2GetPercentOff && Array.isArray(items)) {
       items.forEach(item => {
-        if (item.quantity >= 2) {
-          const discountRate = settings.buy2GetPercentOff / 100;
-          autoOfferDiscount += (item.price * item.quantity) * discountRate;
+        if (!item) return;
+        const qty = Number(item.quantity) || 0;
+        if (qty >= 2) {
+          const discountRate = (Number(settings.buy2GetPercentOff) || 0) / 100;
+          autoOfferDiscount += ((Number(item.price) || 0) * qty) * discountRate;
         }
       });
     }
 
     // Strategy 2: Advanced Promotion Engine Logic
     let hasAppliedStackable = false;
-    promotions.forEach(promo => {
-      // 1. Check stackability
-      if (!promo.stackable && hasAppliedStackable) return;
+    if (Array.isArray(promotions) && Array.isArray(items)) {
+      promotions.forEach(promo => {
+        if (!promo) return;
+        // 1. Check stackability
+        if (!promo.stackable && hasAppliedStackable) return;
 
-      // 2. Initial Conditions
-      const cartTotal = subtotal;
-      const cartQty = items.reduce((sum, i) => sum + i.quantity, 0);
+        // 2. Initial Conditions
+        const cartTotal = subtotal;
+        const cartQty = items.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
 
-      const meetsValue = promo.conditions.minCartValue ? (cartTotal >= promo.conditions.minCartValue) : true;
-      const meetsQty = promo.conditions.minQuantity ? (cartQty >= promo.conditions.minQuantity) : true;
+        const conditions = promo.conditions || {};
+        const meetsValue = conditions.minCartValue ? (cartTotal >= conditions.minCartValue) : true;
+        const meetsQty = conditions.minQuantity ? (cartQty >= conditions.minQuantity) : true;
 
-      // TODO: Add Product/Category specific filters here
-      
-      if (meetsValue && meetsQty) {
-        let promoAppliedValue = 0;
+        if (meetsValue && meetsQty) {
+          let promoAppliedValue = 0;
 
-        if (promo.type === 'bxgy') {
-          items.forEach(item => {
-            const buyQty = promo.bxgyConfig?.buyQty || 2;
-            const getQty = promo.bxgyConfig?.getQty || 1;
-            const sets = Math.floor(item.quantity / (buyQty + getQty));
-            if (sets > 0) {
-              const freeQty = sets * getQty;
-              promoAppliedValue += freeQty * item.price;
-            }
-          });
-        } else if (promo.type === 'percentage') {
-          const rewardValue = promo.reward.value || 0;
-          promoAppliedValue = (cartTotal * rewardValue) / 100;
-        } else if (promo.type === 'flat') {
-          promoAppliedValue = promo.reward.value || 0;
+          if (promo.type === 'bxgy') {
+            const bxgyConfig = promo.bxgyConfig || {};
+            items.forEach(item => {
+              if (!item) return;
+              const buyQty = Number(bxgyConfig.buyQty) || 2;
+              const getQty = Number(bxgyConfig.getQty) || 1;
+              const itemQty = Number(item.quantity) || 0;
+              const sets = Math.floor(itemQty / (buyQty + getQty));
+              if (sets > 0) {
+                const freeQty = sets * getQty;
+                promoAppliedValue += freeQty * (Number(item.price) || 0);
+              }
+            });
+          } else if (promo.type === 'percentage') {
+            const reward = promo.reward || {};
+            const rewardValue = Number(reward.value) || 0;
+            promoAppliedValue = (cartTotal * rewardValue) / 100;
+          } else if (promo.type === 'flat') {
+            const reward = promo.reward || {};
+            promoAppliedValue = Number(reward.value) || 0;
+          }
+
+          // Apply Limits
+          const limits = promo.limits || {};
+          if (limits.maxDiscount && promoAppliedValue > limits.maxDiscount) {
+            promoAppliedValue = limits.maxDiscount;
+          }
+
+          if (promoAppliedValue > 0) {
+            autoOfferDiscount += promoAppliedValue;
+            if (!promo.stackable) hasAppliedStackable = true;
+          }
         }
-
-        // Apply Limits
-        if (promo.limits.maxDiscount && promoAppliedValue > promo.limits.maxDiscount) {
-          promoAppliedValue = promo.limits.maxDiscount;
-        }
-
-        if (promoAppliedValue > 0) {
-          autoOfferDiscount += promoAppliedValue;
-          if (!promo.stackable) hasAppliedStackable = true;
-        }
-      }
-    });
+      });
+    }
 
     if (appliedPromo) {
-      promoDiscount = appliedPromo.discount;
+      promoDiscount = Number(appliedPromo.discount) || 0;
     }
 
     const totalDiscount = promoDiscount + autoOfferDiscount;
