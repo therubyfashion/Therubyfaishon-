@@ -51,6 +51,36 @@ export const useVisitorTracking = () => {
           }
         }
 
+        const getBrowser = (): string => {
+          const ua = navigator.userAgent;
+          if (ua.includes('Chrome') && !ua.includes('Chromium') && !ua.includes('Edg')) return 'Chrome';
+          if (ua.includes('Safari') && !ua.includes('Chrome')) return 'Safari';
+          if (ua.includes('Firefox')) return 'Firefox';
+          if (ua.includes('Edg')) return 'Edge';
+          if (/Mobi|Android|iPhone/i.test(ua)) return 'Mobile Browser';
+          return 'Desktop Browser';
+        };
+
+        const getDevice = (): string => {
+          const ua = navigator.userAgent;
+          if (/Mobi|Android|iPhone|iPad|iPod/i.test(ua)) {
+            if (/iPhone/i.test(ua)) return 'iPhone';
+            if (/iPad/i.test(ua)) return 'iPad';
+            return 'Android';
+          }
+          return 'Desktop';
+        };
+
+        // Parse product name from path if applicable (e.g. /product/product-id)
+        let activeProduct = '';
+        if (location.pathname.startsWith('/product/')) {
+          const parts = location.pathname.split('/');
+          if (parts[2]) {
+            // Capitalize and format product slug or ID for presentation
+            activeProduct = decodeURIComponent(parts[2]).replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          }
+        }
+
         const trackingData = {
           id: sessionId,
           sessionId,
@@ -59,6 +89,9 @@ export const useVisitorTracking = () => {
           path: location.pathname,
           lastSeen: serverTimestamp(),
           startTime: sessionStorage.getItem('session_start_time') || new Date().toISOString(),
+          browser: getBrowser(),
+          device: getDevice(),
+          activeProduct: activeProduct || null,
           ...locationData
         };
 

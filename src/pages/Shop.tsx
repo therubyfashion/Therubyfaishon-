@@ -1,70 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Category } from '../types';
+import { fallbackCategories, fallbackProducts } from '../data/fallbackData';
 import ProductCard from '../components/ProductCard';
 import { ProductCardSkeleton } from '../components/Skeleton';
 import { Filter, ChevronDown, SlidersHorizontal, Truck, RefreshCw, ShieldCheck } from 'lucide-react';
-
-const fallbackProducts: Product[] = [
-  {
-    id: "fp1",
-    name: "Royal Crimson Anarkali Kurta Set",
-    price: 1899,
-    comparePrice: 2999,
-    category: ["Kurti"],
-    sizes: ["M", "L", "XL", "XXL"],
-    images: ["https://images.unsplash.com/photo-1621184455862-c163dfb30e0f?auto=format&fit=crop&q=80&w=800"],
-    stock: 25,
-    stockStatus: "In Stock",
-    isTrending: true,
-    description: "Grace any occasion with this beautiful heavy georgette crimson red Anarkali kurta set. Richly embroidered with golden zari work.",
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: "fp2",
-    name: "Elegant Banarasi Red Silk Saree",
-    price: 3499,
-    comparePrice: 5999,
-    category: ["Sarees"],
-    sizes: ["M", "L"],
-    images: ["https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=800"],
-    stock: 15,
-    stockStatus: "In Stock",
-    isTrending: true,
-    description: "Impeccably handwoven silk saree featuring exquisite golden Banarasi borders.",
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: "fp3",
-    name: "Sapphire Blue Velvet Lehenga Choli",
-    price: 4999,
-    comparePrice: 8999,
-    category: ["Lehengas"],
-    sizes: ["S", "M", "L"],
-    images: ["https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&q=80&w=800"],
-    stock: 10,
-    stockStatus: "In Stock",
-    isTrending: true,
-    description: "Stunning sapphire blue velvet lehenga, heavily embellished with sequins and pearl work.",
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: "fp4",
-    name: "Classic Ivory Lucknowi Chikankari Kurti",
-    price: 1299,
-    comparePrice: 2299,
-    category: ["Kurti"],
-    sizes: ["S", "M", "L", "XL"],
-    images: ["https://images.unsplash.com/photo-1608933221953-c6cd6a7f0525?auto=format&fit=crop&q=80&w=800"],
-    stock: 45,
-    stockStatus: "In Stock",
-    isTrending: false,
-    description: "Traditional Lucknowi hand-embroidered georgette Chikankari kurti in ivory white.",
-    createdAt: new Date().toISOString()
-  }
-];
 
 export default function Shop() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -100,79 +42,101 @@ export default function Shop() {
   }, [activeCategory, sortBy]);
 
   useEffect(() => {
-    const fetchProducts = async () => {
-      const cacheKey = `ruby_shop_cache_${activeCategory}_${sortBy}`;
-      const hasCache = localStorage.getItem(cacheKey) !== null;
-      if (!hasCache) {
-        setLoading(true);
-      }
+    const cacheKey = `ruby_shop_cache_${activeCategory}_${sortBy}`;
+    const hasCache = localStorage.getItem(cacheKey) !== null;
+    if (!hasCache) {
+      setLoading(true);
+    }
+
+    let finalCategories: string[] = ['All'];
+    let fetchedProducts: Product[] = [];
+
+    const saveToCache = () => {
       try {
-        const productsQuery = activeCategory !== 'All' 
-          ? query(collection(db, 'products'), where('category', 'array-contains', activeCategory), limit(24))
-          : query(collection(db, 'products'), limit(24));
-
-        const [productsSnap, categoriesSnap] = await Promise.all([
-          getDocs(productsQuery).catch((err) => { console.warn("Failed fetching shop products:", err); return { docs: [] } as any; }),
-          getDocs(collection(db, 'categories')).catch((err) => { console.warn("Failed fetching shop categories:", err); return { docs: [] } as any; })
-        ]);
-
-        // Handle categories sorted by sortOrder
-        const sortedCategoryDocs = categoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-        sortedCategoryDocs.sort((a, b) => {
-          const orderA = a.sortOrder !== undefined ? Number(a.sortOrder) : 1000;
-          const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
-          return orderA - orderB;
-        });
-        const catNames = sortedCategoryDocs.map(c => c.name);
-        const finalCategories = ['All', ...catNames];
-        setCategories(finalCategories);
-
-        let fetchedProducts = productsSnap.docs.map(doc => ({
-          id: doc.id,
-          ...(doc.data() as Omit<Product, 'id'>)
-        })) as Product[];
-        
-        if (fetchedProducts.length === 0) {
-          fetchedProducts = activeCategory === 'All' 
-            ? fallbackProducts 
-            : fallbackProducts.filter(p => p.category?.includes(activeCategory));
-        }
-        
-        // Client-side sorting
-        fetchedProducts.sort((a, b) => {
-          if (sortBy === 'newest') {
-            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-          }
-          if (sortBy === 'price-low') {
-            return a.price - b.price;
-          }
-          if (sortBy === 'price-high') {
-            return b.price - a.price;
-          }
-          return 0;
-        });
-
-        setProducts(fetchedProducts);
-
-        // Save to cache
-        try {
-          const cacheData = {
-            products: fetchedProducts,
-            categories: finalCategories,
-            savedAt: Date.now()
-          };
-          localStorage.setItem(cacheKey, JSON.stringify(cacheData));
-        } catch (e) {
-          console.warn("Failed to write shop cache:", e);
-        }
-      } catch (error) {
-        console.error("Error fetching products:", error);
-      } finally {
-        setLoading(false);
+        localStorage.setItem(cacheKey, JSON.stringify({
+          products: fetchedProducts,
+          categories: finalCategories,
+          savedAt: Date.now()
+        }));
+      } catch (e) {
+        console.warn("Failed to write shop cache:", e);
       }
     };
 
-    fetchProducts();
+    // 1. Categories real-time sync
+    const unsubscribeCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
+      const sortedCategoryDocs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      sortedCategoryDocs.sort((a, b) => {
+        const orderA = a.sortOrder !== undefined ? Number(a.sortOrder) : 1000;
+        const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
+        return orderA - orderB;
+      });
+      const catNames = sortedCategoryDocs.map(c => c.name);
+      finalCategories = ['All', ...catNames];
+      setCategories(finalCategories);
+      saveToCache();
+    }, (error) => {
+      console.warn("Shop categories real-time error:", error);
+      const catNames = fallbackCategories.map(c => c.name);
+      setCategories(['All', ...catNames]);
+    });
+
+    // 2. Products real-time sync
+    const productsQuery = activeCategory !== 'All' 
+      ? query(collection(db, 'products'), where('category', 'array-contains', activeCategory), limit(40))
+      : query(collection(db, 'products'), limit(40));
+
+    const unsubscribeProducts = onSnapshot(productsQuery, (snapshot) => {
+      let prods = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...(doc.data() as Omit<Product, 'id'>)
+      })) as Product[];
+
+      // Client-side sorting
+      prods.sort((a, b) => {
+        if (sortBy === 'newest') {
+          return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+        }
+        if (sortBy === 'price-low') {
+          return a.price - b.price;
+        }
+        if (sortBy === 'price-high') {
+          return b.price - a.price;
+        }
+        return 0;
+      });
+
+      fetchedProducts = prods;
+      setProducts(prods);
+      setLoading(false);
+      saveToCache();
+    }, (error) => {
+      console.warn("Shop products real-time error:", error);
+      let prods = activeCategory === 'All' 
+        ? fallbackProducts 
+        : fallbackProducts.filter(p => p.category?.includes(activeCategory));
+      
+      prods.sort((a, b) => {
+        if (sortBy === 'newest') {
+          return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+        }
+        if (sortBy === 'price-low') {
+          return a.price - b.price;
+        }
+        if (sortBy === 'price-high') {
+          return b.price - a.price;
+        }
+        return 0;
+      });
+
+      setProducts(prods);
+      setLoading(false);
+    });
+
+    return () => {
+      unsubscribeCategories();
+      unsubscribeProducts();
+    };
   }, [activeCategory, sortBy]);
 
   const handleCategoryChange = (cat: string) => {

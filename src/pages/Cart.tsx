@@ -159,7 +159,7 @@ export default function Cart() {
                 className="bg-white border border-gray-100 rounded-[2rem] p-6 flex gap-6 shadow-sm hover:shadow-md transition-shadow"
               >
                 <div className="w-28 h-28 bg-gray-50 rounded-2xl overflow-hidden flex-shrink-0">
-                  {item.images[0] ? (
+                  {(item.images && item.images[0]) ? (
                     <img src={item.images[0]} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-gray-200">

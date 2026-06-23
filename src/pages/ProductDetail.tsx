@@ -586,7 +586,7 @@ export default function ProductDetail() {
         <meta name="description" content={product.description.replace(/<[^>]*>/g, '').substring(0, 160)} />
         <meta property="og:title" content={`${product.name} | The Ruby Fashion`} />
         <meta property="og:description" content={product.description.replace(/<[^>]*>/g, '').substring(0, 160)} />
-        <meta property="og:image" content={product.images[0]} />
+        <meta property="og:image" content={product.images?.[0] || ''} />
         <meta property="og:url" content={`https://therubyfashion.shop/product/${product.id}`} />
         <link rel="canonical" href={`https://therubyfashion.shop/product/${product.id}`} />
       </Helmet>

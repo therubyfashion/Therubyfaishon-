@@ -237,7 +237,8 @@ export default function Settings() {
         isActive: true,
         expiryDate: expiry.toISOString(),
         createdBy: user.uid,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        isSingleUse: true
       });
 
       const userRef = doc(db, 'users', user.uid);

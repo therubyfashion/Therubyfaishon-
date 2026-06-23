@@ -119,7 +119,7 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
             <Link to="/wishlist" className={`p-2 transition-colors relative group ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
               <Heart size={20} />
               {wishlistItems.length > 0 && (
-                <span className="absolute top-0 right-0 bg-ruby text-white text-[8px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 border-white pointer-events-none">
+                <span className="absolute top-1 right-1 bg-ruby text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white pointer-events-none z-10">
                   {wishlistItems.length}
                 </span>
               )}
@@ -128,7 +128,7 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
             <Link to="/cart" className={`p-2 transition-colors relative group ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
               <ShoppingBag size={20} />
               {itemCount > 0 && (
-                <span className="absolute top-0 right-0 bg-ruby text-white text-[8px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 border-white pointer-events-none">
+                <span className="absolute top-1 right-1 bg-ruby text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white pointer-events-none z-10">
                   {itemCount}
                 </span>
               )}

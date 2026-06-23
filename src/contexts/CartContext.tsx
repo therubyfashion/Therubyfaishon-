@@ -26,8 +26,13 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const [items, setItems] = useState<CartItem[]>(() => {
-    const saved = localStorage.getItem('ruby_cart');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('ruby_cart');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.warn("Failed to parse ruby_cart:", e);
+      return [];
+    }
   });
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discount: number } | null>(null);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
@@ -51,7 +56,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 quantity: item.quantity,
                 selectedSize: item.selectedSize,
                 selectedColor: item.selectedColor,
-                image: item.images[0]
+                image: (item.images && item.images.length > 0) ? item.images[0] : ''
               })),
               total: items.reduce((sum, i) => sum + (i.price * i.quantity), 0),
               updatedAt: serverTimestamp(),
@@ -97,14 +102,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         i.selectedColor === color
       );
       if (existing) {
-        const newQuantity = Math.min(product.stock, existing.quantity + quantity);
+        const stockLimit = (product.stock !== undefined && product.stock !== null) ? Number(product.stock) : 99;
+        const newQuantity = Math.min(stockLimit, existing.quantity + quantity);
         return prev.map(i => 
           (i.id === product.id && i.selectedSize === size && i.selectedColor === color) 
             ? { ...i, quantity: newQuantity } 
             : i
         );
       }
-      const initialQuantity = Math.min(product.stock, quantity);
+      const stockLimit = (product.stock !== undefined && product.stock !== null) ? Number(product.stock) : 99;
+      const initialQuantity = Math.min(stockLimit, quantity);
       return [...prev, { ...product, selectedSize: size, selectedColor: color, quantity: initialQuantity }];
     });
   };
@@ -119,7 +126,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (quantity < 1) return;
     setItems(prev => prev.map(i => {
       if (i.id === productId && i.selectedSize === size && i.selectedColor === color) {
-        const finalQuantity = Math.min(i.stock, quantity);
+        const stockLimit = (i.stock !== undefined && i.stock !== null) ? Number(i.stock) : 99;
+        const finalQuantity = Math.min(stockLimit, quantity);
         return { ...i, quantity: finalQuantity };
       }
       return i;

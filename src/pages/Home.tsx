@@ -7,9 +7,10 @@ import {
   Shirt, Smartphone, Watch, Laptop, ShoppingCart, Gem, Utensils, ToyBrick,
   Plus, ThumbsUp, ThumbsDown, X, Camera, Image as ImageIcon
 } from 'lucide-react';
-import { collection, getDocs, query, where, limit, orderBy, addDoc, doc, updateDoc, increment, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, limit, orderBy, addDoc, doc, updateDoc, increment, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Product, Category } from '../types';
+import { fallbackCategories, fallbackBanners, fallbackReviews, fallbackProducts } from '../data/fallbackData';
 import ProductCard from '../components/ProductCard';
 import { ProductCardSkeleton } from '../components/Skeleton';
 import PromoTickerBar from '../components/PromoTickerBar';
@@ -39,136 +40,6 @@ export default function Home() {
   const [reviewLoading, setReviewLoading] = useState(false);
   const navigate = useNavigate();
 
-  const fallbackReviews = [
-    {
-      id: "f1",
-      name: "Priya R.",
-      initials: "PR",
-      color: "#5a4fcf",
-      rating: 5,
-      text: "The fabric quality is absolutely amazing. The cotton feels so soft and breathable — wore it all day and stayed comfortable throughout!",
-      tag: "Fabric quality",
-      date: "May 2, 2024",
-      likes: 12,
-      dislikes: 0
-    },
-    {
-      id: "f2",
-      name: "Arjun M.",
-      initials: "AM",
-      color: "#d85a30",
-      rating: 4,
-      text: "Doesn't fade after multiple washes. The stitching is solid and the fabric holds shape well. Great durability for the price!",
-      tag: "Durability",
-      date: "Apr 28, 2024",
-      likes: 8,
-      dislikes: 1
-    },
-    {
-      id: "f3",
-      name: "Sneha K.",
-      initials: "SK",
-      color: "#0f6e56",
-      rating: 5,
-      text: "Loved the premium linen blend. Lightweight yet sturdy — perfect for Indian summers. Will definitely order more from this store!",
-      tag: "Summer comfort",
-      date: "Apr 25, 2024",
-      likes: 15,
-      dislikes: 0
-    }
-  ];
-
-  const fallbackCategories = [
-    { id: "kurti", name: "Kurti", image: "https://images.unsplash.com/photo-1621184455862-c163dfb30e0f?auto=format&fit=crop&q=80&w=300", slug: "kurti" },
-    { id: "sarees", name: "Sarees", image: "https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=300", slug: "sarees" },
-    { id: "lehengas", name: "Lehengas", image: "https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&q=80&w=300", slug: "lehengas" },
-    { id: "suits", name: "Suits", image: "https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&q=80&w=300", slug: "suits" }
-  ];
-
-  const fallbackBanners = [
-    {
-      id: "b1",
-      title: "Festive Season Collection",
-      image: "https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=1200",
-      link: "/shop",
-      active: true
-    },
-    {
-      id: "b2",
-      title: "Elegant Pure Cotton Kurtas",
-      image: "https://images.unsplash.com/photo-1621184455862-c163dfb30e0f?auto=format&fit=crop&q=80&w=1200",
-      link: "/shop?category=kurti",
-      active: true
-    }
-  ];
-
-  const fallbackProducts: Product[] = [
-    {
-      id: "fp1",
-      name: "Royal Crimson Anarkali Kurta Set",
-      price: 1899,
-      comparePrice: 2999,
-      category: ["Kurti"],
-      sizes: ["M", "L", "XL", "XXL"],
-      images: ["https://images.unsplash.com/photo-1621184455862-c163dfb30e0f?auto=format&fit=crop&q=80&w=800"],
-      stock: 25,
-      stockStatus: "In Stock",
-      isTrending: true,
-      description: "Grace any occasion with this beautiful heavy georgette crimson red Anarkali kurta set. Richly embroidered with golden zari work.",
-      viewCount: 145,
-      wishlistCount: 38,
-      createdAt: new Date().toISOString()
-    },
-    {
-      id: "fp2",
-      name: "Elegant Banarasi Red Silk Saree",
-      price: 3499,
-      comparePrice: 5999,
-      category: ["Sarees"],
-      sizes: ["M", "L"],
-      images: ["https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=800"],
-      stock: 15,
-      stockStatus: "In Stock",
-      isTrending: true,
-      description: "Impeccably handwoven silk saree featuring exquisite golden Banarasi borders.",
-      viewCount: 189,
-      wishlistCount: 52,
-      createdAt: new Date().toISOString()
-    },
-    {
-      id: "fp3",
-      name: "Sapphire Blue Velvet Lehenga Choli",
-      price: 4999,
-      comparePrice: 8999,
-      category: ["Lehengas"],
-      sizes: ["S", "M", "L"],
-      images: ["https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&q=80&w=800"],
-      stock: 10,
-      stockStatus: "In Stock",
-      isTrending: true,
-      description: "Stunning sapphire blue velvet lehenga, heavily embellished with sequins and pearl work.",
-      viewCount: 232,
-      wishlistCount: 89,
-      createdAt: new Date().toISOString()
-    },
-    {
-      id: "fp4",
-      name: "Classic Ivory Lucknowi Chikankari Kurti",
-      price: 1299,
-      comparePrice: 2299,
-      category: ["Kurti"],
-      sizes: ["S", "M", "L", "XL"],
-      images: ["https://images.unsplash.com/photo-1608933221953-c6cd6a7f0525?auto=format&fit=crop&q=80&w=800"],
-      stock: 45,
-      stockStatus: "In Stock",
-      isTrending: false,
-      description: "Traditional Lucknowi hand-embroidered georgette Chikankari kurti in ivory white.",
-      viewCount: 94,
-      wishlistCount: 22,
-      createdAt: new Date().toISOString()
-    }
-  ];
-
   // Load initial cached values to avoid showing skeleton loading and render instantly
   useEffect(() => {
     try {
@@ -194,136 +65,137 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const fetchData = async () => {
-      const hasCache = localStorage.getItem('ruby_home_cache') !== null;
-      if (!hasCache) {
-        setLoading(true);
-      }
+    const hasCache = localStorage.getItem('ruby_home_cache') !== null;
+    if (!hasCache) {
+      setLoading(true);
+    }
+
+    let trendingData: Product[] = [];
+    let popularData: Product[] = [];
+    let sortedCats: any[] = [];
+    let activeBanners: any[] = [];
+    let finalReviews: any[] = [];
+    let promoConfigData: any = null;
+
+    const cacheAndSave = () => {
       try {
-        const trendingQuery = query(
-          collection(db, 'products'), 
-          where('isTrending', '==', true),
-          limit(8)
-        );
-
-        const popularQuery = query(
-          collection(db, 'products'), 
-          where('isPopular', '==', true),
-          limit(8)
-        );
-
-        const reviewsQuery = query(
-          collection(db, 'fabric_reviews')
-        );
-
-        const [trendingSnap, popularSnap, categoriesSnap, bannersSnap, reviewsSnap, settingsSnap] = await Promise.all([
-          getDocs(trendingQuery).catch((err) => { console.warn("Failed fetching trending:", err); return { docs: [], empty: true } as any; }),
-          getDocs(popularQuery).catch((err) => { console.warn("Failed fetching popular:", err); return { docs: [], empty: true } as any; }),
-          getDocs(collection(db, 'categories')).catch((err) => { console.warn("Failed fetching categories:", err); return { docs: [], empty: true } as any; }),
-          getDocs(collection(db, 'banners')).catch((err) => { console.warn("Failed fetching banners:", err); return { docs: [], empty: true } as any; }),
-          getDocs(reviewsQuery).catch((err) => { console.warn("Failed fetching reviews:", err); return { docs: [], empty: true } as any; }),
-          getDocs(collection(db, 'settings')).catch((err) => { console.warn("Failed fetching settings:", err); return { docs: [], empty: true } as any; })
-        ]);
-
-        // Process Settings for Promo Ticker
-        let promoConfigData = null;
-        if (!settingsSnap.empty) {
-          const rawSettings = settingsSnap.docs[0].data();
-          promoConfigData = {
-            promoEnabled: rawSettings.promoEnabled ?? false,
-            promoType: rawSettings.promoType ?? 'timer',
-            promoMessage: rawSettings.promoMessage ?? '🔥 Mega Sale Ends In:',
-            promoEndDate: rawSettings.promoEndDate ?? '',
-            promoScrolling: rawSettings.promoScrolling ?? false,
-            promoBgColor: rawSettings.promoBgColor ?? '#A11B35',
-            promoTextColor: rawSettings.promoTextColor ?? '#FFFFFF',
-          };
-          setPromoConfig(promoConfigData);
-        }
-
-        // Handle products with base fallback
-        let trendingData = trendingSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
-        let popularData = popularSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
-
-        if (trendingData.length === 0 || popularData.length === 0) {
-          const fallbackSnap = await getDocs(query(collection(db, 'products'), limit(12))).catch((err) => {
-            console.warn("Failed fetching fallback products:", err);
-            return { docs: [] } as any;
-          });
-          const totalFallback = fallbackSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
-
-          if (trendingData.length === 0) {
-            trendingData = totalFallback.slice(0, 8);
-          }
-          if (popularData.length === 0) {
-            popularData = totalFallback.slice(4, 12).length > 0 ? totalFallback.slice(4, 12) : totalFallback.slice(0, 8);
-          }
-        }
-
-        // Final local fail-safe if database contains absolutely 0 products
-        if (trendingData.length === 0) {
-          trendingData = fallbackProducts.filter(p => p.isTrending);
-        }
-        if (popularData.length === 0) {
-          popularData = fallbackProducts;
-        }
-
-        setTrendingProducts(trendingData);
-        setPopularProducts(popularData);
-
-        const sortedCats = categoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-        sortedCats.sort((a, b) => {
-          const orderA = a.sortOrder !== undefined ? Number(a.sortOrder) : 1000;
-          const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
-          return orderA - orderB;
-        });
-        const finalCats = sortedCats.length > 0 ? sortedCats : fallbackCategories;
-        setCategories(finalCats);
-        
-        const bannerData = bannersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const activeBanners = bannerData.filter((b: any) => b.active !== false && b.active !== 'false');
-        const finalBanners = activeBanners.length > 0 ? activeBanners : fallbackBanners;
-        setBanners(finalBanners);
-
-        // Handle reviews with fallback
-        const firestoreReviews = reviewsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-        // Sort client-side to avoid needing an index and to show docs even if createdAt is missing
-        firestoreReviews.sort((a, b) => {
-          const dateA = a.createdAt ? (a.createdAt.toDate ? a.createdAt.toDate() : new Date(a.createdAt)) : new Date(0);
-          const dateB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt)) : new Date(0);
-          return dateB.getTime() - dateA.getTime();
-        });
-        const finalReviews = firestoreReviews.length > 0 ? firestoreReviews : fallbackReviews;
-        setReviews(finalReviews);
-
-        // Save fresh sync to cache
-        try {
-          const cacheData = {
-            trendingProducts: trendingData,
-            popularProducts: popularData,
-            categories: sortedCats,
-            banners: activeBanners,
-            reviews: finalReviews,
-            promoConfig: promoConfigData,
-            cachedAt: Date.now()
-          };
-          localStorage.setItem('ruby_home_cache', JSON.stringify(cacheData));
-        } catch (e) {
-          console.warn("Failed to write home cache:", e);
-        }
-
-      } catch (error: any) {
-        if (error.code === 'resource-exhausted') {
-          console.warn("Home Data: Firestore Quota reached. Content will load after reset.");
-        } else {
-          console.error("Error fetching home data:", error);
-        }
-        setReviews(fallbackReviews);
-      } finally {
-        setLoading(false);
+        const cacheData = {
+          trendingProducts: trendingData,
+          popularProducts: popularData,
+          categories: sortedCats,
+          banners: activeBanners,
+          reviews: finalReviews,
+          promoConfig: promoConfigData,
+          cachedAt: Date.now()
+        };
+        localStorage.setItem('ruby_home_cache', JSON.stringify(cacheData));
+      } catch (e) {
+        console.warn("Failed to write home cache:", e);
       }
     };
-    fetchData();
+
+    // 1. Real-time Categories listener
+    const unsubscribeCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      docs.sort((a, b) => {
+        const orderA = a.sortOrder !== undefined ? Number(a.sortOrder) : 1000;
+        const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
+        return orderA - orderB;
+      });
+      sortedCats = docs;
+      setCategories(docs);
+      cacheAndSave();
+    }, (error) => {
+      console.warn("Categories real-time snapshot error:", error);
+      setCategories(prev => prev.length > 0 ? prev : fallbackCategories);
+    });
+
+    // 2. Real-time Banners listener
+    const unsubscribeBanners = onSnapshot(collection(db, 'banners'), (snapshot) => {
+      const bannerData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      activeBanners = bannerData.filter(b => b.active !== false && b.active !== 'false');
+      setBanners(activeBanners);
+      cacheAndSave();
+    }, (error) => {
+      console.warn("Banners real-time snapshot error:", error);
+      setBanners(prev => prev.length > 0 ? prev : fallbackBanners);
+    });
+
+    // 3. Real-time Reviews listener
+    const unsubscribeReviews = onSnapshot(collection(db, 'fabric_reviews'), (snapshot) => {
+      const firestoreReviews = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      firestoreReviews.sort((a, b) => {
+        const dateA = a.createdAt ? (a.createdAt.toDate ? a.createdAt.toDate() : new Date(a.createdAt)) : new Date(0);
+        const dateB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt)) : new Date(0);
+        return dateB.getTime() - dateA.getTime();
+      });
+      finalReviews = firestoreReviews;
+      setReviews(firestoreReviews);
+      cacheAndSave();
+    }, (error) => {
+      console.warn("Reviews real-time snapshot error:", error);
+      setReviews(prev => prev.length > 0 ? prev : fallbackReviews);
+    });
+
+    // 4. Real-time Settings listener (Promo Config)
+    const unsubscribeSettings = onSnapshot(collection(db, 'settings'), (snapshot) => {
+      if (!snapshot.empty) {
+        const rawSettings = snapshot.docs[0].data();
+        promoConfigData = {
+          promoEnabled: rawSettings.promoEnabled ?? false,
+          promoType: rawSettings.promoType ?? 'timer',
+          promoMessage: rawSettings.promoMessage ?? '🔥 Mega Sale Ends In:',
+          promoEndDate: rawSettings.promoEndDate ?? '',
+          promoScrolling: rawSettings.promoScrolling ?? false,
+          promoBgColor: rawSettings.promoBgColor ?? '#A11B35',
+          promoTextColor: rawSettings.promoTextColor ?? '#FFFFFF',
+        };
+        setPromoConfig(promoConfigData);
+        cacheAndSave();
+      }
+    }, (error) => {
+      console.warn("Settings real-time snapshot error:", error);
+      setPromoConfig(prev => prev || {
+        promoEnabled: true,
+        promoType: 'timer',
+        promoMessage: '🔥 Special Live Sale Ends Soon:',
+        promoEndDate: new Date(Date.now() + 86400000).toISOString(),
+        promoScrolling: false,
+        promoBgColor: '#A11B35',
+        promoTextColor: '#FFFFFF',
+      });
+    });
+
+    // 5. Real-time Products listener (Limit 50 to get a comprehensive set of real products)
+    const productsQuery = query(collection(db, 'products'), limit(50));
+    const unsubscribeProducts = onSnapshot(productsQuery, (snapshot) => {
+      const allProds = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+      
+      const trending = allProds.filter(p => p.isTrending);
+      const popular = allProds.filter(p => p.isPopular);
+      
+      // If there are absolutely zero trending/popular tags on products, fallback cleanly to slicing the active ones
+      trendingData = trending.length > 0 ? trending : allProds.slice(0, 8);
+      popularData = popular.length > 0 ? popular : allProds.slice(0, 8);
+      
+      setTrendingProducts(trendingData);
+      setPopularProducts(popularData);
+      setLoading(false);
+      cacheAndSave();
+    }, (error) => {
+      console.warn("Products real-time snapshot error:", error);
+      setTrendingProducts(prev => prev.length > 0 ? prev : fallbackProducts.filter(p => p.isTrending || true));
+      setPopularProducts(prev => prev.length > 0 ? prev : fallbackProducts);
+      setLoading(false);
+    });
+
+    return () => {
+      unsubscribeCategories();
+      unsubscribeBanners();
+      unsubscribeReviews();
+      unsubscribeSettings();
+      unsubscribeProducts();
+    };
   }, []);
 
   useEffect(() => {

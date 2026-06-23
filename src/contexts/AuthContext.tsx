@@ -42,6 +42,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           },
           (error) => {
             console.error("Error listening to profile:", error);
+            // Fallback: create a custom profile object so app works beautifully on quota limit
+            const displayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User";
+            setProfile({
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || "",
+              displayName: displayName,
+              firstName: displayName.split(' ')[0] || "User",
+              lastName: displayName.split(' ').slice(1).join(' ') || "",
+              role: (firebaseUser.email === 'mdsagaransari65670@gmail.com' || firebaseUser.email === 'admin@theruby.com' || firebaseUser.email?.toLowerCase().includes('rubu') || firebaseUser.email?.toLowerCase().includes('ruby')) ? 'admin' : 'user',
+              isVerified: true,
+              createdAt: new Date().toISOString()
+            } as UserProfile);
             setLoading(false);
           }
         );

@@ -20,7 +20,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    addToCart(product, product.sizes[0] || 'M');
+    addToCart(product, (product.sizes && product.sizes[0]) || 'M');
     
     // Meta Pixel Tracking
     trackPixelEvent('AddToCart', {
@@ -49,7 +49,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   return (
     <Link to={`/product/${product.id}`} className="product-card group block bg-white rounded-2xl overflow-hidden border border-gray-100 cursor-pointer transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl">
       <div className="product-img relative aspect-[3/4] bg-gray-50 flex items-center justify-center overflow-hidden">
-        {product.images[0] ? (
+        {(product.images && product.images[0]) ? (
           <img 
             src={product.images[0]} 
             alt={product.name} 
@@ -106,13 +106,14 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
         
         {/* Deterministic count matching product details page logic */}
         {(() => {
-          const dummyCount = 42 + ((product.id || '').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 97);
+          const idStr = String(product.id || '');
+          const dummyCount = 42 + (idStr.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 97);
           return (
             <div className="product-rating flex items-center gap-1 mt-1 text-[12px] text-gray-400">
               <div className="flex text-yellow-400">
                 <Star size={10} fill="currentColor" />
               </div>
-              <span className="font-semibold text-gray-700">{(4.2 + (((product.id || '').split('').reduce((acc, char) => acc + char.charCodeAt(0) * 31, 0) % 8) / 10)).toFixed(1)}</span>
+              <span className="font-semibold text-gray-700">{(4.2 + ((idStr.split('').reduce((acc, char) => acc + char.charCodeAt(0) * 31, 0) % 8) / 10)).toFixed(1)}</span>
               <span className="text-[10px] text-gray-400 leading-none">({dummyCount})</span>
             </div>
           );

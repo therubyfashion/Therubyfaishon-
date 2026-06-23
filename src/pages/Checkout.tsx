@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
-import { collection, addDoc, getDocs, doc, runTransaction, getDoc, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, runTransaction, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { toast } from 'sonner';
 import { cn, syncToGoogleSheets } from '../lib/utils';
@@ -321,6 +321,27 @@ export default function Checkout() {
           };
 
           await addDoc(collection(db, 'orders'), finalOrderData);
+
+          // Deactivate single-use or loyalty point coupon used in this order
+          if (appliedPromo && appliedPromo.code) {
+            try {
+              const couponRef = doc(db, 'coupons', appliedPromo.code);
+              const couponSnap = await getDoc(couponRef);
+              if (couponSnap.exists()) {
+                const couponData = couponSnap.data();
+                if (couponData.isSingleUse || couponData.createdBy || couponData.code?.startsWith('LP')) {
+                  await updateDoc(couponRef, {
+                    isActive: false,
+                    usedBy: user?.uid || 'guest',
+                    usedAt: new Date().toISOString()
+                  });
+                  console.log("Deactivated single-use loyalty voucher:", appliedPromo.code);
+                }
+              }
+            } catch (couponErr) {
+              console.error("Error deactivating used coupon:", couponErr);
+            }
+          }
           
           // Clear checkout state & cart
           localStorage.removeItem('checkout_step');

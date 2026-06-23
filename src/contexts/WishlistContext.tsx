@@ -13,8 +13,13 @@ const WishlistContext = createContext<WishlistContextType | undefined>(undefined
 
 export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [items, setItems] = useState<Product[]>(() => {
-    const saved = localStorage.getItem('ruby_wishlist');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('ruby_wishlist');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.warn("Failed to parse ruby_wishlist:", e);
+      return [];
+    }
   });
 
   useEffect(() => {
