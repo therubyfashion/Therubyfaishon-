@@ -299,7 +299,15 @@ function AppContent() {
                 }
                 
                 if (subId) {
+                  console.log("====================================================");
+                  console.log("🔔 [OneSignal Device Audit] Browser/Device is Subscribed!");
+                  console.log(`   - Subscription ID: ${subId}`);
+                  console.log("====================================================");
                   await syncOneSignalIdToFirestore(user.uid, subId);
+                } else {
+                  console.log("====================================================");
+                  console.log("⚠️ [OneSignal Device Audit] Browser/Device is NOT subscribed yet, or permission is pending/denied.");
+                  console.log("====================================================");
                 }
 
                 // Add real-time event listener for subscription changes

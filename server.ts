@@ -336,25 +336,48 @@ export const NotificationService = {
     const payload = { ...notification, app_id: appId };
     delete payload.include_player_ids; // Ensure complete removal of include_player_ids if mistakenly passed
 
-    console.log(`📡 [NotificationService] Submitting payload to OneSignal for App ID: ${appId}`);
-    console.log(`📡 [NotificationService] Target Field Audit:`, {
-      include_subscription_ids: payload.include_subscription_ids || 'none',
-      filters: payload.filters || 'none',
-      segments: payload.included_segments || 'none'
-    });
+    // Determine notification type and targets for auditing
+    let targetType = "Global / Broadcast (Subscribed Users)";
+    let targets = "Broadcast Segment";
+    if (payload.include_subscription_ids && payload.include_subscription_ids.length > 0) {
+      targetType = "User (Direct Subscription ID)";
+      targets = payload.include_subscription_ids.join(', ');
+    } else if (payload.filters && payload.filters.length > 0) {
+      targetType = "Admin (Segment/Filter)";
+      targets = JSON.stringify(payload.filters);
+    } else if (payload.included_segments && payload.included_segments.length > 0) {
+      targetType = `Segment Targeted [${payload.included_segments.join(', ')}]`;
+      targets = "Segment Audience";
+    }
+
+    console.log(`\n=============================================================`);
+    console.log(`📡 [NotificationService PUSH SYSTEM DISPATCH]`);
+    console.log(`   - Notification Type: ${targetType}`);
+    console.log(`   - Target Subscription ID(s) / Segment: ${targets}`);
+    console.log(`   - Target OneSignal App ID: ${appId}`);
+    console.log(`   - Core Payload Audit:`);
+    console.log(JSON.stringify(payload, null, 2));
+    console.log(`=============================================================\n`);
 
     try {
       const response = await axios.post('https://onesignal.com/api/v1/notifications', 
         payload,
         { headers }
       );
-      console.log(`✅ [NotificationService] Delivery SUCCESS! Status: ${response.status}`, JSON.stringify(response.data, null, 2));
+      
+      console.log(`\n============================ ON_SUCCESS =====================`);
+      console.log(`✅ [NotificationService] OneSignal HTTP Response Code: ${response.status}`);
+      console.log(`✅ [NotificationService] Response Data Body:`, JSON.stringify(response.data, null, 2));
+      console.log(`=============================================================\n`);
       return response;
     } catch (axiosErr: any) {
       const errorData = axiosErr.response?.data;
       const errorStatus = axiosErr.response?.status;
-      console.error(`❌ [NotificationService] Delivery FAILED! HTTP Status: ${errorStatus || 'unknown'}`);
-      console.error(`❌ [NotificationService] Error Response:`, JSON.stringify(errorData || axiosErr.message, null, 2));
+      
+      console.error(`\n============================ ON_FAILURE =====================`);
+      console.error(`❌ [NotificationService] OneSignal API HTTP Status: ${errorStatus || 'unknown'}`);
+      console.error(`❌ [NotificationService] Direct API Error Statement:`, JSON.stringify(errorData || axiosErr.message, null, 2));
+      console.error(`=============================================================\n`);
       
       if (errorData?.errors?.includes("Invalid REST API Key")) {
         throw new Error("OneSignal Error: Your REST API Key is invalid. Please check Admin Settings.");
@@ -1317,13 +1340,40 @@ async function sendEmailDirect({ to, subject, html, fromName, baseHost }: { to: 
       rawFromEmail = DEFAULT_FROM_EMAIL;
     }
     const formattedFrom = `"${finalFromName}" <${rawFromEmail}>`;
-    await dynamicResend.emails.send({
-      from: formattedFrom,
-      to: [to],
-      subject,
-      html: beautifiedHtml,
-    });
-    return { success: true, provider: 'resend' };
+    try {
+      const result = await dynamicResend.emails.send({
+        from: formattedFrom,
+        to: [to],
+        subject,
+        html: beautifiedHtml,
+      });
+      if (result.error) {
+        throw result.error;
+      }
+      return { success: true, provider: 'resend' };
+    } catch (resendErr: any) {
+      const errMsg = String(resendErr.message || resendErr).toLowerCase();
+      console.warn(`🛑 Resend sending failed with primary domain:`, resendErr.message || resendErr);
+      
+      console.warn("⚠️ Attempting temporary fallback using onboarding@resend.dev...");
+      try {
+        const fallbackFrom = `"${finalFromName}" <onboarding@resend.dev>`;
+        const fallbackResult = await dynamicResend.emails.send({
+          from: fallbackFrom,
+          to: [to],
+          subject,
+          html: beautifiedHtml,
+        });
+        if (fallbackResult.error) {
+          throw fallbackResult.error;
+        }
+        console.log("✅ Resend fallback transmission succeeded!");
+        return { success: true, provider: 'resend-fallback', fallback: true };
+      } catch (fallbackErr: any) {
+        console.error("❌ Resend onboarding fallback failed too:", fallbackErr.message || fallbackErr);
+        throw resendErr;
+      }
+    }
   } else {
     throw new Error("No SMTP or Resend API configurations are active in settings.");
   }
@@ -2947,8 +2997,37 @@ async function startServer() {
       }
 
       console.log("--- Resend API Attempt ---");
-      const { data, error } = await dynamicResend.emails.send(emailPayload);
+      let { data, error } = await dynamicResend.emails.send(emailPayload);
       
+      if (error) {
+        const errorMessage = (error as any).message || "Resend failed with primary email";
+        const errLower = errorMessage.toLowerCase();
+        
+        if (errLower.includes("not verified") || 
+            errLower.includes("onboarding") || 
+            errLower.includes("authorized") || 
+            errLower.includes("testing emails") ||
+            errLower.includes("403") ||
+            errLower.includes("restricted") ||
+            errLower.includes("domain")) {
+          
+          console.warn("⚠️ Resend domain verification error. Attempting temporary fallback using onboarding@resend.dev...");
+          const fallbackPayload = {
+            ...emailPayload,
+            from: `"${fromName}" <onboarding@resend.dev>`
+          };
+          const fallbackResult = await dynamicResend.emails.send(fallbackPayload);
+          if (!fallbackResult.error) {
+            console.log("✅ Resend fallback transmission succeeded! ID:", fallbackResult.data?.id);
+            data = fallbackResult.data;
+            error = null;
+          } else {
+            console.error("❌ Resend onboarding fallback failed too:", fallbackResult.error);
+            error = fallbackResult.error;
+          }
+        }
+      }
+
       if (!error && db && isDbWriteable !== false) {
         const currentMonth = new Date().toISOString().substring(0, 7);
         db.collection('system_stats').doc('communications').set({
@@ -3376,6 +3455,33 @@ async function startServer() {
   console.log(`📡 Attempting to listen on port ${PORT}...`);
   httpServer.listen(PORT, "0.0.0.0", async () => {
     console.log(`✅ SERVER IS LIVE: http://localhost:${PORT}`);
+    
+    // VERIFICATION DISPATCH UPON BOOT
+    setTimeout(async () => {
+      console.log("\n=================================================");
+      console.log("⚡ [STARTUP PUSH VALIDATION] Executing test push dispatches...");
+      console.log("=================================================");
+      
+      try {
+        const dummyAdminTitle = "Startup Verification: Admin Check 🕵️‍♂️";
+        const dummyAdminBody = "This is a startup validation test notification sent to all administrators via segments and subscription IDs.";
+        const res = await NotificationService.sendAdmin(dummyAdminTitle, dummyAdminBody);
+        console.log("⚡ [STARTUP PUSH VALIDATION] sendAdmin Response Result:", res);
+      } catch (err: any) {
+        console.warn("⚠️ Startup test admin notification error:", err.message);
+      }
+
+      try {
+        const dummyUserTitle = "Startup Verification: User Check 🛍️";
+        const dummyUserBody = "This is a startup validation test notification sent to a demo customer to confirm direct-targeting compatibility.";
+        const res = await NotificationService.sendCustomer("test_customer_verification_id", dummyUserTitle, dummyUserBody);
+        console.log("⚡ [STARTUP PUSH VALIDATION] sendCustomer Response Result:", res);
+      } catch (err: any) {
+        console.warn("⚠️ Startup test customer notification error:", err.message);
+      }
+      
+      console.log("=================================================\n");
+    }, 4000);
     
     // AUTO-CLEANUP LOGIC FOR MANUAL REQUEST
     const cleanupFlag = path.join(process.cwd(), 'DO_CLEANUP');
