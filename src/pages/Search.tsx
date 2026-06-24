@@ -6,6 +6,7 @@ import { Search as SearchIcon, X, ArrowRight, ShoppingBag } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { formatPrice } from '../utils/currency';
+import { checkProductHealth, logProductDiagnostics } from '../utils/productHealthCheck';
 
 export default function Search() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -17,10 +18,25 @@ export default function Search() {
     const fetchProducts = async () => {
       try {
         const querySnapshot = await getDocs(collection(db, 'products'));
-        const productsData = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Product[];
+        const productsData = querySnapshot.docs.map(doc => {
+          const prod = {
+            id: doc.id,
+            ...doc.data()
+          } as Product;
+          logProductDiagnostics('Fetched', prod);
+          return prod;
+        });
+
+        console.log(`[Product Diagnostic - Query Result Count] Search fetched ${productsData.length} products total.`);
+
+        productsData.forEach(p => {
+          const health = checkProductHealth(p);
+          if (!health.isValid) {
+            console.warn(`[Product Diagnostic - Health Check Warning] Search product "${p.name}" (${p.id}) has health issues:`, health.errors, health.warnings);
+          }
+          logProductDiagnostics('Rendered', p);
+        });
+
         setProducts(productsData);
       } catch (error) {
         console.error("Error fetching products:", error);
@@ -35,13 +51,27 @@ export default function Search() {
     if (searchTerm.trim() === '') {
       setFilteredProducts([]);
     } else {
-      const filtered = products.filter(product => 
-        product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (Array.isArray(product.category) 
-          ? product.category.some(c => c.toLowerCase().includes(searchTerm.toLowerCase()))
-          : product.category.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        product.description.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+      const term = searchTerm.toLowerCase();
+      const filtered = products.filter(product => {
+        const nameMatch = (product.name || '').toLowerCase().includes(term);
+        
+        let catMatch = false;
+        if (product.category) {
+          if (Array.isArray(product.category)) {
+            catMatch = product.category.some(c => String(c || '').toLowerCase().includes(term));
+          } else if (typeof product.category === 'string') {
+            catMatch = product.category.toLowerCase().includes(term);
+          }
+        }
+
+        const descMatch = (product.description || '').toLowerCase().includes(term);
+
+        const isMatch = nameMatch || catMatch || descMatch;
+        if (!isMatch) {
+          logProductDiagnostics('Hidden', product, `Search term "${searchTerm}" did not match name, category, or description.`);
+        }
+        return isMatch;
+      });
       setFilteredProducts(filtered);
     }
   }, [searchTerm, products]);

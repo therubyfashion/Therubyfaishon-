@@ -889,8 +889,8 @@ async function initializeAutoPushes() {
                   try {
                     await sendCustomerNotification(
                       userId,
-                      `Loyalty Milestone Achieved: ${t} Points! ⚜️`,
-                      `Fantastic! You have achieved the ${t} points milestone. Visit Settings to convert points into cash vouchers now! 🎟️`,
+                      `Loyalty Progress Complete! 🎉`,
+                      `Tumhare loyalty points ka progress complete ho gaya hai, abhi redeem kar lo! 🎟️ (Achieved ${t} Points Milestone)`,
                       '/settings?tab=coupons'
                     );
                   } catch (milestoneErr: any) {

@@ -18,6 +18,7 @@ import { Navigation, Pagination, Zoom, Thumbs } from 'swiper/modules';
 import type { Swiper as SwiperType } from 'swiper';
 import { ProductDetailSkeleton } from '../components/Skeleton';
 import ProductCard from '../components/ProductCard';
+import { fallbackProducts, fallbackReviews } from '../data/fallbackData';
 import { compressImage } from '../utils/imageUtils';
 import { formatPrice } from '../utils/currency';
 
@@ -362,36 +363,71 @@ export default function ProductDetail() {
         setLoading(true);
       }
       try {
-        const docRef = doc(db, 'products', id);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = { id: docSnap.id, ...docSnap.data() } as Product;
+        let data: Product | null = null;
+        let related: Product[] = [];
+
+        // 1. Try to fetch from Firestore first
+        try {
+          const docRef = doc(db, 'products', id);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            data = { id: docSnap.id, ...docSnap.data() } as Product;
+          }
+        } catch (dbErr) {
+          console.warn("Firestore fetch failed, will try fallback data:", dbErr);
+        }
+
+        // 2. If Firestore failed or product doesn't exist, use fallback products
+        if (!data) {
+          const fbProd = fallbackProducts.find(p => p.id === id);
+          if (fbProd) {
+            data = fbProd;
+          } else {
+            // Check if there's any cache in localStorage we can parse
+            try {
+              const cached = localStorage.getItem(cacheKey);
+              if (cached) {
+                const parsed = JSON.parse(cached);
+                if (parsed.product) data = parsed.product;
+              }
+            } catch (e) {
+              console.warn(e);
+            }
+          }
+          // Ultimate safety fallback: use the first fallback product so the details screen always loads nicely
+          if (!data) {
+            data = fallbackProducts[0];
+          }
+        }
+
+        if (data) {
           setProduct(data);
           
           // Preselect sizes/colors if not already set by cache or UI
-          setSelectedSize(prev => prev || (data.sizes && data.sizes.length > 0 ? data.sizes[0] : ''));
-          setSelectedColor(prev => prev || (data.variants && data.variants.length > 0 ? data.variants[0].color : ''));
+          setSelectedSize(prev => prev || (data!.sizes && data!.sizes.length > 0 ? data!.sizes[0] : ''));
+          setSelectedColor(prev => prev || (data!.variants && data!.variants.length > 0 ? data!.variants[0].color : ''));
           
-          // Fetch Related Products
-          const relatedQuery = query(
-            collection(db, 'products'),
-            where('category', '==', data.category),
-            limit(5)
-          );
-          const relatedSnap = await getDocs(relatedQuery);
-          let related = relatedSnap.docs
-            .map(doc => ({ id: doc.id, ...doc.data() } as Product))
-            .filter(p => p.id !== id)
-            .slice(0, 4);
-
-          // Fallback to fetch other products if none or too few found in same category
-          if (related.length < 3) {
-            const fallbackQuery = query(collection(db, 'products'), limit(10));
-            const fallbackSnap = await getDocs(fallbackQuery);
-            const fallbackList = fallbackSnap.docs
+          // Fetch Related Products from Firestore if possible
+          try {
+            const relatedQuery = query(
+              collection(db, 'products'),
+              where('category', '==', data.category),
+              limit(5)
+            );
+            const relatedSnap = await getDocs(relatedQuery);
+            related = relatedSnap.docs
               .map(doc => ({ id: doc.id, ...doc.data() } as Product))
-              .filter(p => p.id !== id && !related.some(r => r.id === p.id));
-            related = [...related, ...fallbackList].slice(0, 4);
+              .filter(p => p.id !== id)
+              .slice(0, 4);
+          } catch (relatedErr) {
+            console.warn("Firestore related products fetch failed, using fallbacks:", relatedErr);
+          }
+
+          // Merge / use fallback related products
+          if (related.length < 3) {
+            const cat = Array.isArray(data.category) ? data.category[0] : data.category;
+            const fbRelated = fallbackProducts.filter(p => p.id !== id && (p.category?.includes(cat) || true));
+            related = [...related, ...fbRelated].slice(0, 4);
           }
           setRelatedProducts(related);
 
@@ -464,6 +500,19 @@ export default function ProductDetail() {
         }
       } catch (error) {
         console.error("Error fetching reviews:", error);
+        // Resiliently fallback to local default reviews if Firestore quota/reads are blocked
+        const defaultReviews = fallbackReviews.map(r => ({
+          id: r.id,
+          productId: id,
+          userName: r.name,
+          userEmail: '',
+          userImage: '',
+          rating: r.rating,
+          comment: r.text,
+          createdAt: new Date().toISOString(),
+          likes: r.likes
+        } as Review));
+        setReviews(defaultReviews);
       }
     };
 

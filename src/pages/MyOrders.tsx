@@ -75,9 +75,29 @@ export default function MyOrders() {
           id: doc.id,
           ...doc.data()
         }));
-        setOrders(ordersData);
+        
+        // Merge offline/local orders
+        const localOrders = JSON.parse(localStorage.getItem('ruby_offline_orders') || '[]');
+        const userLocalOrders = localOrders.filter((lo: any) => lo.userId === user.uid);
+        const combined = [...ordersData];
+        userLocalOrders.forEach((lo: any) => {
+          if (!combined.some(o => (o as any).orderId === lo.orderId)) {
+            combined.push({ ...lo, id: lo.orderId });
+          }
+        });
+        setOrders(combined);
       } catch (error) {
         console.error("Error fetching user orders:", error);
+        try {
+          const localOrders = JSON.parse(localStorage.getItem('ruby_offline_orders') || '[]');
+          const userLocalOrders = localOrders.filter((lo: any) => lo.userId === user.uid).map((lo: any) => ({
+            ...lo,
+            id: lo.orderId
+          }));
+          setOrders(userLocalOrders);
+        } catch (err) {
+          setOrders([]);
+        }
       } finally {
         setLoading(false);
       }

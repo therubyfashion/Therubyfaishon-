@@ -20,6 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
 import { useNotifications } from '../contexts/NotificationContext';
+import { checkProductHealth, logProductDiagnostics } from '../utils/productHealthCheck';
 
 export default function Home() {
   const { user, profile } = useAuth();
@@ -166,11 +167,26 @@ export default function Home() {
       });
     });
 
-    // 5. Real-time Products listener (Limit 50 to get a comprehensive set of real products)
-    const productsQuery = query(collection(db, 'products'), limit(50));
+    // 5. Real-time Products listener (Limit 100 and orderBy createdAt desc to get the newest real products)
+    const productsQuery = query(collection(db, 'products'), orderBy('createdAt', 'desc'), limit(100));
     const unsubscribeProducts = onSnapshot(productsQuery, (snapshot) => {
-      const allProds = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+      const allProds = snapshot.docs.map(doc => {
+        const prod = { id: doc.id, ...doc.data() } as Product;
+        logProductDiagnostics('Fetched', prod);
+        return prod;
+      });
       
+      console.log(`[Product Diagnostic - Query Result Count] Total products fetched for Home screen: ${allProds.length}`);
+
+      // Run health checks & log diagnostics
+      allProds.forEach(p => {
+        const health = checkProductHealth(p);
+        if (!health.isValid) {
+          console.warn(`[Product Diagnostic - Health Check Warning] Product "${p.name}" (${p.id}) has health issues:`, health.errors, health.warnings);
+        }
+        logProductDiagnostics('Rendered', p);
+      });
+
       const trending = allProds.filter(p => p.isTrending);
       const popular = allProds.filter(p => p.isPopular);
       

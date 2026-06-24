@@ -7,6 +7,7 @@ import { fallbackCategories, fallbackProducts } from '../data/fallbackData';
 import ProductCard from '../components/ProductCard';
 import { ProductCardSkeleton } from '../components/Skeleton';
 import { Filter, ChevronDown, SlidersHorizontal, Truck, RefreshCw, ShieldCheck } from 'lucide-react';
+import { checkProductHealth, logProductDiagnostics } from '../utils/productHealthCheck';
 
 export default function Shop() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -81,16 +82,46 @@ export default function Shop() {
       setCategories(['All', ...catNames]);
     });
 
-    // 2. Products real-time sync
-    const productsQuery = activeCategory !== 'All' 
-      ? query(collection(db, 'products'), where('category', 'array-contains', activeCategory), limit(40))
-      : query(collection(db, 'products'), limit(40));
+    // 2. Products real-time sync - resilient querying & client filtering to avoid missing index crashes
+    const productsQuery = query(
+      collection(db, 'products'), 
+      orderBy('createdAt', 'desc'), 
+      limit(200)
+    );
 
     const unsubscribeProducts = onSnapshot(productsQuery, (snapshot) => {
-      let prods = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...(doc.data() as Omit<Product, 'id'>)
-      })) as Product[];
+      let rawProds = snapshot.docs.map(doc => {
+        const prod = {
+          id: doc.id,
+          ...(doc.data() as Omit<Product, 'id'>)
+        } as Product;
+        logProductDiagnostics('Fetched', prod);
+        return prod;
+      });
+
+      console.log(`[Product Diagnostic - Query Result Count] Total products fetched from Firestore: ${rawProds.length}`);
+
+      // Client-side category filtering with fallback resilience (supports both category as array or string)
+      let prods = rawProds.filter(p => {
+        if (activeCategory === 'All') return true;
+        const matches = Array.isArray(p.category)
+          ? p.category.includes(activeCategory)
+          : p.category === activeCategory;
+        
+        if (!matches) {
+          logProductDiagnostics('Hidden', p, `Category mismatch. Product category: ${JSON.stringify(p.category)}, active category: "${activeCategory}"`);
+        }
+        return matches;
+      });
+
+      // Run health checks & diagnostics
+      prods.forEach(p => {
+        const health = checkProductHealth(p);
+        if (!health.isValid) {
+          console.warn(`[Product Diagnostic - Health Check Warning] Product "${p.name}" (${p.id}) has health issues:`, health.errors, health.warnings);
+        }
+        logProductDiagnostics('Rendered', p);
+      });
 
       // Client-side sorting
       prods.sort((a, b) => {
@@ -114,7 +145,11 @@ export default function Shop() {
       console.warn("Shop products real-time error:", error);
       let prods = activeCategory === 'All' 
         ? fallbackProducts 
-        : fallbackProducts.filter(p => p.category?.includes(activeCategory));
+        : fallbackProducts.filter(p => {
+            return Array.isArray(p.category) 
+              ? p.category.includes(activeCategory) 
+              : p.category === activeCategory;
+          });
       
       prods.sort((a, b) => {
         if (sortBy === 'newest') {

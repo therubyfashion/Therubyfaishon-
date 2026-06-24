@@ -11,6 +11,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getToken } from 'firebase/messaging';
 import { Product, Category } from '../types';
 import { toast } from 'sonner';
+import { checkProductHealth, logProductDiagnostics } from '../utils/productHealthCheck';
 import { 
   LayoutDashboard, Package, Tags, ShoppingBag, Palette, Maximize2, 
   Ticket, Users, Settings, LogOut, Search, Bell, Menu, X, 
@@ -140,7 +141,7 @@ const chartDataSample = [];
 const recentOrdersSample = [];
 const topProductsSample = [];
 
-type Tab = 'home' | 'dashboard' | 'live' | 'products' | 'category' | 'orders' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights' | 'promotions' | 'maintenance';
+type Tab = 'home' | 'dashboard' | 'live' | 'products' | 'category' | 'orders' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights' | 'promotions' | 'maintenance' | 'notification_logs';
 
 function Accordion({ title, icon: Icon, children }: { title: string, icon: any, children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -1223,6 +1224,34 @@ export default function AdminDashboard() {
 
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [pushLogs, setPushLogs] = useState<any[]>([]);
+  const [loadingPushLogs, setLoadingPushLogs] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== 'notification_logs') return;
+    
+    const fetchPushLogs = async () => {
+      setLoadingPushLogs(true);
+      try {
+        const q = query(
+          collection(db, 'push_notification_logs'),
+          orderBy('timestamp', 'desc'),
+          limit(10)
+        );
+        const snap = await getDocs(q);
+        const logs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setPushLogs(logs);
+      } catch (err: any) {
+        console.error("Error fetching push notification logs:", err);
+        setPushLogs([]);
+      } finally {
+        setLoadingPushLogs(false);
+      }
+    };
+    
+    fetchPushLogs();
+  }, [activeTab]);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const dashboardLoadTime = useRef(new Date().toISOString());
   const isInitialOrdersRef = useRef(true);
@@ -3174,14 +3203,23 @@ export default function AdminDashboard() {
         updatedAt: new Date().toISOString()
       };
 
+      // Run health check before write
+      const health = checkProductHealth(productData);
+      if (!health.isValid) {
+        console.warn(`[Product Diagnostic - Health Check Warn during Product Save] Product "${productData.name}" is unhealthy:`, health.errors, health.warnings);
+      }
+
       if (editingProduct) {
         await updateDoc(doc(db, 'products', editingProduct.id), productData);
+        logProductDiagnostics('Saved', { id: editingProduct.id, name: productData.name });
         toast.success("Product updated!", { id: uploadToast });
       } else {
-        await addDoc(collection(db, 'products'), {
+        const fullNewProduct = {
           ...productData,
           createdAt: new Date().toISOString()
-        });
+        };
+        const docRef = await addDoc(collection(db, 'products'), fullNewProduct);
+        logProductDiagnostics('Saved', { id: docRef.id, name: productData.name });
         toast.success("Product added successfully!", { id: uploadToast });
       }
 
@@ -3290,18 +3328,31 @@ export default function AdminDashboard() {
           for (const item of data) {
             if (item.name && item.price) {
               try {
-                await addDoc(collection(db, 'products'), {
+                const productCategory = item.category 
+                  ? String(item.category).split(',').map((c: string) => c.trim()).filter(Boolean) 
+                  : ['Women'];
+
+                const newProdData = {
                   name: String(item.name),
                   price: Number(item.price) || 0,
                   description: String(item.description || ''),
-                  category: String(item.category || 'Women'),
+                  category: productCategory,
                   stock: Number(item.stock) || 0,
-                  images: item.images ? String(item.images).split(',') : [],
+                  images: item.images ? String(item.images).split(',').map((imgUrl: string) => imgUrl.trim()).filter(Boolean) : [],
                   createdAt: new Date().toISOString(),
                   status: 'active',
                   sku: item.sku || `BULK-${Math.random().toString(36).substring(7).toUpperCase()}`,
                   comparePrice: Number(item.comparePrice) || 0
-                });
+                };
+
+                // Run a quick health check before writing
+                const health = checkProductHealth(newProdData);
+                if (!health.isValid) {
+                  console.warn(`[Product Diagnostic - Health Check Warn during Bulk Import] Product "${newProdData.name}" is unhealthy:`, health.errors, health.warnings);
+                }
+
+                await addDoc(collection(db, 'products'), newProdData);
+                logProductDiagnostics('Saved', { name: newProdData.name });
                 successCount++;
               } catch (err: any) {
                 console.error("Bulk Item Error:", err);
@@ -4120,6 +4171,7 @@ export default function AdminDashboard() {
     { id: 'rocket', label: 'Marketing', icon: TrendingUp },
     { id: 'stats', label: 'Analytics', icon: BarChart3 },
     { id: 'notifications', label: 'Notifications', icon: Bell },
+    { id: 'notification_logs', label: 'Notification Logs', icon: History },
     { id: 'chats', label: 'Customer Chat', icon: MessageCircle },
     { id: 'reviews', label: 'Reviews', icon: Star },
     { id: 'abandoned', label: 'Abandoned Carts', icon: ShoppingCart },
@@ -7612,6 +7664,119 @@ export default function AdminDashboard() {
             </div>
           )}
 
+          {activeTab === 'notification_logs' && (
+            <div className="space-y-6 md:space-y-8">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <h2 className="text-xl md:text-2xl font-bold text-gray-800">Notification Logs</h2>
+                  <p className="text-xs md:text-sm text-gray-400">Track delivery status and payloads of the last 10 triggered push notifications</p>
+                </div>
+                <div>
+                  <button 
+                    onClick={async () => {
+                      setLoadingPushLogs(true);
+                      try {
+                        const q = query(
+                          collection(db, 'push_notification_logs'),
+                          orderBy('timestamp', 'desc'),
+                          limit(10)
+                        );
+                        const snap = await getDocs(q);
+                        setPushLogs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                        toast.success("Logs updated successfully!");
+                      } catch (err: any) {
+                        console.error("Error fetching logs:", err);
+                        toast.error("Failed to refresh notification logs.");
+                      } finally {
+                        setLoadingPushLogs(false);
+                      }
+                    }}
+                    disabled={loadingPushLogs}
+                    className="bg-ruby text-white px-4 md:px-6 py-3 rounded-xl text-[10px] md:text-xs font-bold uppercase tracking-widest hover:bg-black transition-all flex items-center gap-2"
+                  >
+                    <RefreshCw size={14} className={loadingPushLogs ? "animate-spin" : ""} />
+                    {loadingPushLogs ? 'Refreshing...' : 'Refresh Logs'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+                {loadingPushLogs ? (
+                  <div className="p-12 md:p-20 text-center space-y-4">
+                    <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto text-ruby">
+                      <RefreshCw size={32} className="animate-spin" />
+                    </div>
+                    <p className="text-sm text-gray-400 font-medium">Loading recent dispatch events...</p>
+                  </div>
+                ) : pushLogs.length === 0 ? (
+                  <div className="p-12 md:p-20 text-center space-y-4">
+                    <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto text-gray-200">
+                      <History size={32} />
+                    </div>
+                    <p className="text-sm text-gray-400 font-medium">No push notifications logged yet.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100">
+                          <th className="p-4 md:p-5 text-xs font-bold uppercase tracking-wider text-gray-400">Timestamp</th>
+                          <th className="p-4 md:p-5 text-xs font-bold uppercase tracking-wider text-gray-400">Recipient</th>
+                          <th className="p-4 md:p-5 text-xs font-bold uppercase tracking-wider text-gray-400">Notification Details</th>
+                          <th className="p-4 md:p-5 text-xs font-bold uppercase tracking-wider text-gray-400">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {pushLogs.map((log) => {
+                          let statusClass = "bg-red-50 text-red-600 border-red-100";
+                          let statusLabel = "Failed";
+                          if (log.status === "success") {
+                            statusClass = "bg-green-50 text-green-600 border-green-100";
+                            statusLabel = "Delivered";
+                          } else if (log.status === "simulated") {
+                            statusClass = "bg-blue-50 text-blue-600 border-blue-100";
+                            statusLabel = "Simulated";
+                          } else if (log.status === "warning") {
+                            statusClass = "bg-yellow-50 text-yellow-600 border-yellow-100";
+                            statusLabel = "Warning";
+                          }
+
+                          return (
+                            <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
+                              <td className="p-4 md:p-5 whitespace-nowrap">
+                                <span className="text-xs font-medium text-gray-500 font-mono">
+                                  {log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A'}
+                                </span>
+                              </td>
+                              <td className="p-4 md:p-5 whitespace-nowrap">
+                                <span className="text-xs font-semibold text-[#1A2C54] capitalize">
+                                  {log.recipient || 'Broadcast'}
+                                </span>
+                              </td>
+                              <td className="p-4 md:p-5">
+                                <div className="space-y-1 max-w-lg">
+                                  <h4 className="text-xs font-bold text-[#1A2C54]">{log.title}</h4>
+                                  <p className="text-xs text-gray-400 leading-relaxed line-clamp-2 md:line-clamp-none">
+                                    {log.body}
+                                  </p>
+                                </div>
+                              </td>
+                              <td className="p-4 md:p-5 whitespace-nowrap">
+                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${statusClass}`}>
+                                  {statusLabel}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'chats' && (
             <div className="h-[calc(100vh-120px)] md:h-[calc(100vh-200px)] flex bg-white rounded-3xl border border-gray-100 overflow-hidden shadow-sm relative">
               {/* Chat List */}
@@ -10105,7 +10270,7 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {!['dashboard', 'products', 'orders', 'category', 'colour', 'size', 'coupon', 'promotions', 'customer', 'rocket', 'stats', 'settings', 'notifications', 'chats', 'reviews', 'abandoned', 'insights'].includes(activeTab) && !viewingCustomer && (
+          {!['dashboard', 'products', 'orders', 'category', 'colour', 'size', 'coupon', 'promotions', 'customer', 'rocket', 'stats', 'settings', 'notifications', 'notification_logs', 'chats', 'reviews', 'abandoned', 'insights'].includes(activeTab) && !viewingCustomer && (
             <div className="h-[60vh] flex flex-col items-center justify-center bg-white rounded-3xl border-2 border-dashed border-gray-100 text-gray-400 space-y-4">
               <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center">
                 <Settings size={32} className="text-gray-200 animate-spin-slow" />
