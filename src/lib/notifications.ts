@@ -9,7 +9,7 @@ export const sendNotification = async (data: {
   type: 'order' | 'coupon' | 'alert' | 'promotion';
   iconType: string;
   link?: string;
-}) => {
+}, skipPush = false) => {
   try {
     // 1. Store in Firestore for history
     await addDoc(collection(db, 'notifications'), {
@@ -19,7 +19,12 @@ export const sendNotification = async (data: {
       createdAt: new Date().toISOString()
     });
 
-    // 2. Trigger Push Notification
+    // 2. Trigger Push Notification (unless skipped)
+    if (skipPush) {
+      console.log(`ℹ️ [sendNotification] Recorded in-app notification in DB but skipped redundant push trigger: ${data.title}`);
+      return;
+    }
+
     const pushData = {
       title: data.title,
       body: data.body,

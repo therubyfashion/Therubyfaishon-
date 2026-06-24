@@ -51,7 +51,13 @@ export default function OrderSuccess() {
   };
 
   return (
-    <div className="bg-[#FDFDFD] min-h-screen pb-24 pt-12">
+    <motion.div 
+      initial={{ opacity: 0, y: 30, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -20, scale: 0.98 }}
+      transition={{ type: "spring", duration: 0.9, bounce: 0.15 }}
+      className="bg-[#FDFDFD] min-h-screen pb-24 pt-12"
+    >
       <div className="max-w-xl mx-auto px-4 space-y-10">
         {/* Success Icon & Title */}
         <div className="text-center space-y-6">
@@ -215,6 +221,6 @@ export default function OrderSuccess() {
           </button>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

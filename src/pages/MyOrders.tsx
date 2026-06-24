@@ -42,6 +42,23 @@ export default function MyOrders() {
       };
       await updateDoc(orderRef, returnDetails);
       
+      // Send templated Admin notification for return request
+      try {
+        await fetch('/api/send-templated-notification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            templateKey: 'admin_return_request',
+            params: {
+              orderId: returningOrder.orderId || returningOrder.id
+            },
+            options: { url: '/admin' }
+          })
+        });
+      } catch (pushErr) {
+        console.error("Failed to trigger return request admin push:", pushErr);
+      }
+      
       // Update local state so view re-renders instantly
       setOrders(prevOrders => prevOrders.map(o => 
         o.id === returningOrder.id 

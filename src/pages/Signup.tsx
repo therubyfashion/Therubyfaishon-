@@ -244,6 +244,23 @@ export default function Signup() {
         })
       ]);
 
+      // Notify Admin about new user registration
+      try {
+        fetch('/api/send-templated-notification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            templateKey: 'admin_new_user',
+            params: {
+              email: formData.email
+            },
+            options: { url: '/admin' }
+          })
+        }).catch(err => console.error("Failed to dispatch admin notification for new signup:", err));
+      } catch (adminPushErr) {
+        console.error("Failed to trigger new user admin push:", adminPushErr);
+      }
+
       // Send Verification Email with OTP
       const emailHtml = `
         <!DOCTYPE html>

@@ -328,6 +328,41 @@ function AppContent() {
                     }
                   });
                 }
+
+                // Add real-time event listeners for tracking delivered and clicked statuses
+                if (OneSignalWeb.Notifications && typeof OneSignalWeb.Notifications.addEventListener === 'function') {
+                  OneSignalWeb.Notifications.addEventListener("click", async (event: any) => {
+                    console.log("🔔 [OneSignal Web Event] Push notification click detected:", event);
+                    const notificationId = event.notification?.notificationId;
+                    if (notificationId) {
+                      try {
+                        await fetch('/api/notifications/track-clicked', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ notificationId })
+                        });
+                      } catch (err) {
+                        console.error("Failed to track clicked push status:", err);
+                      }
+                    }
+                  });
+
+                  OneSignalWeb.Notifications.addEventListener("foregroundWillDisplay", async (event: any) => {
+                    console.log("🔔 [OneSignal Web Event] Push notification display detected:", event);
+                    const notificationId = event.notification?.notificationId;
+                    if (notificationId) {
+                      try {
+                        await fetch('/api/notifications/track-delivered', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ notificationId })
+                        });
+                      } catch (err) {
+                        console.error("Failed to track delivered push status:", err);
+                      }
+                    }
+                  });
+                }
               } catch (syncErr: any) {
                 console.warn("OneSignal Web Sync User/Tags failed/skipped:", syncErr.message || syncErr);
               }

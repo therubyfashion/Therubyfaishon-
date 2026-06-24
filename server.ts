@@ -272,6 +272,146 @@ setTimeout(() => {
  * Centralizes credentials checks, targeting fields (using only latest include_subscription_ids),
  * and logging of all administrative / customer notifications.
  */
+// In-memory Deduplication Cache
+const deduplicationCache = new Map<string, number>();
+const DEDUPLICATION_WINDOW_MS = 5000; // 5-second window to prevent dual triggers
+
+function isDuplicatePush(target: string, title: string, body: string): boolean {
+  const cacheKey = `${target}:${title}:${body}`;
+  const now = Date.now();
+  const lastSent = deduplicationCache.get(cacheKey);
+  if (lastSent && (now - lastSent) < DEDUPLICATION_WINDOW_MS) {
+    return true;
+  }
+  deduplicationCache.set(cacheKey, now);
+  
+  // Clean up cache periodically
+  if (deduplicationCache.size > 1000) {
+    for (const [key, timestamp] of deduplicationCache.entries()) {
+      if (now - timestamp > DEDUPLICATION_WINDOW_MS) {
+        deduplicationCache.delete(key);
+      }
+    }
+  }
+  return false;
+}
+
+// Production-Grade Notification Templates Dictionary
+export const TEMPLATES: Record<string, { title: string; body: string }> = {
+  // User notifications
+  'order_placed': {
+    title: '🎉 Order Confirmed!',
+    body: 'Hi {{customerName}}, your order #{{orderId}} of {{total}} has been successfully placed. We are preparing it now.'
+  },
+  'order_confirmed': {
+    title: '🎉 Order Confirmed!',
+    body: 'Hi {{customerName}}, your order #{{orderId}} has been confirmed and is being processed.'
+  },
+  'packed': {
+    title: '📦 Order Packed!',
+    body: 'Hi {{customerName}}, your order #{{orderId}} is packed and ready to leave our warehouse.'
+  },
+  'shipped': {
+    title: '📦 Your order is on the way',
+    body: 'Track your shipment and get ready to receive your package. Order #{{orderId}} is shipped!'
+  },
+  'out_for_delivery': {
+    title: '🚚 Arriving Today',
+    body: 'Your package for order #{{orderId}} is out for delivery and should arrive soon.'
+  },
+  'delivered': {
+    title: '✅ Delivered Successfully',
+    body: 'Thank you for shopping with The Ruby Fashion. Order #{{orderId}} has been delivered!'
+  },
+  'cancelled': {
+    title: '❌ Order Cancelled',
+    body: 'Your order #{{orderId}} has been cancelled. If paid, your refund will be processed.'
+  },
+  'return_approved': {
+    title: '🔄 Return Request Approved',
+    body: 'Your return request for order #{{orderId}} has been approved. We will arrange pickup.'
+  },
+  'refund_processed': {
+    title: '💰 Refund Processed',
+    body: 'Refund for order #{{orderId}} has been processed. It will reflect in your account soon.'
+  },
+  'refund_completed': {
+    title: '✅ Refund Completed',
+    body: 'Refund for order #{{orderId}} has been successfully completed and credited.'
+  },
+  'coupon_received': {
+    title: '🔥 Exclusive Offer',
+    body: 'Use coupon {{couponCode}} and save {{discount}} today.'
+  },
+  'offer_alert': {
+    title: '⚡ Limited Time Offer!',
+    body: 'Exciting discounts on selected collections! Check out our handpicked deals now.'
+  },
+  'wishlist_price_drop': {
+    title: '📉 Price Drop on Wishlist!',
+    body: 'An item in your wishlist has dropped in price! Grab it before it sells out.'
+  },
+  'back_in_stock': {
+    title: '✨ Back in Stock!',
+    body: 'Great news! The product "{{productName}}" you were watching is back in stock.'
+  },
+  'cart_reminder': {
+    title: '🛒 Items left in your cart',
+    body: 'You have items waiting in your cart. Complete your purchase now before they sell out!'
+  },
+  'payment_failed': {
+    title: '⚠️ Payment Failed',
+    body: 'The payment for your order #{{orderId}} failed. Please retry your transaction.'
+  },
+  'payment_success': {
+    title: '💳 Payment Received',
+    body: 'We have successfully received payment for your order #{{orderId}}.'
+  },
+
+  // Admin notifications
+  'admin_new_order': {
+    title: '🛒 New Order Received',
+    body: 'New order #{{orderId}} received from {{customerName}} for {{total}}.'
+  },
+  'admin_high_value_order': {
+    title: '🚨 High Value Order Alert!',
+    body: 'Alert! High value order #{{orderId}} placed by {{customerName}} for {{total}}.'
+  },
+  'admin_new_user': {
+    title: '👤 New User Registered',
+    body: 'A new user {{email}} has just registered on the platform.'
+  },
+  'admin_payment_failed': {
+    title: '⚠️ Payment Failed Alert',
+    body: 'Payment failed for order #{{orderId}} of amount {{total}}.'
+  },
+  'admin_return_request': {
+    title: '🔄 New Return Request',
+    body: 'Return request received for order #{{orderId}}.'
+  },
+  'admin_refund_request': {
+    title: '💰 Refund Request Raised',
+    body: 'Refund requested for order #{{orderId}}.'
+  },
+  'admin_support_message': {
+    title: '💬 New Support Message',
+    body: 'New customer support message received from {{customerName}}.'
+  },
+  'admin_inventory_low': {
+    title: '⚠️ Low Stock Alert',
+    body: 'Warning: Product "{{productName}}" is running low on stock ({{stock}} left).'
+  },
+  'admin_out_of_stock': {
+    title: '🚫 Product Out of Stock',
+    body: 'Alert: Product "{{productName}}" is completely out of stock!'
+  }
+};
+
+/**
+ * Single Reusable Notification Service
+ * Centralizes credentials checks, targeting fields (using only latest include_subscription_ids),
+ * and logging of all administrative / customer notifications.
+ */
 export const NotificationService = {
   /**
    * Helper to verify and log OneSignal configuration.
@@ -350,6 +490,14 @@ export const NotificationService = {
       targets = "Segment Audience";
     }
 
+    // Deduplication check
+    const headingsEn = payload.headings?.en || "Notification";
+    const contentsEn = payload.contents?.en || "";
+    if (isDuplicatePush(targets, headingsEn, contentsEn)) {
+      console.warn(`⚠️ [NotificationService Deduplication] Blocked duplicate push dispatch to ${targets}`);
+      return { data: { id: "deduplicated-msg-id", warning: "Duplicate blocked" } };
+    }
+
     console.log(`\n=============================================================`);
     console.log(`📡 [NotificationService PUSH SYSTEM DISPATCH]`);
     console.log(`   - Notification Type: ${targetType}`);
@@ -379,6 +527,48 @@ export const NotificationService = {
       console.error(`❌ [NotificationService] Direct API Error Statement:`, JSON.stringify(errorData || axiosErr.message, null, 2));
       console.error(`=============================================================\n`);
       
+      // Auto-cleanup invalid subscriptions if OneSignal tells us the subscription ID was not found or not subscribed
+      const errorMsg = String(errorData?.errors ? errorData.errors.join(', ') : '').toLowerCase();
+      if (payload.include_subscription_ids && payload.include_subscription_ids.length > 0) {
+        if (errorMsg.includes("not subscribed") || errorMsg.includes("not found") || errorMsg.includes("players are not subscribed")) {
+          const invalidId = payload.include_subscription_ids[0];
+          try {
+            console.log(`🧹 [NotificationService Auto-Cleanup] Cleared expired subscription ${invalidId} from database`);
+            if (db) {
+              const snap = await db.collection('users').where('onesignalId', '==', invalidId).get();
+              if (snap && !snap.empty) {
+                for (const doc of snap.docs) {
+                  await doc.ref.update({ onesignalId: null });
+                }
+              }
+            }
+          } catch (cleanErr: any) {
+            console.error("Failed to run automatic cleanup:", cleanErr.message);
+          }
+        }
+      }
+
+      // Check if it's a transient failure (5xx or connection timeout), queue for auto-retry
+      const isTransient = !errorStatus || errorStatus >= 500 || axiosErr.code === 'ECONNABORTED' || axiosErr.message?.includes('Network Error');
+      if (isTransient) {
+        console.log(`⏳ [NotificationService Queue] Enqueueing failed push for background retry loop`);
+        try {
+          const queuedData = {
+            payload,
+            targetType,
+            targets,
+            retryCount: 0,
+            status: 'queued',
+            timestamp: new Date().toISOString()
+          };
+          if (db) {
+            await db.collection('queued_notifications').add(queuedData);
+          }
+        } catch (queueErr: any) {
+          console.error("Failed to enqueue notification:", queueErr.message);
+        }
+      }
+
       if (errorData?.errors?.includes("Invalid REST API Key")) {
         throw new Error("OneSignal Error: Your REST API Key is invalid. Please check Admin Settings.");
       }
@@ -392,12 +582,14 @@ export const NotificationService = {
   /**
    * Safe persistent logging of dispatch statuses.
    */
-  async log(title: string, body: string, recipient: string, status: string) {
+  async log(title: string, body: string, recipient: string, status: string, notificationId: string | null = null) {
     const logData = {
       title,
       body,
       recipient,
       status,
+      deliveryStatus: status === 'success' ? 'sent' : 'failed',
+      notificationId,
       timestamp: new Date().toISOString()
     };
     try {
@@ -471,6 +663,7 @@ export const NotificationService = {
       }
 
       let resultStatus = "success";
+      let msgId: string | null = null;
 
       // Try tag filter delivery
       try {
@@ -478,7 +671,8 @@ export const NotificationService = {
           ...notification,
           filters: [{ field: "tag", key: "role", relation: "=", value: "admin" }]
         };
-        await this.send(filterNotif);
+        const res = await this.send(filterNotif);
+        msgId = res?.data?.id || msgId;
       } catch (fErr: any) {
         console.warn("[NotificationService] Tag filter push warning:", fErr.message);
         resultStatus = "warning";
@@ -491,15 +685,16 @@ export const NotificationService = {
             ...notification,
             include_subscription_ids: adminSubIds
           };
-          await this.send(directNotif);
+          const res = await this.send(directNotif);
+          msgId = res?.data?.id || msgId;
           resultStatus = "success";
         } catch (dErr: any) {
           console.warn("[NotificationService] Direct admin subscription push warning:", dErr.message);
         }
       }
 
-      await this.log(title, body, "admin", resultStatus);
-      return { success: true, status: resultStatus };
+      await this.log(title, body, "admin", resultStatus, msgId);
+      return { success: true, status: resultStatus, notificationId: msgId };
     } catch (err: any) {
       console.error("❌ [NotificationService] sendAdmin failed:", err.message);
       await this.log(title, body, "admin", "failed");
@@ -568,6 +763,7 @@ export const NotificationService = {
 
       const response = await this.send(notification);
       const responseData = response?.data;
+      const msgId = responseData?.id || null;
       
       let resultStatus = "success";
       if (responseData?.errors && Array.isArray(responseData.errors)) {
@@ -577,8 +773,8 @@ export const NotificationService = {
         }
       }
 
-      await this.log(title, body, userEmail || userId, resultStatus);
-      return { success: true, status: resultStatus };
+      await this.log(title, body, userEmail || userId, resultStatus, msgId);
+      return { success: true, status: resultStatus, notificationId: msgId };
     } catch (err: any) {
       console.error(`❌ [NotificationService] sendCustomer failed:`, err.message);
       const errLower = String(err.message || '').toLowerCase();
@@ -591,6 +787,43 @@ export const NotificationService = {
     }
   }
 };
+
+// Automatic Background Retry Loop for Queued Pushes
+setInterval(async () => {
+  try {
+    if (!db) return;
+    const queuedSnap = await db.collection('queued_notifications').where('status', '==', 'queued').get();
+    if (!queuedSnap || queuedSnap.empty) return;
+    
+    console.log(`🔄 [NotificationService Retry Engine] Retrying ${queuedSnap.size} queued notifications...`);
+    for (const doc of queuedSnap.docs) {
+      const data = doc.data();
+      if (data.retryCount >= 3) {
+        await doc.ref.update({ status: 'failed_exhausted' });
+        await NotificationService.log(
+          data.payload?.headings?.en || 'Retried push',
+          data.payload?.contents?.en || '',
+          data.targets || 'unknown',
+          'failed'
+        );
+        continue;
+      }
+      
+      try {
+        await NotificationService.send(data.payload);
+        await doc.ref.update({ status: 'processed' });
+        console.log(`✅ [NotificationService Retry Engine] Dispatched queued message ${doc.id}`);
+      } catch (err: any) {
+        const nextRetry = (data.retryCount || 0) + 1;
+        await doc.ref.update({ retryCount: nextRetry });
+        console.warn(`⚠️ [NotificationService Retry Engine] Retry attempt ${nextRetry} failed for ${doc.id}`);
+      }
+    }
+  } catch (err: any) {
+    console.error("Error running retry background engine loop:", err.message);
+  }
+}, 30000); // execute retry process every 30 seconds
+
 
 // Compatible standalone wrappers delegating to the unified NotificationService
 async function sendOneSignalNotification(notification: any, config?: { appId?: string, restKey?: string }) {
@@ -3387,6 +3620,98 @@ async function startServer() {
         error: errorDetail || "Unknown error",
         hint: "This key is incorrect. Go to OneSignal Dashboard -> Settings -> Keys & IDs, and copy the 'REST API Key'. Do not copy 'Key ID'!"
       });
+    }
+  });
+
+  // Track notification delivered status
+  app.post("/api/notifications/track-delivered", async (req, res) => {
+    const { notificationId } = req.body;
+    if (!notificationId) {
+      return res.status(400).json({ error: "notificationId is required" });
+    }
+    try {
+      console.log(`📈 [Notification Tracking] Received delivery confirmation for push: ${notificationId}`);
+      if (db) {
+        const logsSnap = await db.collection('push_notification_logs')
+          .where('notificationId', '==', notificationId)
+          .get();
+        if (logsSnap && !logsSnap.empty) {
+          for (const doc of logsSnap.docs) {
+            await doc.ref.update({ 
+              deliveryStatus: 'delivered',
+              deliveredAt: new Date().toISOString()
+            });
+            console.log(`📈 [Notification Tracking] Updated log status to 'delivered' for log: ${doc.id}`);
+          }
+        }
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Failed to track delivery:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Track notification clicked status
+  app.post("/api/notifications/track-clicked", async (req, res) => {
+    const { notificationId } = req.body;
+    if (!notificationId) {
+      return res.status(400).json({ error: "notificationId is required" });
+    }
+    try {
+      console.log(`📈 [Notification Tracking] Received click notification for push: ${notificationId}`);
+      if (db) {
+        const logsSnap = await db.collection('push_notification_logs')
+          .where('notificationId', '==', notificationId)
+          .get();
+        if (logsSnap && !logsSnap.empty) {
+          for (const doc of logsSnap.docs) {
+            await doc.ref.update({ 
+              deliveryStatus: 'clicked',
+              clickedAt: new Date().toISOString()
+            });
+            console.log(`📈 [Notification Tracking] Updated log status to 'clicked' for log: ${doc.id}`);
+          }
+        }
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Failed to track click:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Dedicated Templated Notification Dispatcher API Route
+  app.post("/api/send-templated-notification", async (req, res) => {
+    const { templateKey, params = {}, userId, options = {} } = req.body;
+    try {
+      const template = TEMPLATES[templateKey];
+      if (!template) {
+        return res.status(400).json({ error: `Template '${templateKey}' not found.` });
+      }
+
+      let title = template.title;
+      let body = template.body;
+
+      // Replace place_holders dynamically
+      Object.entries(params).forEach(([key, val]) => {
+        const placeholder = new RegExp(`{{${key}}}`, 'g');
+        title = title.replace(placeholder, String(val));
+        body = body.replace(placeholder, String(val));
+      });
+
+      console.log(`[Templated API Dispatcher] Dispatched template '${templateKey}' resolved to: [${title}] -> [${body}]`);
+
+      if (userId && userId !== 'admin') {
+        const result = await NotificationService.sendCustomer(userId, title, body, options);
+        return res.json({ success: true, result });
+      } else {
+        const result = await NotificationService.sendAdmin(title, body, options);
+        return res.json({ success: true, result });
+      }
+    } catch (err: any) {
+      console.error("❌ Templated notification dispatch failed:", err.message);
+      res.status(500).json({ error: err.message });
     }
   });
 

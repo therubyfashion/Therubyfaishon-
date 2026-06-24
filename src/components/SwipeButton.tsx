@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { ChevronRight, Check } from 'lucide-react';
 import { formatPrice } from '../utils/currency';
@@ -15,11 +15,26 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
   const containerRef = useRef<HTMLDivElement>(null);
   const x = useMotionValue(0);
   
-  // Width of the handle is roughly 60px
-  const containerWidth = containerRef.current?.offsetWidth || 300;
+  // Responsive container width state
+  const [containerWidth, setContainerWidth] = useState(300);
+
+  useEffect(() => {
+    if (containerRef.current) {
+      setContainerWidth(containerRef.current.offsetWidth);
+    }
+    // Handle window resize dynamically to recalculate swipe range
+    const handleResize = () => {
+      if (containerRef.current) {
+        setContainerWidth(containerRef.current.offsetWidth);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const padding = 8;
   const handleSize = 56;
-  const swipeRange = containerWidth - handleSize - (padding * 2);
+  const swipeRange = Math.max(100, containerWidth - handleSize - (padding * 2));
 
   const opacity = useTransform(x, [0, swipeRange * 0.3], [1, 0.1]);
   const bgColor = useTransform(
@@ -32,19 +47,22 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
     [0, swipeRange],
     ["#1A2C54", "#ffffff"]
   );
-  const handleX = x;
   const checkScale = useTransform(x, [swipeRange * 0.8, swipeRange], [0, 1]);
 
   const handleDragEnd = () => {
-    if (x.get() > swipeRange * 0.8) {
-      animate(x, swipeRange, { type: 'spring', stiffness: 400, damping: 40 });
+    const currentX = x.get();
+    if (currentX > swipeRange * 0.75) {
+      // Complete swipe
+      animate(x, swipeRange, { type: 'spring', stiffness: 500, damping: 30 });
       setIsComplete(true);
-      // Small delay to let the animation finish before triggering navigation/processing
+      
+      // Delay to let the completed animation sit satisfyingly for a moment before calling onConfirm
       setTimeout(() => {
         onConfirm();
-      }, 100);
+      }, 350);
     } else {
-      animate(x, 0, { type: 'spring', stiffness: 400, damping: 40 });
+      // Snap back
+      animate(x, 0, { type: 'spring', stiffness: 400, damping: 25 });
     }
   };
 
@@ -53,7 +71,7 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
       <div className="w-full h-[72px] bg-ruby/5 rounded-[24px] flex items-center justify-center border-2 border-ruby/10 shadow-inner">
         <motion.div 
           animate={{ rotate: 360 }}
-          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+          transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
           className="w-6 h-6 border-2 border-ruby border-t-transparent rounded-full"
         />
         <span className="ml-4 text-xs font-black uppercase tracking-[0.2em] text-ruby">Processing Order</span>
@@ -65,15 +83,17 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
     <motion.div 
       ref={containerRef}
       style={{ backgroundColor: bgColor }}
-      className={`relative w-full h-[72px] rounded-[24px] border-2 overflow-hidden select-none transition-all duration-500 shadow-md ${
-        isComplete ? 'border-ruby shadow-xl shadow-ruby/20' : 'border-gray-200'
+      className={`relative w-full h-[72px] rounded-[24px] border-2 overflow-hidden select-none shadow-md ${
+        isComplete 
+          ? 'border-ruby shadow-xl shadow-ruby/20' 
+          : 'border-gray-200'
       } ${disabled ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}
     >
       {/* Background Pulse for "Swipe to Pay" */}
       {!isComplete && (
         <motion.div 
-          animate={{ opacity: [0.3, 0.6, 0.3], scale: [0.95, 1.05, 0.95] }}
-          transition={{ duration: 2, repeat: Infinity }}
+          animate={{ opacity: [0.3, 0.6, 0.3], scale: [0.98, 1.02, 0.98] }}
+          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
           className="absolute inset-0 bg-gradient-to-r from-transparent via-ruby/5 to-transparent skew-x-12"
         />
       )}
@@ -82,7 +102,7 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
         <motion.span 
           style={{ color: textColor }}
-          className="text-[15px] font-black uppercase tracking-widest"
+          className="text-[15px] font-black uppercase tracking-widest transition-colors duration-150"
         >
           {isComplete ? 'ORDER CONFIRMED' : formatPrice(price)}
         </motion.span>
@@ -101,14 +121,14 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
         <motion.div
           drag="x"
           dragConstraints={{ left: 0, right: swipeRange }}
-          dragElastic={0.02}
+          dragElastic={0.05}
           onDragEnd={handleDragEnd}
-          style={{ x: handleX }}
-          className="absolute left-2 top-2 w-[56px] h-[56px] bg-ruby rounded-[18px] shadow-lg shadow-ruby/20 flex items-center justify-center z-10 cursor-grab active:cursor-grabbing hover:scale-105 active:scale-95 transition-transform"
+          style={{ x }}
+          className="absolute left-2 top-2 w-[56px] h-[56px] bg-ruby rounded-[18px] shadow-lg shadow-ruby/20 flex items-center justify-center z-10 cursor-grab active:cursor-grabbing hover:scale-105 active:scale-95 transition-all duration-150"
         >
           <motion.div
             animate={{ x: [0, 4, 0] }}
-            transition={{ duration: 1.5, repeat: Infinity }}
+            transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
           >
             <ChevronRight className="text-white" size={24} strokeWidth={3} />
           </motion.div>

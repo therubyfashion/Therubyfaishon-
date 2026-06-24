@@ -84,6 +84,24 @@ export default function Checkout() {
   const [selectedShipping, setSelectedShipping] = useState('standard');
   const [selectedPayment, setSelectedPayment] = useState('cod');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [paymentStep, setPaymentStep] = useState(1);
+
+  useEffect(() => {
+    if (!isProcessingPayment) {
+      setPaymentStep(1);
+      return;
+    }
+    const step1 = setTimeout(() => setPaymentStep(2), 500);
+    const step2 = setTimeout(() => setPaymentStep(3), 1000);
+    const step3 = setTimeout(() => setPaymentStep(4), 1500);
+    
+    return () => {
+      clearTimeout(step1);
+      clearTimeout(step2);
+      clearTimeout(step3);
+    };
+  }, [isProcessingPayment]);
+
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [pendingAddress, setPendingAddress] = useState<any>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -410,13 +428,16 @@ export default function Checkout() {
             }
           }
           
+          // Wait for a minimum of 2 seconds for visual satisfaction of secure processing steps
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
           // Clear checkout state & cart
           localStorage.removeItem('checkout_step');
           localStorage.removeItem('selected_address_id');
           clearCart();
           setIsProcessingPayment(false);
 
-          // Navigate IMMEDIATELY to success screen!
+          // Navigate to success screen with smooth routing
           navigate('/order-success', {
             state: {
               ...finalOrderData,
@@ -456,61 +477,67 @@ export default function Checkout() {
               }
             }
 
-            // Send internal notification (Firestore DB)
+            // Send internal notification (Firestore DB) & Templated Push Notification
             if (user?.uid) {
               try {
+                // 1. Send customer templated push notification (🎉 Order Confirmed!)
+                await fetch('/api/send-templated-notification', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    templateKey: 'order_placed',
+                    userId: user.uid,
+                    params: {
+                      customerName: finalOrderData.customerName || 'Customer',
+                      orderId: finalOrderData.orderId,
+                      total: `₹${Number(finalOrderData.total).toLocaleString()}`
+                    },
+                    options: { url: '/my-orders' }
+                  })
+                });
+
+                // 2. Log inside in-app notifications history (skip duplicate direct push trigger)
                 await sendNotification({
                   userId: user.uid,
                   title: 'Order Placed!',
-                  body: `Your order ${finalOrderData.orderId} has been placed successfully.`,
+                  body: `Your order ${finalOrderData.orderId} of ₹${Number(finalOrderData.total).toLocaleString()} has been placed successfully.`,
                   type: 'order',
                   iconType: 'package',
                   link: '/my-orders'
-                });
+                }, true);
               } catch (notifErr) {
                 console.error('Failed to send user notification:', notifErr);
               }
             }
 
-            // 1. Trigger User Push Notification via OneSignal (Individual)
-            if (user?.uid) {
-              try {
-                await fetch('/api/send-user-push', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    userId: user.uid,
-                    title: 'Order Successfully Placed! 🎉',
-                    body: `Your order ${finalOrderData.orderId} of ₹${Number(finalOrderData.total).toLocaleString()} has been successfully placed. We are preparing it!`,
-                    url: '/my-orders'
-                  })
-                });
-                console.log("Sent user push notification with Order ID:", finalOrderData.orderId);
-              } catch (userPushErr) {
-                console.error('Failed to send user push notification:', userPushErr);
-              }
-            }
-
-            // 2. Trigger Admin Push Notification via OneSignal
+            // 3. Trigger Admin Templated Push Notification via OneSignal (including High Value Order detection)
             try {
               const mainItemName = finalOrderData.items[0]?.name || 'Premium Product';
               const firstImage = finalOrderData.items[0]?.image || '';
               const itemCount = finalOrderData.items.reduce((sum: number, item: any) => sum + (item.quantity || 1), 0);
               const itemsText = itemCount > 1 ? `${mainItemName} (+${itemCount - 1} item${itemCount > 2 ? 's' : ''})` : `${mainItemName}`;
               
-              const adminPushBody = `You have a new order ${finalOrderData.orderId}\nfor ₹${Number(finalOrderData.total).toLocaleString()} from ${finalOrderData.customerName} (${finalOrderData.address?.city || 'Patna'}, ${finalOrderData.address?.state || 'Bihar'})\n\n📦 Order Details:\n• Order ID   : ${finalOrderData.orderId}\n• Product    : ${itemsText}\n• Quantity   : ${itemCount}\n• Amount     : ₹${Number(finalOrderData.total).toLocaleString()}\n• Payment    : ${finalOrderData.paymentMethod}`;
-              
-              await fetch('/api/send-admin-push', {
+              const isHighValue = Number(finalOrderData.total) >= 5000;
+              const templateKey = isHighValue ? 'admin_high_value_order' : 'admin_new_order';
+              const formattedTotal = `₹${Number(finalOrderData.total).toLocaleString()}`;
+
+              await fetch('/api/send-templated-notification', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  title: '🛒 New Order Received',
-                  body: adminPushBody,
-                  imageUrl: firstImage,
-                  url: '/admin'
+                  templateKey,
+                  params: {
+                    orderId: finalOrderData.orderId,
+                    customerName: finalOrderData.customerName || 'Customer',
+                    total: formattedTotal
+                  },
+                  options: {
+                    url: '/admin',
+                    imageUrl: firstImage
+                  }
                 })
               });
-              console.log("Sent admin push notification with rich layout & image");
+              console.log("Sent admin push notification with rich layout & templates");
             } catch (pushErr) {
               console.error('Failed to send admin push notification:', pushErr);
             }
@@ -788,6 +815,142 @@ export default function Checkout() {
 
   return (
     <div id="checkout" className="bg-gray-50 min-h-screen pb-24">
+      {/* Secure Payment Processing Overlay with dynamic status steps */}
+      <AnimatePresence>
+        {isProcessingPayment && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              transition={{ type: "spring", duration: 0.5, bounce: 0.15 }}
+              className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center space-y-6 shadow-2xl border border-gray-100"
+            >
+              {/* Spinning/pulsing loader circle */}
+              <div className="relative w-20 h-20 mx-auto">
+                <motion.div 
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  className="absolute inset-0 border-4 border-ruby/10 border-t-ruby rounded-full"
+                />
+                <motion.div 
+                  animate={{ scale: [0.9, 1.1, 0.9], opacity: [0.3, 0.6, 0.3] }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                  className="absolute -inset-2 bg-ruby/5 rounded-full filter blur-sm"
+                />
+                <div className="absolute inset-0 flex items-center justify-center text-ruby">
+                  <Lock size={24} strokeWidth={2.5} />
+                </div>
+              </div>
+
+              {/* Status Stepper */}
+              <div className="space-y-2">
+                <h3 className="text-lg font-black text-[#1A2C54] tracking-tight">Securing Your Order</h3>
+                <p className="text-[11px] text-gray-400 font-medium max-w-[240px] mx-auto leading-relaxed">
+                  Please do not close this tab or go back. We are finalizing your payment with industry-standard encryption.
+                </p>
+              </div>
+
+              {/* Dynamic Step indicator animations */}
+              <div className="space-y-3 pt-2 text-left max-w-[240px] mx-auto border-t border-gray-100">
+                {/* Step 1 */}
+                <div className="flex items-center gap-3">
+                  {paymentStep > 1 ? (
+                    <div className="w-5 h-5 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center text-xs font-bold">
+                      ✓
+                    </div>
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-ruby/10 text-ruby flex items-center justify-center">
+                      <motion.div 
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                        className="w-2.5 h-2.5 border border-ruby border-t-transparent rounded-full"
+                      />
+                    </div>
+                  )}
+                  <span className={cn("text-[11px] font-bold transition-all duration-150", paymentStep === 1 ? "text-ruby" : "text-gray-400")}>
+                    Authorizing payment gateway
+                  </span>
+                </div>
+                
+                {/* Step 2 */}
+                <div className="flex items-center gap-3">
+                  {paymentStep > 2 ? (
+                    <div className="w-5 h-5 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center text-xs font-bold">
+                      ✓
+                    </div>
+                  ) : paymentStep === 2 ? (
+                    <div className="w-5 h-5 rounded-full bg-ruby/10 text-ruby flex items-center justify-center">
+                      <motion.div 
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                        className="w-2.5 h-2.5 border border-ruby border-t-transparent rounded-full"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-gray-50 text-gray-300 flex items-center justify-center text-[10px] font-bold">
+                      2
+                    </div>
+                  )}
+                  <span className={cn("text-[11px] font-bold transition-all duration-150", paymentStep === 2 ? "text-ruby" : paymentStep > 2 ? "text-gray-400" : "text-gray-300")}>
+                    Creating unique order records
+                  </span>
+                </div>
+
+                {/* Step 3 */}
+                <div className="flex items-center gap-3">
+                  {paymentStep > 3 ? (
+                    <div className="w-5 h-5 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center text-xs font-bold">
+                      ✓
+                    </div>
+                  ) : paymentStep === 3 ? (
+                    <div className="w-5 h-5 rounded-full bg-ruby/10 text-ruby flex items-center justify-center">
+                      <motion.div 
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                        className="w-2.5 h-2.5 border border-ruby border-t-transparent rounded-full"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-gray-50 text-gray-300 flex items-center justify-center text-[10px] font-bold">
+                      3
+                    </div>
+                  )}
+                  <span className={cn("text-[11px] font-bold transition-all duration-150", paymentStep === 3 ? "text-ruby" : paymentStep > 3 ? "text-gray-400" : "text-gray-300")}>
+                    Syncing fashion stock ledger
+                  </span>
+                </div>
+
+                {/* Step 4 */}
+                <div className="flex items-center gap-3">
+                  {paymentStep === 4 ? (
+                    <div className="w-5 h-5 rounded-full bg-ruby/10 text-ruby flex items-center justify-center">
+                      <motion.div 
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                        className="w-2.5 h-2.5 border border-ruby border-t-transparent rounded-full"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-gray-50 text-gray-300 flex items-center justify-center text-[10px] font-bold">
+                      4
+                    </div>
+                  )}
+                  <span className={cn("text-[11px] font-bold transition-all duration-150", paymentStep === 4 ? "text-ruby" : "text-gray-300")}>
+                    Finalizing notification dispatch
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header - Not Sticky */}
       <div className="bg-white border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-[5%] h-16 sm:h-20 flex items-center justify-between">

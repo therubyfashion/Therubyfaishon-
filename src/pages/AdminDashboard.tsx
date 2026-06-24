@@ -2919,23 +2919,44 @@ export default function AdminDashboard() {
 
   const handleUpdateOrderStatus = async (orderId: string, newStatus: string) => {
     try {
-      await updateDoc(doc(db, 'orders', orderId), { status: newStatus });
+      const updates: any = { status: newStatus };
+      if (newStatus === 'Returned') {
+        updates.returnStatus = 'Approved';
+      } else if (newStatus === 'Cancelled' || newStatus === 'Refunded') {
+        updates.returnStatus = 'Rejected';
+      }
+      
+      await updateDoc(doc(db, 'orders', orderId), updates);
       const order = orders.find(o => o.id === orderId);
       
-      // Send OneSignal notification to customer
+      // Send OneSignal templated push notification & email to customer
       if (order && order.userId && order.userId !== 'guest') {
         try {
-          // Push
-          fetch('/api/send-user-push', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: order.userId,
-              title: 'Order Status Updated! 📦',
-              body: `Your order ${order.orderId} is now ${newStatus}.`,
-              url: '/my-orders'
-            })
-          });
+          // Identify template key
+          let templateKey = '';
+          if (newStatus === 'Shipped') templateKey = 'shipped';
+          else if (newStatus === 'Processing') templateKey = 'packed';
+          else if (newStatus === 'In Delivery') templateKey = 'out_for_delivery';
+          else if (newStatus === 'Delivered') templateKey = 'delivered';
+          else if (newStatus === 'Cancelled') templateKey = 'cancelled';
+          else if (newStatus === 'Refunded') templateKey = 'refund_completed';
+
+          if (templateKey) {
+            // Send templated high-fidelity push
+            fetch('/api/send-templated-notification', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                templateKey,
+                userId: order.userId,
+                params: {
+                  customerName: order.address?.name || 'Customer',
+                  orderId: order.orderId
+                },
+                options: { url: '/my-orders' }
+              })
+            }).catch(pushErr => console.error("Failed to send status update push:", pushErr));
+          }
 
           // Email
           if (order.address?.email) {
@@ -2974,7 +2995,7 @@ export default function AdminDashboard() {
                   </div>
                 `
               })
-            });
+            }).catch(emailErr => console.error("Email send failed:", emailErr));
           }
         } catch (e) {
           console.error("Failed to send customer notifications:", e);
@@ -2986,7 +3007,7 @@ export default function AdminDashboard() {
         setViewingCustomer({ ...viewingCustomer, status: newStatus });
       }
 
-      // Send internal notification to user
+      // Send internal notification to user (with skipPush: true to prevent double push triggers)
       if (order?.userId && order.userId !== 'guest') {
         let iconType = 'package';
         if (newStatus === 'Shipped') iconType = 'truck';
@@ -2999,7 +3020,7 @@ export default function AdminDashboard() {
           type: 'order',
           iconType: iconType,
           link: '/my-orders'
-        });
+        }, true);
       }
 
       toast.success(`Order status updated to ${newStatus}`);
@@ -3936,27 +3957,30 @@ export default function AdminDashboard() {
         createdAt: new Date().toISOString() 
       });
 
-      // Internal notification for new coupon
+      // Internal notification for new coupon (skip default push trigger to prevent duplicates)
       await sendNotification({
         title: 'New Discount Coupon! 🎟️',
         body: `Use code ${couponForm.code.toUpperCase()} to get ${couponForm.discount}${couponForm.type === 'percentage' ? '%' : ' OFF'} on your next order!`,
         type: 'coupon',
         iconType: 'tag',
         link: '/shop'
-      });
+      }, true);
 
-      // Send broadcast notification for new coupon
+      // Send broadcast notification for new coupon using high-fidelity templates
       try {
-        fetch('/api/send-push', {
+        const discountText = `${couponForm.discount}${couponForm.type === 'percentage' ? '%' : ' OFF'}`;
+        fetch('/api/send-templated-notification', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            title: 'New Discount Coupon! 🎟️',
-            body: `Use code ${couponForm.code.toUpperCase()} to get ${couponForm.discount}${couponForm.type === 'percentage' ? '%' : ' OFF'} on your next order!`,
-            url: '/',
-            type: 'all'
+            templateKey: 'coupon_received',
+            params: {
+              couponCode: couponForm.code.toUpperCase(),
+              discount: discountText
+            },
+            options: { url: '/' }
           })
-        });
+        }).catch(err => console.error("Failed to broadcast coupon push notification:", err));
 
         // Send Newsletter Emails
         const newsletterSnap = await getDocs(collection(db, 'newsletter'));
@@ -6110,16 +6134,15 @@ export default function AdminDashboard() {
                         {['Pending', 'Paid', 'Processing', 'Shipped', 'In Delivery', 'Delivered', 'Cancelled', 'Refunded', 'Return Requested', 'Returned'].map(s => (
                           <button 
                             key={s}
-                            onClick={() => {
+                            onClick={async () => {
                               const updates: any = { status: s };
                               if (s === 'Returned') {
                                 updates.returnStatus = 'Approved';
                               } else if (s === 'Cancelled' || s === 'Refunded') {
                                 updates.returnStatus = 'Rejected';
                               }
-                              updateDoc(doc(db, 'orders', viewingCustomer.id), updates);
+                              await handleUpdateOrderStatus(viewingCustomer.id, s);
                               setViewingCustomer({ ...viewingCustomer, ...updates });
-                              toast.success(`Order status: ${s}`);
                             }}
                             className="w-full text-left px-3.5 py-2 rounded-lg text-[13px] font-[500] hover:bg-gray-50 flex items-center justify-between"
                           >
