@@ -34,7 +34,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         unsubscribeProfile = onSnapshot(doc(db, 'users', firebaseUser.uid), 
           (docSnap) => {
             if (docSnap.exists()) {
-              setProfile(docSnap.data() as UserProfile);
+              const data = docSnap.data();
+              setProfile({
+                ...data,
+                loyaltyPoints: data.loyaltyPoints !== undefined ? data.loyaltyPoints : 0
+              } as UserProfile);
             } else {
               setProfile(null);
             }
@@ -52,6 +56,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               lastName: displayName.split(' ').slice(1).join(' ') || "",
               role: (firebaseUser.email === 'mdsagaransari65670@gmail.com' || firebaseUser.email === 'admin@theruby.com' || firebaseUser.email?.toLowerCase().includes('rubu') || firebaseUser.email?.toLowerCase().includes('ruby')) ? 'admin' : 'user',
               isVerified: true,
+              loyaltyPoints: 0,
               createdAt: new Date().toISOString()
             } as UserProfile);
             setLoading(false);
@@ -83,6 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               lastName: parsed.lastName || parsed.displayName?.split(' ')[1] || "",
               role: parsed.role || 'user',
               isVerified: true,
+              loyaltyPoints: parsed.loyaltyPoints !== undefined ? parsed.loyaltyPoints : 0,
               createdAt: parsed.createdAt || new Date().toISOString()
             } as any;
             

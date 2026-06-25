@@ -52,47 +52,51 @@ export default function OrderSuccess() {
 
   return (
     <motion.div 
-      initial={{ opacity: 0, y: 30, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -20, scale: 0.98 }}
-      transition={{ type: "spring", duration: 0.9, bounce: 0.15 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
       className="bg-[#FDFDFD] min-h-screen pb-24 pt-12"
     >
       <div className="max-w-xl mx-auto px-4 space-y-10">
         {/* Success Icon & Title */}
         <div className="text-center space-y-6">
           <motion.div 
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ 
-              scale: [1, 1.1, 1],
-              opacity: 1
-            }}
-            transition={{
-              scale: {
-                repeat: Infinity,
-                duration: 2,
-                ease: "easeInOut"
-              },
-              opacity: { duration: 0.5 }
-            }}
+            initial={{ scale: 0, rotate: -30 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: "spring", stiffness: 220, damping: 14, delay: 0.15 }}
             className="w-32 h-32 bg-[#107C41]/10 rounded-full flex items-center justify-center mx-auto relative"
           >
-            <div className="absolute inset-0 bg-[#107C41] rounded-full blur-2xl opacity-20" />
-            <div className="w-24 h-24 bg-[#107C41] rounded-full flex items-center justify-center text-white shadow-xl relative z-10">
-              <CheckCircle2 size={48} />
-            </div>
+            <div className="absolute inset-0 bg-[#107C41] rounded-full blur-2xl opacity-20 animate-pulse" />
+            <motion.div 
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: "spring", stiffness: 280, damping: 11, delay: 0.35 }}
+              className="w-24 h-24 bg-[#107C41] rounded-full flex items-center justify-center text-white shadow-xl relative z-10"
+            >
+              <CheckCircle2 size={48} className="animate-pulse" style={{ animationDuration: '2s' }} />
+            </motion.div>
           </motion.div>
           
-          <div className="space-y-3">
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ type: "spring", stiffness: 150, damping: 18, delay: 0.4 }}
+            className="space-y-3"
+          >
             <h1 className="text-4xl sm:text-5xl font-serif italic text-[#1A2C54]">Order Placed!</h1>
             <p className="text-gray-400 text-sm sm:text-base leading-relaxed max-w-sm mx-auto font-medium">
               Your order has been confirmed. You'll receive a confirmation email and SMS shortly. Sit back and relax — your fashion is on its way!
             </p>
-          </div>
+          </motion.div>
         </div>
 
         {/* Order ID Card */}
-        <div className="bg-white border border-gray-100 rounded-[2rem] p-8 text-center space-y-2 shadow-sm relative overflow-hidden group">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 140, damping: 16, delay: 0.55 }}
+          className="bg-white border border-gray-100 rounded-[2rem] p-8 text-center space-y-2 shadow-sm relative overflow-hidden group"
+        >
           <div className="absolute top-0 right-0 p-4">
             <button 
               onClick={downloadReceipt}
@@ -108,10 +112,15 @@ export default function OrderSuccess() {
             <p className="text-[10px] font-bold uppercase tracking-widest text-gray-300">Estimated delivery</p>
             <p className="text-sm font-bold text-[#1A2C54]">{orderData.deliveryDate}</p>
           </div>
-        </div>
+        </motion.div>
 
         {/* Order Status Timeline */}
-        <div className="bg-white border border-gray-100 rounded-[2rem] p-8 space-y-8 shadow-sm">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 140, damping: 16, delay: 0.7 }}
+          className="bg-white border border-gray-100 rounded-[2rem] p-8 space-y-8 shadow-sm"
+        >
           <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Order Status</p>
           <div className="space-y-8">
             {[
@@ -136,10 +145,15 @@ export default function OrderSuccess() {
               </div>
             ))}
           </div>
-        </div>
+        </motion.div>
 
         {/* Order Summary */}
-        <div className="bg-white border border-gray-100 rounded-[2rem] p-8 space-y-6 shadow-sm">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 140, damping: 16, delay: 0.85 }}
+          className="bg-white border border-gray-100 rounded-[2rem] p-8 space-y-6 shadow-sm"
+        >
           <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Order Summary</p>
           <div className="space-y-4">
             {orderData.items.map((item: any, idx: number) => (
@@ -167,10 +181,15 @@ export default function OrderSuccess() {
               <p className="text-2xl font-bold text-ruby">₹{Number(orderData.total || 0).toLocaleString()}</p>
             </div>
           </div>
-        </div>
+        </motion.div>
 
         {/* Delivery Details Box */}
-        <div className="bg-ruby/5 border border-ruby/10 rounded-[2rem] p-8 space-y-4">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 140, damping: 16, delay: 1.0 }}
+          className="bg-ruby/5 border border-ruby/10 rounded-[2rem] p-8 space-y-4"
+        >
           <div className="flex items-start gap-3">
             <MapPin size={18} className="text-ruby mt-1" />
             <p className="text-sm font-bold text-[#1A2C54] leading-relaxed">
@@ -193,10 +212,15 @@ export default function OrderSuccess() {
               </p>
             </div>
           </div>
-        </div>
+        </motion.div>
 
         {/* Action Buttons */}
-        <div className="space-y-4">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 140, damping: 16, delay: 1.15 }}
+          className="space-y-4"
+        >
           <button 
             onClick={() => {
               const emailValue = orderData.address?.email || orderData.email || '';
@@ -219,7 +243,7 @@ export default function OrderSuccess() {
           >
             Download Receipt 🧾
           </button>
-        </div>
+        </motion.div>
       </div>
     </motion.div>
   );

@@ -51,18 +51,18 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
 
   const handleDragEnd = () => {
     const currentX = x.get();
-    if (currentX > swipeRange * 0.75) {
+    if (currentX > swipeRange * 0.7) {
       // Complete swipe
-      animate(x, swipeRange, { type: 'spring', stiffness: 500, damping: 30 });
+      animate(x, swipeRange, { type: 'spring', stiffness: 450, damping: 24 });
       setIsComplete(true);
       
       // Delay to let the completed animation sit satisfyingly for a moment before calling onConfirm
       setTimeout(() => {
         onConfirm();
-      }, 350);
+      }, 150);
     } else {
       // Snap back
-      animate(x, 0, { type: 'spring', stiffness: 400, damping: 25 });
+      animate(x, 0, { type: 'spring', stiffness: 350, damping: 22 });
     }
   };
 
@@ -121,7 +121,7 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
         <motion.div
           drag="x"
           dragConstraints={{ left: 0, right: swipeRange }}
-          dragElastic={0.05}
+          dragElastic={0.12}
           onDragEnd={handleDragEnd}
           style={{ x }}
           className="absolute left-2 top-2 w-[56px] h-[56px] bg-ruby rounded-[18px] shadow-lg shadow-ruby/20 flex items-center justify-center z-10 cursor-grab active:cursor-grabbing hover:scale-105 active:scale-95 transition-all duration-150"

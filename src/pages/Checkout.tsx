@@ -91,9 +91,9 @@ export default function Checkout() {
       setPaymentStep(1);
       return;
     }
-    const step1 = setTimeout(() => setPaymentStep(2), 500);
-    const step2 = setTimeout(() => setPaymentStep(3), 1000);
-    const step3 = setTimeout(() => setPaymentStep(4), 1500);
+    const step1 = setTimeout(() => setPaymentStep(2), 300);
+    const step2 = setTimeout(() => setPaymentStep(3), 600);
+    const step3 = setTimeout(() => setPaymentStep(4), 900);
     
     return () => {
       clearTimeout(step1);
@@ -428,8 +428,8 @@ export default function Checkout() {
             }
           }
           
-          // Wait for a minimum of 2 seconds for visual satisfaction of secure processing steps
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          // Wait for a minimum of 1.2 seconds for visual satisfaction of secure processing steps
+          await new Promise(resolve => setTimeout(resolve, 1200));
 
           // Clear checkout state & cart
           localStorage.removeItem('checkout_step');
