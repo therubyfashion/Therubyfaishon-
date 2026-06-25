@@ -11,9 +11,9 @@ import { checkProductHealth, logProductDiagnostics } from '../utils/productHealt
 
 export default function Shop() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [categories, setCategories] = useState<string[]>(['All']);
+  const [products, setProducts] = useState<Product[]>(fallbackProducts);
+  const [loading, setLoading] = useState(false);
+  const [categories, setCategories] = useState<string[]>(['All', ...fallbackCategories.map(c => c.name)]);
   const [activeCategory, setActiveCategory] = useState<string>(
     searchParams.get('category') || 'All'
   );
@@ -45,7 +45,7 @@ export default function Shop() {
   useEffect(() => {
     const cacheKey = `ruby_shop_cache_${activeCategory}_${sortBy}`;
     const hasCache = localStorage.getItem(cacheKey) !== null;
-    if (!hasCache) {
+    if (!hasCache && products.length === 0) {
       setLoading(true);
     }
 

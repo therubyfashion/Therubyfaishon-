@@ -25,19 +25,23 @@ import { checkProductHealth, logProductDiagnostics } from '../utils/productHealt
 export default function Home() {
   const { user, profile } = useAuth();
   const [unreadCount] = useState(0); // Notifications context fallback if needed
-  const [trendingProducts, setTrendingProducts] = useState<Product[]>([]);
-  const [popularProducts, setPopularProducts] = useState<Product[]>([]);
-  const [promoConfig, setPromoConfig] = useState<any>(null);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [banners, setBanners] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [trendingProducts, setTrendingProducts] = useState<Product[]>(
+    fallbackProducts.filter(p => p.isTrending || p.trending || p.tags?.includes('trending'))
+  );
+  const [popularProducts, setPopularProducts] = useState<Product[]>(
+    fallbackProducts.filter(p => p.isPopular || p.popular || p.tags?.includes('popular'))
+  );
+  const [promoConfig, setPromoConfig] = useState<any>({ promoText: "Welcome to The Ruby Ethnic Wear Store! 🎉" });
+  const [categories, setCategories] = useState<any[]>(fallbackCategories);
+  const [banners, setBanners] = useState<any[]>(fallbackBanners);
+  const [loading, setLoading] = useState(false);
   const [activeFilter, setActiveFilter] = useState('All');
   const [currentReview, setCurrentReview] = useState(0);
   const [currentBanner, setCurrentBanner] = useState(0);
   const [email, setEmail] = useState('');
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [newReview, setNewReview] = useState({ rating: 5, text: '', tag: 'Fabric', image: '' as string | null });
-  const [reviews, setReviews] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<any[]>(fallbackReviews);
   const [reviewLoading, setReviewLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -66,8 +70,9 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    // Keep loading false if we have fallback data to render instantly, otherwise show skeletons
     const hasCache = localStorage.getItem('ruby_home_cache') !== null;
-    if (!hasCache) {
+    if (!hasCache && trendingProducts.length === 0) {
       setLoading(true);
     }
 

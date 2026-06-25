@@ -2746,7 +2746,9 @@ export default function AdminDashboard() {
   };
 
   const fetchDashboardData = async () => {
-    setLoading(true);
+    if (products.length === 0 || orders.length === 0) {
+      setLoading(true);
+    }
     
     // Resilient fallback query wrapper for extreme loading speed and index fault-tolerance
     const safeGetDocs = async (queryRef: any) => {

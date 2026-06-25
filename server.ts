@@ -616,6 +616,9 @@ export const NotificationService = {
         contents: { en: body },
         headings: { en: title },
         url: url,
+        android_accent_color: "A11B35",
+        android_led_color: "A11B35",
+        android_visibility: 1
       };
 
       if (imageUrl) {
@@ -642,7 +645,7 @@ export const NotificationService = {
           console.warn("[NotificationService] Admin lookup warning:", dbErr.message);
         }
       }
-      
+
       if (adminSubIds.length === 0 && clientDb && isClientDbReady) {
         try {
           const adminsSnap = await cGetDocs(cQuery(
@@ -665,20 +668,9 @@ export const NotificationService = {
       let resultStatus = "success";
       let msgId: string | null = null;
 
-      // Try tag filter delivery
-      try {
-        const filterNotif = {
-          ...notification,
-          filters: [{ field: "tag", key: "role", relation: "=", value: "admin" }]
-        };
-        const res = await this.send(filterNotif);
-        msgId = res?.data?.id || msgId;
-      } catch (fErr: any) {
-        console.warn("[NotificationService] Tag filter push warning:", fErr.message);
-        resultStatus = "warning";
-      }
-
-      // Try direct subscription delivery
+      // EXCLUSIVE DELIVERY STRATEGY TO PREVENT DUPLICATES:
+      // If there are direct active subscriptions, target them directly.
+      // Do NOT send by tags if targeting by subscription IDs to prevent duplicate pushes!
       if (adminSubIds.length > 0) {
         try {
           const directNotif = {
@@ -690,6 +682,20 @@ export const NotificationService = {
           resultStatus = "success";
         } catch (dErr: any) {
           console.warn("[NotificationService] Direct admin subscription push warning:", dErr.message);
+          resultStatus = "warning";
+        }
+      } else {
+        // Fallback to tag filter delivery ONLY if no active admin subscription is registered
+        try {
+          const filterNotif = {
+            ...notification,
+            filters: [{ field: "tag", key: "role", relation: "=", value: "admin" }]
+          };
+          const res = await this.send(filterNotif);
+          msgId = res?.data?.id || msgId;
+        } catch (fErr: any) {
+          console.warn("[NotificationService] Tag filter push warning:", fErr.message);
+          resultStatus = "warning";
         }
       }
 
@@ -705,8 +711,8 @@ export const NotificationService = {
   /**
    * Sends status update notification to customer.
    */
-  async sendCustomer(userId: string, title: string, body: string, options: { url?: string } = {}) {
-    const { url = '/' } = options;
+  async sendCustomer(userId: string, title: string, body: string, options: { url?: string; imageUrl?: string; buttons?: any[] } = {}) {
+    const { url = '/', imageUrl, buttons } = options;
     try {
       if (!userId) {
         console.warn("[NotificationService] sendCustomer aborted: missing userId");
@@ -746,12 +752,25 @@ export const NotificationService = {
         contents: { en: body },
         headings: { en: title },
         url: url,
-        include_external_user_ids: [String(userId)],
-        include_aliases: {
-          external_id: [String(userId)]
-        }
+        android_accent_color: "A11B35",
+        android_led_color: "A11B35",
+        android_visibility: 1
       };
 
+      if (imageUrl) {
+        notification.big_picture = imageUrl;
+        notification.chrome_web_image = imageUrl;
+        notification.firefox_icon = imageUrl;
+        notification.ios_attachments = { id1: imageUrl };
+      }
+
+      if (buttons && Array.isArray(buttons)) {
+        notification.buttons = buttons;
+      }
+
+      // EXCLUSIVE TARGETING STRATEGY TO PREVENT DUPLICATES:
+      // If we have the exact subscription ID, use it directly.
+      // Remove external ID aliases and include_external_user_ids to prevent OneSignal from sending twice.
       if (onesignalId) {
         if (String(onesignalId).startsWith('simulated_push_')) {
           console.log(`[NotificationService] Simulating push to simulated device: ${onesignalId}`);
@@ -759,6 +778,12 @@ export const NotificationService = {
           return { success: true, status: "simulated" };
         }
         notification.include_subscription_ids = [onesignalId];
+      } else {
+        // Fallback: target strictly by external user ID alias if subscription ID isn't linked
+        notification.include_external_user_ids = [String(userId)];
+        notification.include_aliases = {
+          external_id: [String(userId)]
+        };
       }
 
       const response = await this.send(notification);

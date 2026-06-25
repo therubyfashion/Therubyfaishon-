@@ -33,6 +33,27 @@ if (Capacitor.isNativePlatform()) {
   });
 }
 
+// Global fetch interceptor to support relative /api paths on native platforms and local hosts
+if (typeof window !== 'undefined') {
+  const originalFetch = window.fetch;
+  window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+    if (typeof input === 'string' && input.startsWith('/api/')) {
+      const origin = window.location.origin;
+      let baseUrl = origin;
+      if (
+        origin.includes('localhost') || 
+        origin.startsWith('capacitor://') || 
+        origin.startsWith('http://localhost')
+      ) {
+        baseUrl = 'https://therubyfashion.shop';
+      }
+      // Ensure no double slashes when joining base URL and api path
+      input = `${baseUrl.replace(/\/$/, '')}${input}`;
+    }
+    return originalFetch.call(this, input, init);
+  };
+}
+
 createRoot(document.getElementById('root')!).render(
   <HelmetProvider>
     <App />
