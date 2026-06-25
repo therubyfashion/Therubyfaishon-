@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { ShoppingBag, Heart, Star } from 'lucide-react';
 import { Product } from '../types';
 import { useCart } from '../contexts/CartContext';
@@ -14,12 +14,22 @@ interface ProductCardProps {
 }
 
 const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
+  const navigate = useNavigate();
   const { addToCart } = useCart();
   const { toggleWishlist, isInWishlist } = useWishlist();
 
   if (!product || !product.id) {
     return null;
   }
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    // Do not navigate if a button or something inside a button is clicked
+    if (target.closest('button')) {
+      return;
+    }
+    navigate(`/product/${product.id}`);
+  };
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -55,7 +65,10 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   };
 
   return (
-    <Link to={`/product/${product.id}`} className="product-card group block bg-white rounded-2xl overflow-hidden border border-gray-100 cursor-pointer transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl">
+    <div 
+      onClick={handleCardClick}
+      className="product-card group block bg-white rounded-2xl overflow-hidden border border-gray-100 cursor-pointer transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl"
+    >
       <div className="product-img relative aspect-[3/4] bg-gray-50 flex items-center justify-center overflow-hidden">
         {(product.images && product.images[0]) ? (
           <img 
@@ -127,7 +140,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           );
         })()}
       </div>
-    </Link>
+    </div>
   );
 };
 

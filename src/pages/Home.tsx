@@ -78,18 +78,13 @@ export default function Home() {
     let finalReviews: any[] = [];
     let promoConfigData: any = null;
 
-    const cacheAndSave = () => {
+    const cacheAndSave = (key: string, data: any) => {
       try {
-        const cacheData = {
-          trendingProducts: trendingData,
-          popularProducts: popularData,
-          categories: sortedCats,
-          banners: activeBanners,
-          reviews: finalReviews,
-          promoConfig: promoConfigData,
-          cachedAt: Date.now()
-        };
-        localStorage.setItem('ruby_home_cache', JSON.stringify(cacheData));
+        const cached = localStorage.getItem('ruby_home_cache');
+        const parsed = cached ? JSON.parse(cached) : {};
+        parsed[key] = data;
+        parsed.cachedAt = Date.now();
+        localStorage.setItem('ruby_home_cache', JSON.stringify(parsed));
       } catch (e) {
         console.warn("Failed to write home cache:", e);
       }
@@ -105,7 +100,7 @@ export default function Home() {
       });
       sortedCats = docs;
       setCategories(docs);
-      cacheAndSave();
+      cacheAndSave('categories', docs);
     }, (error) => {
       console.warn("Categories real-time snapshot error:", error);
       setCategories(prev => prev.length > 0 ? prev : fallbackCategories);
@@ -116,7 +111,7 @@ export default function Home() {
       const bannerData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
       activeBanners = bannerData.filter(b => b.active !== false && b.active !== 'false');
       setBanners(activeBanners);
-      cacheAndSave();
+      cacheAndSave('banners', activeBanners);
     }, (error) => {
       console.warn("Banners real-time snapshot error:", error);
       setBanners(prev => prev.length > 0 ? prev : fallbackBanners);
@@ -132,7 +127,7 @@ export default function Home() {
       });
       finalReviews = firestoreReviews;
       setReviews(firestoreReviews);
-      cacheAndSave();
+      cacheAndSave('reviews', firestoreReviews);
     }, (error) => {
       console.warn("Reviews real-time snapshot error:", error);
       setReviews(prev => prev.length > 0 ? prev : fallbackReviews);
@@ -152,7 +147,7 @@ export default function Home() {
           promoTextColor: rawSettings.promoTextColor ?? '#FFFFFF',
         };
         setPromoConfig(promoConfigData);
-        cacheAndSave();
+        cacheAndSave('promoConfig', promoConfigData);
       }
     }, (error) => {
       console.warn("Settings real-time snapshot error:", error);
@@ -197,7 +192,8 @@ export default function Home() {
       setTrendingProducts(trendingData);
       setPopularProducts(popularData);
       setLoading(false);
-      cacheAndSave();
+      cacheAndSave('trendingProducts', trendingData);
+      cacheAndSave('popularProducts', popularData);
     }, (error) => {
       console.warn("Products real-time snapshot error:", error);
       setTrendingProducts(prev => prev.length > 0 ? prev : fallbackProducts.filter(p => p.isTrending || true));

@@ -52,13 +52,13 @@ export default function Shop() {
     let finalCategories: string[] = ['All'];
     let fetchedProducts: Product[] = [];
 
-    const saveToCache = () => {
+    const saveToCache = (key: 'products' | 'categories', data: any) => {
       try {
-        localStorage.setItem(cacheKey, JSON.stringify({
-          products: fetchedProducts,
-          categories: finalCategories,
-          savedAt: Date.now()
-        }));
+        const cached = localStorage.getItem(cacheKey);
+        const parsed = cached ? JSON.parse(cached) : {};
+        parsed[key] = data;
+        parsed.savedAt = Date.now();
+        localStorage.setItem(cacheKey, JSON.stringify(parsed));
       } catch (e) {
         console.warn("Failed to write shop cache:", e);
       }
@@ -75,7 +75,7 @@ export default function Shop() {
       const catNames = sortedCategoryDocs.map(c => c.name);
       finalCategories = ['All', ...catNames];
       setCategories(finalCategories);
-      saveToCache();
+      saveToCache('categories', finalCategories);
     }, (error) => {
       console.warn("Shop categories real-time error:", error);
       const catNames = fallbackCategories.map(c => c.name);
@@ -140,7 +140,7 @@ export default function Shop() {
       fetchedProducts = prods;
       setProducts(prods);
       setLoading(false);
-      saveToCache();
+      saveToCache('products', prods);
     }, (error) => {
       console.warn("Shop products real-time error:", error);
       let prods = activeCategory === 'All' 
