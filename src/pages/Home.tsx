@@ -26,10 +26,10 @@ export default function Home() {
   const { user, profile } = useAuth();
   const [unreadCount] = useState(0); // Notifications context fallback if needed
   const [trendingProducts, setTrendingProducts] = useState<Product[]>(
-    fallbackProducts.filter(p => p.isTrending || p.trending || p.tags?.includes('trending'))
+    fallbackProducts.filter(p => p.isTrending || (p as any).trending || (p as any).tags?.includes('trending'))
   );
   const [popularProducts, setPopularProducts] = useState<Product[]>(
-    fallbackProducts.filter(p => p.isPopular || p.popular || p.tags?.includes('popular'))
+    fallbackProducts.filter(p => p.isPopular || (p as any).popular || (p as any).tags?.includes('popular'))
   );
   const [promoConfig, setPromoConfig] = useState<any>({ promoText: "Welcome to The Ruby Ethnic Wear Store! 🎉" });
   const [categories, setCategories] = useState<any[]>(fallbackCategories);

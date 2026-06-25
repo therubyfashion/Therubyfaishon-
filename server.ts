@@ -407,6 +407,147 @@ export const TEMPLATES: Record<string, { title: string; body: string }> = {
   }
 };
 
+// Sliding window cache for notification idempotency (key to timestamp)
+const recentNotificationsCache = new Map<string, Date>();
+
+function cleanRecentNotificationsCache() {
+  const now = Date.now();
+  for (const [key, timestamp] of recentNotificationsCache.entries()) {
+    if (now - timestamp.getTime() > 10 * 60 * 1000) { // Clean up entries older than 10 minutes
+      recentNotificationsCache.delete(key);
+    }
+  }
+}
+
+/**
+ * Checks if a notification with specific order status details or content has already
+ * been dispatched to a recipient within a short time window (2 minutes).
+ * This prevents duplicate push triggers from double clicks, network retries, or concurrent workers.
+ */
+export async function isNotificationDuplicate(userId: string, title: string, body: string, options: any = {}): Promise<{ duplicate: boolean; reason?: string }> {
+  cleanRecentNotificationsCache();
+  const now = new Date();
+
+  // 1. Extract orderId
+  let orderId = options.orderId || null;
+  if (!orderId) {
+    const urlMatch = options.url?.match(/\/track\/([a-zA-Z0-9_\-]+)/);
+    if (urlMatch) {
+      orderId = urlMatch[1];
+    } else {
+      const hashMatch = body.match(/#([a-zA-Z0-9_\-]+)/) || title.match(/#([a-zA-Z0-9_\-]+)/);
+      if (hashMatch) {
+        orderId = hashMatch[1];
+      }
+    }
+  }
+
+  // 2. Determine orderStatus / templateKey
+  let orderStatus = options.templateKey || options.orderStatus || null;
+  if (!orderStatus) {
+    const titleLower = title.toLowerCase();
+    const bodyLower = body.toLowerCase();
+    if (titleLower.includes("placed") || bodyLower.includes("placed")) {
+      orderStatus = "order_placed";
+    } else if (titleLower.includes("confirmed") || bodyLower.includes("confirmed")) {
+      orderStatus = "order_confirmed";
+    } else if (titleLower.includes("processing") || bodyLower.includes("preparing")) {
+      orderStatus = "packed";
+    } else if (titleLower.includes("shipped") || bodyLower.includes("shipped")) {
+      orderStatus = "shipped";
+    } else if (titleLower.includes("delivery") || bodyLower.includes("delivery") || titleLower.includes("arriving")) {
+      orderStatus = "out_for_delivery";
+    } else if (titleLower.includes("delivered") || bodyLower.includes("delivered")) {
+      orderStatus = "delivered";
+    } else if (titleLower.includes("cancelled") || bodyLower.includes("cancelled")) {
+      orderStatus = "cancelled";
+    } else if (titleLower.includes("refund") || bodyLower.includes("refund")) {
+      orderStatus = "refund_processed";
+    } else if (titleLower.includes("rate") || bodyLower.includes("rate")) {
+      orderStatus = "rate_purchase";
+    }
+  }
+
+  const IDEMP_WINDOW_MS = 2 * 60 * 1000; // 2 minutes short time window
+
+  // Check 1: In-Memory Cache for Order Status + ID
+  if (orderStatus && orderId) {
+    const key = `status_order_id:${userId}:${orderStatus}:${orderId}`;
+    const cachedTime = recentNotificationsCache.get(key);
+    if (cachedTime && (now.getTime() - cachedTime.getTime() < IDEMP_WINDOW_MS)) {
+      return { duplicate: true, reason: `In-memory: duplicate order status '${orderStatus}' for order #${orderId} detected.` };
+    }
+  }
+
+  // Check 2: In-Memory Cache for exact content match
+  const exactKey = `exact_content:${userId}:${title}:${body}`;
+  const cachedExactTime = recentNotificationsCache.get(exactKey);
+  if (cachedExactTime && (now.getTime() - cachedExactTime.getTime() < IDEMP_WINDOW_MS)) {
+    return { duplicate: true, reason: `In-memory: exact duplicate content detected.` };
+  }
+
+  // Check 3: Firestore-Backed Backup Check (index-free fallback for resilience)
+  try {
+    let logs: any[] = [];
+    if (db) {
+      const snap = await db.collection('push_notification_logs')
+        .where('recipient', '==', String(userId))
+        .limit(30)
+        .get();
+      snap.forEach(doc => {
+        logs.push(doc.data());
+      });
+    } else if (clientDb && isClientDbReady) {
+      const q = cQuery(
+        cCollection(clientDb, 'push_notification_logs'),
+        cWhere('recipient', '==', String(userId)),
+        cLimit(30)
+      );
+      const snap = await cGetDocs(q);
+      snap.forEach(doc => {
+        logs.push(doc.data());
+      });
+    }
+
+    // Sort latest logs descending in-memory to keep index-free
+    logs.sort((a, b) => {
+      const tA = a.timestamp || '';
+      const tB = b.timestamp || '';
+      return tB.localeCompare(tA);
+    });
+
+    const windowAgoStr = new Date(now.getTime() - IDEMP_WINDOW_MS).toISOString();
+
+    for (const log of logs) {
+      const logTimestamp = log.timestamp || '';
+      if (logTimestamp < windowAgoStr) {
+        continue;
+      }
+
+      // Check duplicate explicitly via logged templateKey/orderId
+      if (orderStatus && orderId && log.templateKey === orderStatus && log.orderId === orderId) {
+        return { duplicate: true, reason: `Firestore: duplicate order status '${orderStatus}' for order #${orderId} found in logs.` };
+      }
+
+      // Check duplicate fallback via exact title/body matching
+      if (log.title === title && log.body === body) {
+        return { duplicate: true, reason: `Firestore: exact duplicate content found in logs.` };
+      }
+    }
+  } catch (err: any) {
+    console.warn("[Idempotency] Firestore-backed backup check encountered an error (continuing with in-memory result):", err.message);
+  }
+
+  // Not a duplicate: record this event in the cache
+  if (orderStatus && orderId) {
+    const key = `status_order_id:${userId}:${orderStatus}:${orderId}`;
+    recentNotificationsCache.set(key, now);
+  }
+  recentNotificationsCache.set(exactKey, now);
+
+  return { duplicate: false };
+}
+
 /**
  * Single Reusable Notification Service
  * Centralizes credentials checks, targeting fields (using only latest include_subscription_ids),
@@ -582,15 +723,17 @@ export const NotificationService = {
   /**
    * Safe persistent logging of dispatch statuses.
    */
-  async log(title: string, body: string, recipient: string, status: string, notificationId: string | null = null) {
-    const logData = {
+  async log(title: string, body: string, recipient: string, status: string, notificationId: string | null = null, extra: { templateKey?: string; orderId?: string } = {}) {
+    const logData: any = {
       title,
       body,
       recipient,
       status,
       deliveryStatus: status === 'success' ? 'sent' : 'failed',
       notificationId,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      templateKey: extra.templateKey || null,
+      orderId: extra.orderId || null
     };
     try {
       if (clientDb && isClientDbReady) {
@@ -607,9 +750,57 @@ export const NotificationService = {
   /**
    * Sends order notification to Admin users.
    */
-  async sendAdmin(title: string, body: string, options: { url?: string; imageUrl?: string } = {}) {
+  async sendAdmin(title: string, body: string, options: { url?: string; imageUrl?: string; templateKey?: string; orderId?: string } = {}) {
     const { url = '/', imageUrl } = options;
+    
+    // Infer orderId if not provided
+    let inferredOrderId = options.orderId || null;
+    if (!inferredOrderId) {
+      const urlMatch = url.match(/\/track\/([a-zA-Z0-9_\-]+)/);
+      if (urlMatch) {
+        inferredOrderId = urlMatch[1];
+      } else {
+        const hashMatch = body.match(/#([a-zA-Z0-9_\-]+)/) || title.match(/#([a-zA-Z0-9_\-]+)/);
+        if (hashMatch) {
+          inferredOrderId = hashMatch[1];
+        }
+      }
+    }
+
+    // Infer templateKey/status if not provided
+    let inferredTemplateKey = options.templateKey || null;
+    if (!inferredTemplateKey) {
+      const titleLower = title.toLowerCase();
+      const bodyLower = body.toLowerCase();
+      if (titleLower.includes("placed") || bodyLower.includes("placed")) {
+        inferredTemplateKey = "order_placed";
+      } else if (titleLower.includes("confirmed") || bodyLower.includes("confirmed")) {
+        inferredTemplateKey = "order_confirmed";
+      } else if (titleLower.includes("processing") || bodyLower.includes("preparing")) {
+        inferredTemplateKey = "packed";
+      } else if (titleLower.includes("shipped") || bodyLower.includes("shipped")) {
+        inferredTemplateKey = "shipped";
+      } else if (titleLower.includes("delivery") || bodyLower.includes("delivery") || titleLower.includes("arriving")) {
+        inferredTemplateKey = "out_for_delivery";
+      } else if (titleLower.includes("delivered") || bodyLower.includes("delivered")) {
+        inferredTemplateKey = "delivered";
+      } else if (titleLower.includes("cancelled") || bodyLower.includes("cancelled")) {
+        inferredTemplateKey = "cancelled";
+      } else if (titleLower.includes("refund") || bodyLower.includes("refund")) {
+        inferredTemplateKey = "refund_processed";
+      } else if (titleLower.includes("rate") || bodyLower.includes("rate")) {
+        inferredTemplateKey = "rate_purchase";
+      }
+    }
+
     try {
+      // Check idempotency to prevent duplicate triggers within short time window
+      const isDup = await isNotificationDuplicate("admin", title, body, { ...options, templateKey: inferredTemplateKey, orderId: inferredOrderId });
+      if (isDup.duplicate) {
+        console.log(`⚠️ [NotificationService] sendAdmin skipped due to idempotency: ${isDup.reason}`);
+        return { success: true, status: "duplicate_skipped", message: isDup.reason };
+      }
+
       console.log(`[NotificationService] Preparing admin notification: "${title}" - "${body}"`);
       
       const notification: any = {
@@ -699,11 +890,11 @@ export const NotificationService = {
         }
       }
 
-      await this.log(title, body, "admin", resultStatus, msgId);
+      await this.log(title, body, "admin", resultStatus, msgId, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
       return { success: true, status: resultStatus, notificationId: msgId };
     } catch (err: any) {
       console.error("❌ [NotificationService] sendAdmin failed:", err.message);
-      await this.log(title, body, "admin", "failed");
+      await this.log(title, body, "admin", "failed", null, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
       return { success: false, error: err.message };
     }
   },
@@ -711,106 +902,155 @@ export const NotificationService = {
   /**
    * Sends status update notification to customer.
    */
-  async sendCustomer(userId: string, title: string, body: string, options: { url?: string; imageUrl?: string; buttons?: any[] } = {}) {
+  async sendCustomer(userId: string, title: string, body: string, options: { url?: string; imageUrl?: string; buttons?: any[]; templateKey?: string; orderId?: string } = {}) {
     const { url = '/', imageUrl, buttons } = options;
+    
+    // Infer orderId if not provided
+    let inferredOrderId = options.orderId || null;
+    if (!inferredOrderId) {
+      const urlMatch = url.match(/\/track\/([a-zA-Z0-9_\-]+)/);
+      if (urlMatch) {
+        inferredOrderId = urlMatch[1];
+      } else {
+        const hashMatch = body.match(/#([a-zA-Z0-9_\-]+)/) || title.match(/#([a-zA-Z0-9_\-]+)/);
+        if (hashMatch) {
+          inferredOrderId = hashMatch[1];
+        }
+      }
+    }
+
+    // Infer templateKey/status if not provided
+    let inferredTemplateKey = options.templateKey || null;
+    if (!inferredTemplateKey) {
+      const titleLower = title.toLowerCase();
+      const bodyLower = body.toLowerCase();
+      if (titleLower.includes("placed") || bodyLower.includes("placed")) {
+        inferredTemplateKey = "order_placed";
+      } else if (titleLower.includes("confirmed") || bodyLower.includes("confirmed")) {
+        inferredTemplateKey = "order_confirmed";
+      } else if (titleLower.includes("processing") || bodyLower.includes("preparing")) {
+        inferredTemplateKey = "packed";
+      } else if (titleLower.includes("shipped") || bodyLower.includes("shipped")) {
+        inferredTemplateKey = "shipped";
+      } else if (titleLower.includes("delivery") || bodyLower.includes("delivery") || titleLower.includes("arriving")) {
+        inferredTemplateKey = "out_for_delivery";
+      } else if (titleLower.includes("delivered") || bodyLower.includes("delivered")) {
+        inferredTemplateKey = "delivered";
+      } else if (titleLower.includes("cancelled") || bodyLower.includes("cancelled")) {
+        inferredTemplateKey = "cancelled";
+      } else if (titleLower.includes("refund") || bodyLower.includes("refund")) {
+        inferredTemplateKey = "refund_processed";
+      } else if (titleLower.includes("rate") || bodyLower.includes("rate")) {
+        inferredTemplateKey = "rate_purchase";
+      }
+    }
+
     try {
       if (!userId) {
         console.warn("[NotificationService] sendCustomer aborted: missing userId");
         return { success: false, error: "userId is required" };
       }
+
+      // Check idempotency to prevent duplicate triggers within short time window
+      const isDup = await isNotificationDuplicate(userId, title, body, { ...options, templateKey: inferredTemplateKey, orderId: inferredOrderId });
+      if (isDup.duplicate) {
+        console.log(`⚠️ [NotificationService] sendCustomer skipped due to idempotency: ${isDup.reason}`);
+        return { success: true, status: "duplicate_skipped", message: isDup.reason };
+      }
+
       console.log(`[NotificationService] Preparing customer notification to User ${userId}: "${title}"`);
-
-      let onesignalId = null;
-      let userEmail = "";
-      if (db) {
-        try {
-          const userDoc = await db.collection('users').doc(String(userId)).get();
-          if (userDoc.exists) {
-            const userData = userDoc.data();
-            onesignalId = userData?.onesignalId || null;
-            userEmail = userData?.email || "";
-          }
-        } catch (dbErr: any) {
-          console.warn("[NotificationService] User lookup error:", dbErr.message);
-        }
-      }
-
-      if (!onesignalId && clientDb && isClientDbReady) {
-        try {
-          const userDocSnapshot = await cGetDoc(cDoc(clientDb, 'users', String(userId)));
-          if (userDocSnapshot.exists()) {
-            const userData = userDocSnapshot.data();
-            onesignalId = userData?.onesignalId || null;
-            userEmail = userData?.email || "";
-          }
-        } catch (clientDbErr: any) {
-          console.warn("[NotificationService] Client SDK User lookup error:", clientDbErr.message);
-        }
-      }
-
-      const notification: any = {
-        contents: { en: body },
-        headings: { en: title },
-        url: url,
-        android_accent_color: "A11B35",
-        android_led_color: "A11B35",
-        android_visibility: 1
-      };
-
-      if (imageUrl) {
-        notification.big_picture = imageUrl;
-        notification.chrome_web_image = imageUrl;
-        notification.firefox_icon = imageUrl;
-        notification.ios_attachments = { id1: imageUrl };
-      }
-
-      if (buttons && Array.isArray(buttons)) {
-        notification.buttons = buttons;
-      }
-
-      // EXCLUSIVE TARGETING STRATEGY TO PREVENT DUPLICATES:
-      // If we have the exact subscription ID, use it directly.
-      // Remove external ID aliases and include_external_user_ids to prevent OneSignal from sending twice.
-      if (onesignalId) {
-        if (String(onesignalId).startsWith('simulated_push_')) {
-          console.log(`[NotificationService] Simulating push to simulated device: ${onesignalId}`);
-          await this.log(title, body, userEmail || userId, "simulated");
-          return { success: true, status: "simulated" };
-        }
-        notification.include_subscription_ids = [onesignalId];
-      } else {
-        // Fallback: target strictly by external user ID alias if subscription ID isn't linked
-        notification.include_external_user_ids = [String(userId)];
-        notification.include_aliases = {
-          external_id: [String(userId)]
-        };
-      }
-
-      const response = await this.send(notification);
-      const responseData = response?.data;
-      const msgId = responseData?.id || null;
-      
-      let resultStatus = "success";
-      if (responseData?.errors && Array.isArray(responseData.errors)) {
-        const errorMsg = responseData.errors.join(', ');
-        if (errorMsg.includes("not subscribed") || errorMsg.includes("not found") || errorMsg.includes("players are not subscribed")) {
-          resultStatus = "warning";
-        }
-      }
-
-      await this.log(title, body, userEmail || userId, resultStatus, msgId);
-      return { success: true, status: resultStatus, notificationId: msgId };
-    } catch (err: any) {
-      console.error(`❌ [NotificationService] sendCustomer failed:`, err.message);
-      const errLower = String(err.message || '').toLowerCase();
-      let finalStatus = "failed";
-      if (errLower.includes("not subscribed") || errLower.includes("players are not subscribed") || errLower.includes("not found")) {
-        finalStatus = "warning";
-      }
-      await this.log(title, body, userId, finalStatus);
-      return { success: false, error: err.message };
-    }
-  }
+ 
+       let onesignalId = null;
+       let userEmail = "";
+       if (db) {
+         try {
+           const userDoc = await db.collection('users').doc(String(userId)).get();
+           if (userDoc.exists) {
+             const userData = userDoc.data();
+             onesignalId = userData?.onesignalId || null;
+             userEmail = userData?.email || "";
+           }
+         } catch (dbErr: any) {
+           console.warn("[NotificationService] User lookup error:", dbErr.message);
+         }
+       }
+ 
+       if (!onesignalId && clientDb && isClientDbReady) {
+         try {
+           const userDocSnapshot = await cGetDoc(cDoc(clientDb, 'users', String(userId)));
+           if (userDocSnapshot.exists()) {
+             const userData = userDocSnapshot.data();
+             onesignalId = userData?.onesignalId || null;
+             userEmail = userData?.email || "";
+           }
+         } catch (clientDbErr: any) {
+           console.warn("[NotificationService] Client SDK User lookup error:", clientDbErr.message);
+         }
+       }
+ 
+       const notification: any = {
+         contents: { en: body },
+         headings: { en: title },
+         url: url,
+         android_accent_color: "A11B35",
+         android_led_color: "A11B35",
+         android_visibility: 1
+       };
+ 
+       if (imageUrl) {
+         notification.big_picture = imageUrl;
+         notification.chrome_web_image = imageUrl;
+         notification.firefox_icon = imageUrl;
+         notification.ios_attachments = { id1: imageUrl };
+       }
+ 
+       if (buttons && Array.isArray(buttons)) {
+         notification.buttons = buttons;
+       }
+ 
+       // EXCLUSIVE TARGETING STRATEGY TO PREVENT DUPLICATES:
+       // If we have the exact subscription ID, use it directly.
+       // Remove external ID aliases and include_external_user_ids to prevent OneSignal from sending twice.
+       if (onesignalId) {
+         if (String(onesignalId).startsWith('simulated_push_')) {
+           console.log(`[NotificationService] Simulating push to simulated device: ${onesignalId}`);
+           await this.log(title, body, userEmail || userId, "simulated", null, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
+           return { success: true, status: "simulated" };
+         }
+         notification.include_subscription_ids = [onesignalId];
+       } else {
+         // Fallback: target strictly by external user ID alias if subscription ID isn't linked
+         notification.include_external_user_ids = [String(userId)];
+         notification.include_aliases = {
+           external_id: [String(userId)]
+         };
+       }
+ 
+       const response = await this.send(notification);
+       const responseData = response?.data;
+       const msgId = responseData?.id || null;
+       
+       let resultStatus = "success";
+       if (responseData?.errors && Array.isArray(responseData.errors)) {
+         const errorMsg = responseData.errors.join(', ');
+         if (errorMsg.includes("not subscribed") || errorMsg.includes("not found") || errorMsg.includes("players are not subscribed")) {
+           resultStatus = "warning";
+         }
+       }
+ 
+       await this.log(title, body, userEmail || userId, resultStatus, msgId, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
+       return { success: true, status: resultStatus, notificationId: msgId };
+     } catch (err: any) {
+       console.error(`❌ [NotificationService] sendCustomer failed:`, err.message);
+       const errLower = String(err.message || '').toLowerCase();
+       let finalStatus = "failed";
+       if (errLower.includes("not subscribed") || errLower.includes("players are not subscribed") || errLower.includes("not found")) {
+         finalStatus = "warning";
+       }
+       await this.log(title, body, userId, finalStatus, null, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
+       return { success: false, error: err.message };
+     }
+   }
 };
 
 // Automatic Background Retry Loop for Queued Pushes
