@@ -103,6 +103,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const addToCart = (product: Product, size: string, color?: string, quantity: number = 1) => {
     if (!product || !product.id) return;
+    const safeQuantity = isNaN(Number(quantity)) || Number(quantity) < 1 ? 1 : Number(quantity);
+    
     setItems(prev => {
       const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
       const existing = safePrev.find(i => 
@@ -111,16 +113,20 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         i.selectedColor === color
       );
       if (existing) {
-        const stockLimit = (product.stock !== undefined && product.stock !== null) ? Number(product.stock) : 99;
-        const newQuantity = Math.min(stockLimit, existing.quantity + quantity);
+        const productStockValue = product.stock !== undefined && product.stock !== null ? Number(product.stock) : 99;
+        const stockLimit = isNaN(productStockValue) ? 99 : productStockValue;
+        const existingQty = isNaN(Number(existing.quantity)) ? 1 : Number(existing.quantity);
+        const newQuantity = Math.min(stockLimit, existingQty + safeQuantity);
+        
         return safePrev.map(i => 
           (i && i.id === product.id && i.selectedSize === size && i.selectedColor === color) 
             ? { ...i, quantity: newQuantity } 
             : i
         );
       }
-      const stockLimit = (product.stock !== undefined && product.stock !== null) ? Number(product.stock) : 99;
-      const initialQuantity = Math.min(stockLimit, quantity);
+      const productStockValue = product.stock !== undefined && product.stock !== null ? Number(product.stock) : 99;
+      const stockLimit = isNaN(productStockValue) ? 99 : productStockValue;
+      const initialQuantity = Math.min(stockLimit, safeQuantity);
       return [...safePrev, { ...product, selectedSize: size, selectedColor: color, quantity: initialQuantity }];
     });
   };
@@ -136,13 +142,15 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updateQuantity = (productId: string, size: string, quantity: number, color?: string) => {
-    if (!productId || quantity < 1) return;
+    if (!productId) return;
+    const cleanQty = isNaN(Number(quantity)) || Number(quantity) < 1 ? 1 : Number(quantity);
     setItems(prev => {
       const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
       return safePrev.map(i => {
         if (i && i.id === productId && i.selectedSize === size && i.selectedColor === color) {
-          const stockLimit = (i.stock !== undefined && i.stock !== null) ? Number(i.stock) : 99;
-          const finalQuantity = Math.min(stockLimit, quantity);
+          const productStockValue = i.stock !== undefined && i.stock !== null ? Number(i.stock) : 99;
+          const stockLimit = isNaN(productStockValue) ? 99 : productStockValue;
+          const finalQuantity = Math.min(stockLimit, cleanQty);
           return { ...i, quantity: finalQuantity };
         }
         return i;
@@ -162,45 +170,47 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let promoDiscount = 0;
     let autoOfferDiscount = 0;
 
-    if (Array.isArray(items)) {
-      items.forEach(item => {
-        if (!item) return;
-        const price = Number(item.price);
-        if (!isNaN(price)) {
-          subtotal += price * (Number(item.quantity) || 1);
-        }
-      });
-    }
+    const safeItems = Array.isArray(items) ? items.filter(Boolean) : [];
+
+    safeItems.forEach(item => {
+      const price = Number(item.price);
+      const qty = isNaN(Number(item.quantity)) ? 1 : Number(item.quantity);
+      if (!isNaN(price)) {
+        subtotal += price * qty;
+      }
+    });
 
     // Strategy 1: Legacy Settings-based Discounts (Optional/Fallback)
-    if (settings?.buy2Get1Free && Array.isArray(items)) {
-      items.forEach(item => {
-        if (!item) return;
-        const freeItems = Math.floor((Number(item.quantity) || 0) / 3);
-        autoOfferDiscount += freeItems * (Number(item.price) || 0);
+    if (settings?.buy2Get1Free) {
+      safeItems.forEach(item => {
+        const qty = isNaN(Number(item.quantity)) ? 0 : Number(item.quantity);
+        const freeItems = Math.floor(qty / 3);
+        const price = Number(item.price) || 0;
+        autoOfferDiscount += freeItems * price;
       });
-    } else if (settings?.buy2GetPercentEnabled && settings?.buy2GetPercentOff && Array.isArray(items)) {
-      items.forEach(item => {
-        if (!item) return;
-        const qty = Number(item.quantity) || 0;
+    } else if (settings?.buy2GetPercentEnabled && settings?.buy2GetPercentOff) {
+      safeItems.forEach(item => {
+        const qty = isNaN(Number(item.quantity)) ? 0 : Number(item.quantity);
         if (qty >= 2) {
           const discountRate = (Number(settings.buy2GetPercentOff) || 0) / 100;
-          autoOfferDiscount += ((Number(item.price) || 0) * qty) * discountRate;
+          const price = Number(item.price) || 0;
+          autoOfferDiscount += (price * qty) * discountRate;
         }
       });
     }
 
     // Strategy 2: Advanced Promotion Engine Logic
     let hasAppliedStackable = false;
-    if (Array.isArray(promotions) && Array.isArray(items)) {
-      promotions.forEach(promo => {
+    if (Array.isArray(promotions)) {
+      const activePromotions = promotions.filter(Boolean);
+      activePromotions.forEach(promo => {
         if (!promo) return;
         // 1. Check stackability
         if (!promo.stackable && hasAppliedStackable) return;
 
         // 2. Initial Conditions
         const cartTotal = subtotal;
-        const cartQty = items.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
+        const cartQty = safeItems.reduce((sum, i) => sum + (isNaN(Number(i.quantity)) ? 1 : Number(i.quantity)), 0);
 
         const conditions = promo.conditions || {};
         const meetsValue = conditions.minCartValue ? (cartTotal >= conditions.minCartValue) : true;
@@ -211,11 +221,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (promo.type === 'bxgy') {
             const bxgyConfig = promo.bxgyConfig || {};
-            items.forEach(item => {
-              if (!item) return;
+            safeItems.forEach(item => {
               const buyQty = Number(bxgyConfig.buyQty) || 2;
               const getQty = Number(bxgyConfig.getQty) || 1;
-              const itemQty = Number(item.quantity) || 0;
+              const itemQty = isNaN(Number(item.quantity)) ? 0 : Number(item.quantity);
               const sets = Math.floor(itemQty / (buyQty + getQty));
               if (sets > 0) {
                 const freeQty = sets * getQty;
@@ -256,7 +265,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const { subtotal, totalDiscount, autoOfferDiscount, promoDiscount, finalTotal: total } = calculateTotals();
-  const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
+  const itemCount = Array.isArray(items) ? items.filter(Boolean).reduce((sum, item) => sum + (isNaN(Number(item.quantity)) ? 1 : Number(item.quantity)), 0) : 0;
 
   return (
     <CartContext.Provider value={{ 

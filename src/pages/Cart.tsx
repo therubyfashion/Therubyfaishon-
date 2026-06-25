@@ -102,7 +102,13 @@ export default function Cart() {
   const savings = totalDiscount + (productComparePriceTotal() - subtotal);
 
   function productComparePriceTotal() {
-    return items.reduce((sum, item) => sum + (item.comparePrice || item.price * 1.5) * item.quantity, 0);
+    const safeItems = Array.isArray(items) ? items.filter(Boolean) : [];
+    return safeItems.reduce((sum, item) => {
+      const price = Number(item.price) || 0;
+      const comparePrice = Number(item.comparePrice) || (price * 1.5);
+      const quantity = isNaN(Number(item.quantity)) ? 1 : Number(item.quantity);
+      return sum + comparePrice * quantity;
+    }, 0);
   }
 
   if (itemCount === 0) {
