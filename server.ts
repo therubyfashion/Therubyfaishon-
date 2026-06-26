@@ -84,6 +84,19 @@ let adminApp: admin.app.App | null = null;
 let currentFirestoreDatabaseId = '(default)';
 let currentFirebaseProjectId = '';
 
+// Load configured database ID synchronously at boot
+let configuredFirestoreDatabaseId = '(default)';
+try {
+  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+  if (fs.existsSync(configPath)) {
+    const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    configuredFirestoreDatabaseId = firebaseConfig.firestoreDatabaseId || '(default)';
+    console.log(`📌 Loaded configured Firestore Database ID: ${configuredFirestoreDatabaseId}`);
+  }
+} catch (e: any) {
+  console.warn("⚠️ Failed to parse firebase-applet-config.json synchronously:", e.message);
+}
+
 const initializeClientFirestore = () => {
   if (isClientDbReady && clientDb) return;
   try {
@@ -91,7 +104,7 @@ const initializeClientFirestore = () => {
     const configPath = path.join(rootPath, 'firebase-applet-config.json');
     if (fs.existsSync(configPath)) {
       const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      const dbId = currentFirestoreDatabaseId || firebaseConfig.firestoreDatabaseId || '(default)';
+      const dbId = configuredFirestoreDatabaseId || firebaseConfig.firestoreDatabaseId || '(default)';
       const apps = getClientApps();
       const cApp = apps.length === 0 ? initClientApp(firebaseConfig, 'node-server-secondary') : apps[0];
       clientDb = getClientFirestore(cApp, dbId);
@@ -181,31 +194,13 @@ const initializeFirebase = async (force = false) => {
       } catch (probeErr: any) {
         console.warn("⚠️ Firebase Admin initial probe failed:", probeErr.message);
         isDbWriteable = false; // Mark restricted initially
-        const isPermissionError = probeErr.message.includes('PERMISSION_DENIED');
-        const isNotFoundError = probeErr.message.includes('NOT_FOUND');
 
-        if ((isPermissionError || isNotFoundError) && firestoreDatabaseId !== '(default)') {
-          console.log(`ℹ️ Retrying with '(default)' database due to: ${probeErr.message}`);
-          const fallbackDb = getFirestore(app, '(default)');
-          try {
-            await fallbackDb.collection('settings').limit(1).get();
-            db = fallbackDb;
-            isDbWriteable = true;
-            currentFirestoreDatabaseId = '(default)';
-            console.log("✅ Firebase Connected: Fallback to '(default)' database successful.");
-            // Try to seed settings on fallback db
-            seedSettingsIfEmpty(fallbackDb).catch((err) => {
-              console.warn("⚠️ Seeding skipped on fallback db:", err.message);
-            });
-          } catch (fallbackErr: any) {
-            console.log("ℹ️ Fallback database probe also failed. Assigning configured database to prevent lockouts.");
-            db = currentDb;
-            isDbWriteable = false;
-          }
+        if (firestoreDatabaseId !== '(default)') {
+          console.warn("⚠️ Custom database ID inaccessible via Admin SDK. Falling back to Resilient Client SDK fallback...");
+          db = null;
         } else {
-          console.log("ℹ️ Connectivity restricted. Assigning configured database anyway to prevent lockouts.");
+          console.log("ℹ️ Connectivity restricted. Assigning default database anyway to prevent lockouts.");
           db = currentDb;
-          isDbWriteable = false;
         }
       }
     } catch (adminErr: any) {
@@ -274,7 +269,7 @@ setTimeout(() => {
  */
 // In-memory Deduplication Cache
 const deduplicationCache = new Map<string, number>();
-const DEDUPLICATION_WINDOW_MS = 5000; // 5-second window to prevent dual triggers
+const DEDUPLICATION_WINDOW_MS = 35000; // 35s — covers one full retry engine cycle
 
 function isDuplicatePush(target: string, title: string, body: string): boolean {
   const cacheKey = `${target}:${title}:${body}`;
@@ -1233,6 +1228,11 @@ async function initializeAutoPushes() {
         const orderId = change.doc.id;
         const order = change.doc.data();
 
+        if (order.isTestOrder === true) {
+          orderStatusCache.set(orderId, order.status || '');
+          return;
+        }
+
         if (change.type === 'added') {
           orderStatusCache.set(orderId, order.status || '');
           
@@ -1281,6 +1281,16 @@ async function initializeAutoPushes() {
                   await sendCustomerNotification(order.userId, "Order Processing ⚙️", "We are preparing your order.");
                 }
                 break;
+              case 'Packed':
+                if (order.userId) {
+                  await sendCustomerNotification(
+                    order.userId,
+                    "Order Packed 📦",
+                    `Your order #${orderId} is packed and ready to dispatch from our warehouse.`,
+                    `/track/${orderId}`
+                  );
+                }
+                break;
               case 'Shipped':
                 if (order.userId) {
                   await sendCustomerNotification(order.userId, "Order Shipped 🚚", "Your package is on the way!");
@@ -1306,8 +1316,13 @@ async function initializeAutoPushes() {
                 break;
               case 'Refunded':
                 if (order.userId) {
-                  await sendCustomerNotification(order.userId, "Refund Initiated 💰", "Refund process has started.");
-                  await sendCustomerNotification(order.userId, "Refund Completed ✅", "Refund has been completed.");
+                  await sendCustomerNotification(order.userId, "Refund Initiated 💰", "Your refund is being processed. It will reflect in your account within 5-7 business days.");
+                }
+                break;
+              case 'Refund_Completed':
+              case 'RefundCompleted':
+                if (order.userId) {
+                  await sendCustomerNotification(order.userId, "Refund Completed ✅", "Refund has been successfully credited to your original payment source.");
                 }
                 break;
             }
@@ -3896,7 +3911,22 @@ async function startServer() {
     }
     try {
       console.log(`📈 [Notification Tracking] Received delivery confirmation for push: ${notificationId}`);
-      if (db) {
+      if (clientDb && isClientDbReady) {
+        const q = cQuery(
+          cCollection(clientDb, 'push_notification_logs'),
+          cWhere('notificationId', '==', notificationId)
+        );
+        const logsSnap = await cGetDocs(q);
+        if (logsSnap && !logsSnap.empty) {
+          for (const doc of logsSnap.docs) {
+            await cUpdateDoc(doc.ref, { 
+              deliveryStatus: 'delivered',
+              deliveredAt: new Date().toISOString()
+            });
+            console.log(`📈 [Notification Tracking] Updated log status to 'delivered' for log: ${doc.id}`);
+          }
+        }
+      } else if (db) {
         const logsSnap = await db.collection('push_notification_logs')
           .where('notificationId', '==', notificationId)
           .get();
@@ -3925,7 +3955,22 @@ async function startServer() {
     }
     try {
       console.log(`📈 [Notification Tracking] Received click notification for push: ${notificationId}`);
-      if (db) {
+      if (clientDb && isClientDbReady) {
+        const q = cQuery(
+          cCollection(clientDb, 'push_notification_logs'),
+          cWhere('notificationId', '==', notificationId)
+        );
+        const logsSnap = await cGetDocs(q);
+        if (logsSnap && !logsSnap.empty) {
+          for (const doc of logsSnap.docs) {
+            await cUpdateDoc(doc.ref, { 
+              deliveryStatus: 'clicked',
+              clickedAt: new Date().toISOString()
+            });
+            console.log(`📈 [Notification Tracking] Updated log status to 'clicked' for log: ${doc.id}`);
+          }
+        }
+      } else if (db) {
         const logsSnap = await db.collection('push_notification_logs')
           .where('notificationId', '==', notificationId)
           .get();

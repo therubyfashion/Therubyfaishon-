@@ -43,7 +43,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     if (Array.isArray(items)) {
-      localStorage.setItem('ruby_cart', JSON.stringify(items.filter(Boolean)));
+      try {
+        localStorage.setItem('ruby_cart', JSON.stringify(items.filter(Boolean)));
+      } catch (err) {
+        console.warn("⚠️ LocalStorage quota exceeded, could not save cart state locally:", err);
+      }
     }
     
     // Abandoned Cart Tracking Logic
@@ -265,7 +269,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const { subtotal, totalDiscount, autoOfferDiscount, promoDiscount, finalTotal: total } = calculateTotals();
-  const itemCount = Array.isArray(items) ? items.filter(Boolean).reduce((sum, item) => sum + (isNaN(Number(item.quantity)) ? 1 : Number(item.quantity)), 0) : 0;
+  const itemCount = Array.isArray(items) ? items.filter(Boolean).reduce((sum, item) => sum + (Number(item?.quantity) || 0), 0) : 0;
 
   return (
     <CartContext.Provider value={{ 

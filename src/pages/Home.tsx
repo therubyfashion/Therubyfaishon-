@@ -21,29 +21,31 @@ import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
 import { useNotifications } from '../contexts/NotificationContext';
 import { checkProductHealth, logProductDiagnostics } from '../utils/productHealthCheck';
+import { autoSeedDatabase } from '../utils/dbSeeder';
 
 export default function Home() {
   const { user, profile } = useAuth();
-  const [unreadCount] = useState(0); // Notifications context fallback if needed
-  const [trendingProducts, setTrendingProducts] = useState<Product[]>(
-    fallbackProducts.filter(p => p.isTrending || (p as any).trending || (p as any).tags?.includes('trending'))
-  );
-  const [popularProducts, setPopularProducts] = useState<Product[]>(
-    fallbackProducts.filter(p => p.isPopular || (p as any).popular || (p as any).tags?.includes('popular'))
-  );
+  const { unreadCount } = useNotifications();
+  const [trendingProducts, setTrendingProducts] = useState<Product[]>([]);
+  const [popularProducts, setPopularProducts] = useState<Product[]>([]);
   const [promoConfig, setPromoConfig] = useState<any>({ promoText: "Welcome to The Ruby Ethnic Wear Store! 🎉" });
-  const [categories, setCategories] = useState<any[]>(fallbackCategories);
-  const [banners, setBanners] = useState<any[]>(fallbackBanners);
-  const [loading, setLoading] = useState(false);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [banners, setBanners] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState('All');
   const [currentReview, setCurrentReview] = useState(0);
   const [currentBanner, setCurrentBanner] = useState(0);
   const [email, setEmail] = useState('');
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [newReview, setNewReview] = useState({ rating: 5, text: '', tag: 'Fabric', image: '' as string | null });
-  const [reviews, setReviews] = useState<any[]>(fallbackReviews);
+  const [reviews, setReviews] = useState<any[]>([]);
   const [reviewLoading, setReviewLoading] = useState(false);
   const navigate = useNavigate();
+
+  // Run database auto-seeding on mount to guarantee real products, categories and banners exist
+  useEffect(() => {
+    autoSeedDatabase();
+  }, []);
 
   // Load initial cached values to avoid showing skeleton loading and render instantly
   useEffect(() => {
@@ -51,13 +53,20 @@ export default function Home() {
       const cached = localStorage.getItem('ruby_home_cache');
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (parsed.trendingProducts) setTrendingProducts(parsed.trendingProducts);
-        if (parsed.popularProducts) setPopularProducts(parsed.popularProducts);
-        if (parsed.categories) setCategories(parsed.categories);
-        if (parsed.banners) setBanners(parsed.banners);
-        if (parsed.reviews) setReviews(parsed.reviews);
-        if (parsed.promoConfig) setPromoConfig(parsed.promoConfig);
-        setLoading(false); // Instantly turn off the skeleton loaders
+        // Clean cache of old fallback items to prevent flash of dummy data
+        const hasDummy = (parsed.trendingProducts && parsed.trendingProducts.some((p: any) => p.id && p.id.startsWith('fp'))) ||
+                         (parsed.categories && parsed.categories.some((c: any) => c.id && c.id.startsWith('kurti')));
+        if (hasDummy) {
+          localStorage.removeItem('ruby_home_cache');
+        } else {
+          if (parsed.trendingProducts) setTrendingProducts(parsed.trendingProducts);
+          if (parsed.popularProducts) setPopularProducts(parsed.popularProducts);
+          if (parsed.categories) setCategories(parsed.categories);
+          if (parsed.banners) setBanners(parsed.banners);
+          if (parsed.reviews) setReviews(parsed.reviews);
+          if (parsed.promoConfig) setPromoConfig(parsed.promoConfig);
+          setLoading(false); // Instantly turn off the skeleton loaders
+        }
       }
     } catch (e) {
       console.warn("Failed to load home cache:", e);
@@ -191,8 +200,8 @@ export default function Home() {
       const popular = allProds.filter(p => p.isPopular);
       
       // If there are absolutely zero trending/popular tags on products, fallback cleanly to slicing the active ones
-      trendingData = trending.length > 0 ? trending : allProds.slice(0, 8);
-      popularData = popular.length > 0 ? popular : allProds.slice(0, 8);
+      trendingData = trending.length > 0 ? trending : (allProds.length > 0 ? allProds.slice(0, 8) : fallbackProducts.filter(p => p.isTrending || true));
+      popularData = popular.length > 0 ? popular : (allProds.length > 0 ? allProds.slice(0, 8) : fallbackProducts);
       
       setTrendingProducts(trendingData);
       setPopularProducts(popularData);

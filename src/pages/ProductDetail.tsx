@@ -18,7 +18,7 @@ import { Navigation, Pagination, Zoom, Thumbs } from 'swiper/modules';
 import type { Swiper as SwiperType } from 'swiper';
 import { ProductDetailSkeleton } from '../components/Skeleton';
 import ProductCard from '../components/ProductCard';
-import { fallbackProducts, fallbackReviews } from '../data/fallbackData';
+import { fallbackReviews } from '../data/fallbackData';
 import { compressImage } from '../utils/imageUtils';
 import { formatPrice } from '../utils/currency';
 
@@ -377,59 +377,43 @@ export default function ProductDetail() {
           console.warn("Firestore fetch failed, will try fallback data:", dbErr);
         }
 
-        // 2. If Firestore failed or product doesn't exist, use fallback products
-        if (!data) {
-          const fbProd = fallbackProducts.find(p => p.id === id);
-          if (fbProd) {
-            data = fbProd;
-          } else {
-            // Check if there's any cache in localStorage we can parse
-            try {
-              const cached = localStorage.getItem(cacheKey);
-              if (cached) {
-                const parsed = JSON.parse(cached);
-                if (parsed.product) data = parsed.product;
-              }
-            } catch (e) {
-              console.warn(e);
-            }
-          }
-          // Ultimate safety fallback: use the first fallback product so the details screen always loads nicely
-          if (!data) {
-            data = fallbackProducts[0];
-          }
-        }
+         // 2. If Firestore failed or product doesn't exist, check cache
+         if (!data) {
+           try {
+             const cached = localStorage.getItem(cacheKey);
+             if (cached) {
+               const parsed = JSON.parse(cached);
+               if (parsed.product) data = parsed.product;
+             }
+           } catch (e) {
+             console.warn(e);
+           }
+         }
 
-        if (data) {
-          setProduct(data);
-          
-          // Preselect sizes/colors if not already set by cache or UI
-          setSelectedSize(prev => prev || (data!.sizes && data!.sizes.length > 0 ? data!.sizes[0] : ''));
-          setSelectedColor(prev => prev || (data!.variants && data!.variants.length > 0 ? data!.variants[0].color : ''));
-          
-          // Fetch Related Products from Firestore if possible
-          try {
-            const relatedQuery = query(
-              collection(db, 'products'),
-              where('category', '==', data.category),
-              limit(5)
-            );
-            const relatedSnap = await getDocs(relatedQuery);
-            related = relatedSnap.docs
-              .map(doc => ({ id: doc.id, ...doc.data() } as Product))
-              .filter(p => p.id !== id)
-              .slice(0, 4);
-          } catch (relatedErr) {
-            console.warn("Firestore related products fetch failed, using fallbacks:", relatedErr);
-          }
+         if (data) {
+           setProduct(data);
+           
+           // Preselect sizes/colors if not already set by cache or UI
+           setSelectedSize(prev => prev || (data!.sizes && data!.sizes.length > 0 ? data!.sizes[0] : ''));
+           setSelectedColor(prev => prev || (data!.variants && data!.variants.length > 0 ? data!.variants[0].color : ''));
+           
+           // Fetch Related Products from Firestore if possible
+           try {
+             const relatedQuery = query(
+               collection(db, 'products'),
+               where('category', '==', data.category),
+               limit(5)
+             );
+             const relatedSnap = await getDocs(relatedQuery);
+             related = relatedSnap.docs
+               .map(doc => ({ id: doc.id, ...doc.data() } as Product))
+               .filter(p => p.id !== id)
+               .slice(0, 4);
+           } catch (relatedErr) {
+             console.warn("Firestore related products fetch failed:", relatedErr);
+           }
 
-          // Merge / use fallback related products
-          if (related.length < 3) {
-            const cat = Array.isArray(data.category) ? data.category[0] : data.category;
-            const fbRelated = fallbackProducts.filter(p => p.id !== id && (p.category?.includes(cat) || true));
-            related = [...related, ...fbRelated].slice(0, 4);
-          }
-          setRelatedProducts(related);
+           setRelatedProducts(related);
 
           // Track Recently Viewed
           try {
@@ -627,6 +611,7 @@ export default function ProductDetail() {
 
   const colors = Array.from(new Set(product.variants?.map(v => v.color) || []));
   const isFavorite = isInWishlist(product.id);
+  const stockVal = product.stock !== undefined && product.stock !== null ? Number(product.stock) : 99;
 
   const handleToggleWishlist = () => {
     const isCurrentlyFavorite = isFavorite;
@@ -670,7 +655,7 @@ export default function ProductDetail() {
                 onSlideChange={(swiper) => setActiveImage(swiper.activeIndex)}
                 className="w-full h-full"
               >
-                {product.images.map((img, idx) => (
+                {(product.images || []).map((img, idx) => (
                   <SwiperSlide key={idx} className="relative cursor-zoom-in" onClick={() => setIsFullscreenOpen(true)}>
                     <img 
                       src={img} 
@@ -705,7 +690,7 @@ export default function ProductDetail() {
             </div>
           </div>
           
-          {product.images.length > 1 && (
+          {product.images && product.images.length > 1 && (
             <div className="px-2">
               <Swiper
                 onSwiper={setThumbsSwiper}
@@ -715,7 +700,7 @@ export default function ProductDetail() {
                 modules={THUMB_SWIPER_MODULES}
                 className="thumbs-swiper"
               >
-                {product.images.map((img, idx) => (
+                {(product.images || []).map((img, idx) => (
                   <SwiperSlide key={idx}>
                     <div className={`aspect-square rounded-2xl overflow-hidden border-2 transition-all cursor-pointer ${activeImage === idx ? 'border-ruby scale-[1.02] shadow-lg shadow-ruby/10' : 'border-transparent opacity-60 hover:opacity-100'}`}>
                       <img src={img} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -766,7 +751,7 @@ export default function ProductDetail() {
               </button>
             </div>
             <div className="flex gap-[10px] flex-wrap">
-              {product.sizes.map(size => (
+              {(product.sizes || []).map(size => (
                 <button 
                   key={size}
                   onClick={() => setSelectedSize(size)}
@@ -813,15 +798,15 @@ export default function ProductDetail() {
                 {quantity}
               </div>
               <button 
-                onClick={() => setQuantity(Math.min(product.stock, quantity + 1))}
-                disabled={quantity >= product.stock}
+                onClick={() => setQuantity(Math.min(stockVal, quantity + 1))}
+                disabled={quantity >= stockVal}
                 className="w-10 h-11 flex items-center justify-center text-[20px] hover:bg-gray-100 transition-colors disabled:opacity-30"
               >
                 <Plus size={16} />
               </button>
             </div>
             <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">
-              {product.stock > 0 ? `${product.stock} items left` : 'Out of stock'}
+              {stockVal > 0 ? `${stockVal} items left` : 'Out of stock'}
             </p>
           </div>
 
@@ -829,15 +814,15 @@ export default function ProductDetail() {
           <div className="flex gap-3 mb-6">
             <button 
               onClick={handleAddToCart}
-              disabled={product.stock <= 0}
+              disabled={stockVal <= 0}
               className={`flex-grow h-[52px] rounded-[10px] text-[13px] font-bold uppercase tracking-[1.5px] transition-all flex items-center justify-center gap-2 ${
-                product.stock > 0 
+                stockVal > 0 
                 ? 'bg-ruby text-white hover:bg-[#1A2C54] shadow-lg shadow-ruby/20' 
                 : 'bg-gray-100 text-gray-400 cursor-not-allowed'
               }`}
             >
               <ShoppingBag size={18} />
-              {product.stock > 0 ? 'Add to Shopping Bag' : 'Out of Stock'}
+              {stockVal > 0 ? 'Add to Shopping Bag' : 'Out of Stock'}
             </button>
             <button 
               onClick={handleToggleWishlist}
@@ -1020,7 +1005,7 @@ export default function ProductDetail() {
       <FullScreenViewer 
         isOpen={isFullscreenOpen} 
         onClose={() => setIsFullscreenOpen(false)} 
-        images={product.images} 
+        images={product.images || []} 
         initialIndex={activeImage} 
       />
     </div>

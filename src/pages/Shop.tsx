@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { collection, query, where, getDocs, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Category } from '../types';
-import { fallbackCategories, fallbackProducts } from '../data/fallbackData';
+
 import ProductCard from '../components/ProductCard';
 import { ProductCardSkeleton } from '../components/Skeleton';
 import { Filter, ChevronDown, SlidersHorizontal, Truck, RefreshCw, ShieldCheck } from 'lucide-react';
@@ -11,9 +11,9 @@ import { checkProductHealth, logProductDiagnostics } from '../utils/productHealt
 
 export default function Shop() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [products, setProducts] = useState<Product[]>(fallbackProducts);
-  const [loading, setLoading] = useState(false);
-  const [categories, setCategories] = useState<string[]>(['All', ...fallbackCategories.map(c => c.name)]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState<string[]>(['All']);
   const [activeCategory, setActiveCategory] = useState<string>(
     searchParams.get('category') || 'All'
   );
@@ -33,9 +33,16 @@ export default function Shop() {
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (parsed.products) setProducts(parsed.products);
-        if (parsed.categories) setCategories(parsed.categories);
-        setLoading(false);
+        // Clean cache of old fallback items to prevent flash of dummy data
+        const hasDummy = (parsed.products && parsed.products.some((p: any) => p.id && p.id.startsWith('fp'))) ||
+                         (parsed.categories && parsed.categories.some((c: any) => c !== 'All' && !c.match(/^[A-Z]/)));
+        if (hasDummy) {
+          localStorage.removeItem(cacheKey);
+        } else {
+          if (parsed.products) setProducts(parsed.products);
+          if (parsed.categories) setCategories(parsed.categories);
+          setLoading(false);
+        }
       }
     } catch (e) {
       console.warn("Failed to load shop cache:", e);
@@ -78,8 +85,8 @@ export default function Shop() {
       saveToCache('categories', finalCategories);
     }, (error) => {
       console.warn("Shop categories real-time error:", error);
-      const catNames = fallbackCategories.map(c => c.name);
-      setCategories(['All', ...catNames]);
+      setCategories(['All']);
+      unsubscribeCategories();
     });
 
     // 2. Products real-time sync - resilient querying & client filtering to avoid missing index crashes
@@ -100,6 +107,10 @@ export default function Shop() {
       });
 
       console.log(`[Product Diagnostic - Query Result Count] Total products fetched from Firestore: ${rawProds.length}`);
+
+      if (rawProds.length === 0) {
+        rawProds = [];
+      }
 
       // Client-side category filtering with fallback resilience (supports both category as array or string)
       let prods = rawProds.filter(p => {
@@ -143,29 +154,9 @@ export default function Shop() {
       saveToCache('products', prods);
     }, (error) => {
       console.warn("Shop products real-time error:", error);
-      let prods = activeCategory === 'All' 
-        ? fallbackProducts 
-        : fallbackProducts.filter(p => {
-            return Array.isArray(p.category) 
-              ? p.category.includes(activeCategory) 
-              : p.category === activeCategory;
-          });
-      
-      prods.sort((a, b) => {
-        if (sortBy === 'newest') {
-          return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
-        }
-        if (sortBy === 'price-low') {
-          return a.price - b.price;
-        }
-        if (sortBy === 'price-high') {
-          return b.price - a.price;
-        }
-        return 0;
-      });
-
-      setProducts(prods);
+      setProducts([]);
       setLoading(false);
+      unsubscribeProducts();
     });
 
     return () => {

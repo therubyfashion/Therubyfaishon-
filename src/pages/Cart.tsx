@@ -28,6 +28,7 @@ export default function Cart() {
     setAppliedPromo 
   } = useCart();
   const { toggleWishlist, isInWishlist } = useWishlist();
+  const { settings } = useSettings();
   const navigate = useNavigate();
   const [promoCode, setPromoCode] = useState('');
   const [coupons, setCoupons] = useState<any[]>([]);
@@ -66,7 +67,7 @@ export default function Cart() {
     // Simulate a small delay for better UX
     await new Promise(resolve => setTimeout(resolve, 800));
 
-    const coupon = coupons.find(c => c.code.toUpperCase() === promoCode.toUpperCase());
+    const coupon = coupons.find(c => c && c.code && typeof c.code === 'string' && c.code.toUpperCase() === promoCode.toUpperCase());
     
     if (coupon) {
       // Safety validation: Ensure private loyalty vouchers belong to the current user
@@ -99,17 +100,7 @@ export default function Cart() {
   };
 
   const finalTotal = total;
-  const savings = totalDiscount + (productComparePriceTotal() - subtotal);
 
-  function productComparePriceTotal() {
-    const safeItems = Array.isArray(items) ? items.filter(Boolean) : [];
-    return safeItems.reduce((sum, item) => {
-      const price = Number(item.price) || 0;
-      const comparePrice = Number(item.comparePrice) || (price * 1.5);
-      const quantity = isNaN(Number(item.quantity)) ? 1 : Number(item.quantity);
-      return sum + comparePrice * quantity;
-    }, 0);
-  }
 
   if (itemCount === 0) {
     return (
@@ -205,7 +196,7 @@ export default function Cart() {
                       </button>
                       <span className="w-8 sm:w-12 text-center text-xs sm:text-sm font-bold text-[#1A2C54]">{item.quantity}</span>
                       <button 
-                        onClick={() => updateQuantity(item.id, item.selectedSize, Math.min(item.stock, item.quantity + 1), item.selectedColor)}
+                        onClick={() => updateQuantity(item.id, item.selectedSize, Math.min(item.stock !== undefined && item.stock !== null ? Number(item.stock) : 99, item.quantity + 1), item.selectedColor)}
                         className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center text-[#1A2C54] hover:bg-gray-50 transition-colors border-l border-gray-100"
                       >
                         <Plus size={12} />
@@ -299,7 +290,7 @@ export default function Cart() {
               <div className="flex justify-between text-sm font-bold text-ruby">
                 <div className="flex items-center gap-2">
                   <Sparkles size={14} />
-                  <span>{useSettings().settings?.buy2Get1Free ? 'Buy 2 Get 1 Free' : 'Bundle Discount'}</span>
+                  <span>{settings?.buy2Get1Free ? 'Buy 2 Get 1 Free' : 'Bundle Discount'}</span>
                 </div>
                 <span>-₹{Number(autoOfferDiscount || 0).toLocaleString()}</span>
               </div>
