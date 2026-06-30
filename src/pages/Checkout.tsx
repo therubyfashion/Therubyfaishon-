@@ -545,7 +545,7 @@ export default function Checkout() {
             if (user?.uid) {
               try {
                 // Send customer templated push notification (🎉 Order Confirmed!)
-                await fetch('/api/send-templated-notification', {
+                const res = await fetch('/api/send-templated-notification', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -559,8 +559,16 @@ export default function Checkout() {
                     options: { url: '/my-orders' }
                   })
                 });
-              } catch (pushErr) {
-                console.error("Customer push notification API call failed:", pushErr);
+                if (!res.ok) {
+                  const errorBody = await res.text();
+                  throw new Error(`HTTP Error Status: ${res.status} | Response: ${errorBody}`);
+                }
+                console.log("Customer push notification API call succeeded");
+              } catch (pushErr: any) {
+                console.error("❌ [DIAGNOSTIC] Customer push notification API call failed! Detailed Error:", {
+                  message: pushErr.message || pushErr,
+                  stack: pushErr.stack
+                });
               }
 
               try {
@@ -573,8 +581,12 @@ export default function Checkout() {
                   iconType: 'package',
                   link: '/my-orders'
                 }, true);
-              } catch (notifErr) {
-                console.error("Customer in-app notification logging failed:", notifErr);
+                console.log("Customer in-app notification logging succeeded");
+              } catch (notifErr: any) {
+                console.error("❌ [DIAGNOSTIC] Customer in-app notification logging failed! Detailed Error:", {
+                  message: notifErr.message || notifErr,
+                  stack: notifErr.stack
+                });
               }
             }
           };
@@ -589,7 +601,7 @@ export default function Checkout() {
               const templateKey = isHighValue ? 'admin_high_value_order' : 'admin_new_order';
               const formattedTotal = `₹${Number(finalOrderData.total).toLocaleString()}`;
 
-              await fetch('/api/send-templated-notification', {
+              const res = await fetch('/api/send-templated-notification', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -605,9 +617,16 @@ export default function Checkout() {
                   }
                 })
               });
-              console.log("Sent admin push notification with rich layout & templates");
-            } catch (pushErr) {
-              console.error('Failed to send admin push notification:', pushErr);
+              if (!res.ok) {
+                const errorBody = await res.text();
+                throw new Error(`HTTP Error Status: ${res.status} | Response: ${errorBody}`);
+              }
+              console.log("Sent admin push notification with rich layout & templates successfully");
+            } catch (pushErr: any) {
+              console.error('❌ [DIAGNOSTIC] Failed to send admin push notification! Detailed Error:', {
+                message: pushErr.message || pushErr,
+                stack: pushErr.stack
+              });
             }
           };
 
@@ -624,10 +643,17 @@ export default function Checkout() {
                   html: emailHtml
                 })
               });
+              if (!res.ok) {
+                const errorBody = await res.text();
+                throw new Error(`HTTP Error Status: ${res.status} | Response: ${errorBody}`);
+              }
               const d = await res.json();
               console.log("Customer order email dispatched successfully:", d);
-            } catch (err) {
-              console.error("Customer email failed:", err);
+            } catch (err: any) {
+              console.error("❌ [DIAGNOSTIC] Customer email failed! Detailed Error:", {
+                message: err.message || err,
+                stack: err.stack
+              });
             }
           };
 
@@ -654,10 +680,17 @@ export default function Checkout() {
                   `
                 })
               });
+              if (!res.ok) {
+                const errorBody = await res.text();
+                throw new Error(`HTTP Error Status: ${res.status} | Response: ${errorBody}`);
+              }
               const d = await res.json();
               console.log("Admin order email dispatched successfully:", d);
-            } catch (err) {
-              console.error("Admin order email failed:", err);
+            } catch (err: any) {
+              console.error("❌ [DIAGNOSTIC] Admin order email failed! Detailed Error:", {
+                message: err.message || err,
+                stack: err.stack
+              });
             }
           };
 
