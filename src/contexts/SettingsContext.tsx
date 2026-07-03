@@ -26,7 +26,10 @@ const DEFAULT_CLIENT_SETTINGS = {
   otpMonthlyLimit: 9999,
   buy2Get1Free: false,
   buy2GetPercentEnabled: false,
-  buy2GetPercentOff: 0
+  buy2GetPercentOff: 0,
+  ogTitle: '',
+  ogDescription: '',
+  ogImage: ''
 };
 
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

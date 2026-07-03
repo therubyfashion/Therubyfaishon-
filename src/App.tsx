@@ -429,6 +429,66 @@ function AppContent() {
         link.href = settings.favicon;
         document.getElementsByTagName('head')[0].appendChild(link);
       }
+
+      // Apply og:title & twitter:title
+      const ogTitleVal = settings.ogTitle || settings.siteTitle;
+      if (ogTitleVal) {
+        let ogTitle = document.querySelector('meta[property="og:title"]');
+        if (!ogTitle) {
+          ogTitle = document.createElement('meta');
+          ogTitle.setAttribute('property', 'og:title');
+          document.head.appendChild(ogTitle);
+        }
+        ogTitle.setAttribute('content', ogTitleVal);
+
+        let twitterTitle = document.querySelector('meta[name="twitter:title"]');
+        if (!twitterTitle) {
+          twitterTitle = document.createElement('meta');
+          twitterTitle.setAttribute('name', 'twitter:title');
+          document.head.appendChild(twitterTitle);
+        }
+        twitterTitle.setAttribute('content', ogTitleVal);
+      }
+
+      // Apply og:description & twitter:description
+      const ogDescVal = settings.ogDescription || settings.metaDescription;
+      if (ogDescVal) {
+        let ogDesc = document.querySelector('meta[property="og:description"]');
+        if (!ogDesc) {
+          ogDesc = document.createElement('meta');
+          ogDesc.setAttribute('property', 'og:description');
+          document.head.appendChild(ogDesc);
+        }
+        ogDesc.setAttribute('content', ogDescVal);
+
+        let twitterDesc = document.querySelector('meta[name="twitter:description"]');
+        if (!twitterDesc) {
+          twitterDesc = document.createElement('meta');
+          twitterDesc.setAttribute('name', 'twitter:description');
+          document.head.appendChild(twitterDesc);
+        }
+        twitterDesc.setAttribute('content', ogDescVal);
+      }
+
+      // Apply og:image & twitter:image
+      const ogImgVal = settings.ogImage || settings.storeLogo;
+      if (ogImgVal) {
+        let ogImg = document.querySelector('meta[property="og:image"]');
+        if (!ogImg) {
+          ogImg = document.createElement('meta');
+          ogImg.setAttribute('property', 'og:image');
+          document.head.appendChild(ogImg);
+        }
+        ogImg.setAttribute('content', ogImgVal);
+
+        let twitterImg = document.querySelector('meta[name="twitter:image"]');
+        if (!twitterImg) {
+          twitterImg = document.createElement('meta');
+          twitterImg.setAttribute('name', 'twitter:image');
+          document.head.appendChild(twitterImg);
+        }
+        twitterImg.setAttribute('content', ogImgVal);
+      }
     } catch (error) {
       console.error('Error applying SEO settings:', error);
     }

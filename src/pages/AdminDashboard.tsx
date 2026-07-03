@@ -21,7 +21,7 @@ import {
   TrendingDown, Shield, ShieldAlert, ShieldCheck, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info, History,
   Send, MessageSquare, User, CreditCard, Download, Eye, Check, ArrowRight,
   Cloud, RefreshCw, CheckCircle, Clock, MousePointer2, Zap, Save, Percent, Gift, Tag, Layers, MapPin,
-  Sparkles, Megaphone, Copy
+  Sparkles, Megaphone, Copy, Share2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -1189,6 +1189,9 @@ export default function AdminDashboard() {
     favicon: '',
     siteTitle: 'The Ruby Fashion | Premium Clothing',
     metaDescription: 'Discover the latest trends in fashion at The Ruby Fashion.',
+    ogTitle: '',
+    ogDescription: '',
+    ogImage: '',
     resendApiKey: '',
     fromEmail: 'support@therubyfashion.shop',
     smtpUser: '',
@@ -10007,6 +10010,106 @@ export default function AdminDashboard() {
                             <p className="text-[10px] text-gray-400 mt-2 leading-relaxed">
                               A brief summary of your store. Google often shows this in search results.
                             </p>
+                          </div>
+
+                          <div className="border-t border-gray-100 pt-6 mt-6 space-y-6">
+                            <h4 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center">
+                              <Share2 size={16} className="mr-2 text-ruby" /> Social Share & Open Graph (OG) Tags
+                            </h4>
+                            <p className="text-[11px] text-gray-400 leading-relaxed font-medium">
+                              These tags control how your store is displayed when shared on social media platforms like Facebook, Twitter, WhatsApp, and LinkedIn.
+                            </p>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                              <div className="space-y-4">
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Social Share Title (og:title)</label>
+                                  <input 
+                                    type="text" 
+                                    placeholder="e.g. Premium Clothing & Luxury Wear | The Ruby"
+                                    value={settings.ogTitle || ''}
+                                    onChange={(e) => setSettings({...settings, ogTitle: e.target.value})}
+                                    className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                  />
+                                  <p className="text-[9px] text-gray-400 mt-1 leading-normal">
+                                    Defaults to Site Title if left empty.
+                                  </p>
+                                </div>
+
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Social Share Description (og:description)</label>
+                                  <textarea 
+                                    rows={4}
+                                    placeholder="Describe your store for social media previews..."
+                                    value={settings.ogDescription || ''}
+                                    onChange={(e) => setSettings({...settings, ogDescription: e.target.value})}
+                                    className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium resize-none" 
+                                  />
+                                  <p className="text-[9px] text-gray-400 mt-1 leading-normal">
+                                    Defaults to Meta Description if left empty.
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Social Share Image (og:image)</label>
+                                <div className="flex flex-col space-y-4">
+                                  <div className="flex-grow flex flex-col items-center justify-center border-2 border-dashed border-gray-100 rounded-xl p-6 hover:border-ruby/30 transition-all cursor-pointer relative group h-40 bg-gray-50/50">
+                                    {settings.ogImage ? (
+                                      <div className="relative w-full h-full rounded-lg overflow-hidden flex items-center justify-center">
+                                        <img src={settings.ogImage} alt="OG Image Preview" className="h-full object-contain" referrerPolicy="no-referrer" />
+                                        <button 
+                                          type="button"
+                                          onClick={() => setSettings({...settings, ogImage: ''})}
+                                          className="absolute top-2 right-2 p-1.5 bg-white/80 backdrop-blur-sm rounded-lg text-red-500 opacity-0 group-hover:opacity-100 transition-all shadow-md"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <div className="p-3 bg-white rounded-xl text-gray-400 mb-2 shadow-sm">
+                                          <ImageIcon size={24} className="text-ruby" />
+                                        </div>
+                                        <p className="text-[10px] text-[#1A2C54] font-bold uppercase tracking-widest">Upload Social Image</p>
+                                        <p className="text-[9px] text-gray-400 mt-1 text-center max-w-[200px]">
+                                          Recommended: 1200 x 630 px.
+                                        </p>
+                                      </>
+                                    )}
+                                    <input 
+                                      type="file" 
+                                      accept="image/*"
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) {
+                                          if (file.size > 5 * 1024 * 1024) {
+                                            toast.error("Image size must be less than 5MB");
+                                            return;
+                                          }
+                                          const reader = new FileReader();
+                                          reader.onloadend = () => {
+                                            setSettings({...settings, ogImage: reader.result as string});
+                                          };
+                                          reader.readAsDataURL(file);
+                                        }
+                                      }}
+                                      className="absolute inset-0 opacity-0 cursor-pointer"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Or Paste Image URL</label>
+                                    <input 
+                                      type="text" 
+                                      placeholder="https://example.com/social-preview.jpg"
+                                      value={settings.ogImage && !settings.ogImage.startsWith('data:') ? settings.ogImage : ''}
+                                      onChange={(e) => setSettings({...settings, ogImage: e.target.value})}
+                                      className="w-full bg-gray-50 border-none rounded-xl px-4 py-2.5 text-xs focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
                           </div>
 
                           <div className="mt-8 p-6 bg-amber-50 border border-amber-100 rounded-2xl space-y-4">
