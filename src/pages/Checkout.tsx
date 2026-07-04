@@ -635,7 +635,7 @@ export default function Checkout() {
           const sendCustomerEmail = async () => {
             try {
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 10000);
+              const timeoutId = setTimeout(() => controller.abort(), 55000);
               const res = await fetch('/api/send-email', {
                 signal: controller.signal,
                 method: 'POST',
@@ -667,7 +667,7 @@ export default function Checkout() {
             try {
               const adminEmailDestination = settingsData.supportEmail || "mdsagaransari65670@gmail.com";
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 10000);
+              const timeoutId = setTimeout(() => controller.abort(), 55000);
               const res = await fetch('/api/send-email', {
                 signal: controller.signal,
                 method: 'POST',
