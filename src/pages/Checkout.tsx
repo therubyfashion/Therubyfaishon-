@@ -632,17 +632,21 @@ export default function Checkout() {
 
           const sendCustomerEmail = async () => {
             try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 10000);
               const res = await fetch('/api/send-email', {
+                signal: controller.signal,
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   to: finalOrderData.address?.email,
-                  from: settingsData.fromEmail || undefined,
+                  from: settingsData.fromEmail || settingsData.smtpUser || undefined,
                   replyTo: settingsData.supportEmail || undefined,
                   subject: `Order Confirmed! ${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`} ✨`,
                   html: emailHtml
                 })
               });
+              clearTimeout(timeoutId);
               if (!res.ok) {
                 const errorBody = await res.text();
                 throw new Error(`HTTP Error Status: ${res.status} | Response: ${errorBody}`);
@@ -660,12 +664,15 @@ export default function Checkout() {
           const sendAdminEmail = async () => {
             try {
               const adminEmailDestination = settingsData.supportEmail || "mdsagaransari65670@gmail.com";
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 10000);
               const res = await fetch('/api/send-email', {
+                signal: controller.signal,
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   to: adminEmailDestination,
-                  from: settingsData.fromEmail || undefined,
+                  from: settingsData.fromEmail || settingsData.smtpUser || undefined,
                   subject: `New Order Received! ${finalOrderData.orderId} 🛍️`,
                   html: `
                     <div style="font-family: sans-serif; padding: 20px;">
@@ -680,6 +687,7 @@ export default function Checkout() {
                   `
                 })
               });
+              clearTimeout(timeoutId);
               if (!res.ok) {
                 const errorBody = await res.text();
                 throw new Error(`HTTP Error Status: ${res.status} | Response: ${errorBody}`);
