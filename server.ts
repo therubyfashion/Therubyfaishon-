@@ -1713,7 +1713,7 @@ function enhanceAndSanitizeEmailHtml(
   }
 
   // 3. Complete layout detection (avoid nesting multiple standard head/body boundaries)
-  const isFullLayout = /<!DOCTYPE|<html|<\/head>|<\/body>/i.test(processedHtml);
+  const isFullLayout = /<!DOCTYPE|<html|<\/head>|<\/body>|background-color.*#000000|background-color.*#1A1A1A/i.test(processedHtml);
 
   if (isFullLayout) {
     return processedHtml;

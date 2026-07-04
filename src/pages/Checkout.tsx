@@ -442,7 +442,9 @@ export default function Checkout() {
           const storeName = settingsData.storeName || 'The Ruby Fashion';
 
           // Build high-compatibility 100%-bulletproof HTML Table email summary (Outlook / Gmail safe)
-          const emailHtml = `
+          const emailHtml = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head><body style="margin:0;padding:0;">
             <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #000000; padding: 40px 20px; color: #FFFFFF; line-height: 1.5;">
               <div style="max-width: 500px; margin: 0 auto;">
                 <!-- Header -->
@@ -538,7 +540,7 @@ export default function Checkout() {
                 </div>
               </div>
             </div>
-          `;
+          </body></html>`;
 
           // 2. Define the 4 parallel critical notification/email tasks
           const sendCustomerPush = async () => {
