@@ -1234,29 +1234,64 @@ async function initializeAutoPushes() {
         }
 
         if (change.type === 'added') {
+          if (orderStatusCache.has(orderId)) {
+            // Already processed or pre-loaded on startup! Skip to prevent duplicates!
+            return;
+          }
           orderStatusCache.set(orderId, order.status || '');
           
-          await sendAdminNotification(
-            "New Order Received 🛍️",
-            `Order #${orderId} of ₹${order.total || 0} has been placed.`,
-            `/admin?tab=orders`
-          );
+          const humanReadableOrderId = order.orderId || orderId;
+          const formattedTotal = `₹${Number(order.total || 0).toLocaleString()}`;
+          const customerName = order.customerName || 'Customer';
 
-          if (order.userId) {
-            await sendCustomerNotification(
-              order.userId,
-              "Order Successfully Placed 🎉",
-              "Your order has been received. Track status using view details!",
-              `/track/${orderId}`
-            );
+          // Send admin push notification
+          const isHighValue = Number(order.total || 0) >= 5000;
+          const adminTemplateKey = isHighValue ? 'admin_high_value_order' : 'admin_new_order';
+          const adminTemplate = TEMPLATES[adminTemplateKey];
+          if (adminTemplate) {
+            let adminTitle = adminTemplate.title;
+            let adminBody = adminTemplate.body;
+            const params: Record<string, string> = {
+              orderId: humanReadableOrderId,
+              customerName,
+              total: formattedTotal
+            };
+            Object.entries(params).forEach(([key, val]) => {
+              const placeholder = new RegExp(`{{${key}}}`, 'g');
+              adminTitle = adminTitle.replace(placeholder, val);
+              adminBody = adminBody.replace(placeholder, val);
+            });
+
+            await NotificationService.sendAdmin(adminTitle, adminBody, {
+              url: `/admin?tab=orders`,
+              templateKey: adminTemplateKey,
+              orderId: humanReadableOrderId
+            });
           }
 
-          if (Number(order.total || 0) >= 5000) {
-            await sendAdminNotification(
-              "High Value Order Alert! ⚠️",
-              `Large order received: Order #${orderId} total is ₹${order.total}!`,
-              `/admin?tab=orders`
-            );
+          // Send customer push notification
+          if (order.userId) {
+            const customerTemplate = TEMPLATES['order_placed'];
+            if (customerTemplate) {
+              let customerTitle = customerTemplate.title;
+              let customerBody = customerTemplate.body;
+              const params: Record<string, string> = {
+                orderId: humanReadableOrderId,
+                customerName,
+                total: formattedTotal
+              };
+              Object.entries(params).forEach(([key, val]) => {
+                const placeholder = new RegExp(`{{${key}}}`, 'g');
+                customerTitle = customerTitle.replace(placeholder, val);
+                customerBody = customerBody.replace(placeholder, val);
+              });
+
+              await NotificationService.sendCustomer(order.userId, customerTitle, customerBody, {
+                url: `/track/${humanReadableOrderId}`,
+                templateKey: 'order_placed',
+                orderId: humanReadableOrderId
+              });
+            }
           }
         }
 
