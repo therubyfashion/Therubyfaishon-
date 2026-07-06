@@ -339,21 +339,15 @@ export default function Signup() {
       });
 
       const emailData = await emailResponse.json();
-      if (!emailResponse.ok) {
-        console.error("Email send failed:", emailData.error);
-        if (emailData.error?.includes("initializing")) {
-          toast.error(emailData.error, { duration: 6000 });
-        } else {
-          toast.error("Account created, but verification email failed to send. Resend it from the next screen.");
-        }
-      } else {
+      if (emailResponse.ok) {
         toast.success("Verification code sent to your email!");
+      } else {
+        console.error("Email send failed:", emailData.error);
       }
 
       localStorage.removeItem('phone_user');
       // Keep user signed in so they have permissions to update their profile during verification
-      const errorParam = !emailResponse.ok ? `&message=${encodeURIComponent("Account created, but verification email failed to send. You can resend it from the next screen.")}` : '';
-      navigate(`/verify-prompt?email=${encodeURIComponent(formData.email)}&uid=${user.uid}${errorParam}`);
+      navigate(`/verify-prompt?email=${encodeURIComponent(formData.email)}&uid=${user.uid}`);
     } catch (error: any) {
       console.error("Signup error:", error);
       if (error.code === 'auth/email-already-in-use') {

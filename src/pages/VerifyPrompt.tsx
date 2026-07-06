@@ -363,19 +363,6 @@ export default function VerifyPrompt() {
         >
           <ArrowLeft size={20} />
         </button>
-        {urlMessage && (
-          <div className="w-full mb-8 p-4 bg-red-50 border border-red-100 rounded-2xl flex flex-col items-start gap-2 text-left">
-            <div className="flex items-center gap-2 text-red-600">
-              <AlertCircle size={18} />
-              <span className="text-xs font-black uppercase tracking-wider">Configuration Required</span>
-            </div>
-            <p className="text-[11px] font-bold text-red-500 leading-relaxed">
-              {urlMessage} 
-              <br />
-              <span className="text-[#1A2C54] mt-1 block opacity-80">Check Admin Panel &rarr; Settings &rarr; Resend API Key.</span>
-            </p>
-          </div>
-        )}
 
         <div className="mb-8">
           <div className="w-20 h-20 bg-ruby/10 text-ruby rounded-3xl flex items-center justify-center mx-auto">
@@ -399,7 +386,9 @@ export default function VerifyPrompt() {
             <input
               key={index}
               id={`otp-${index}`}
-              type="text"
+              type="tel"
+              inputMode="numeric"
+              pattern="[0-9]*"
               maxLength={1}
               value={digit}
               onChange={(e) => handleOtpChange(index, e.target.value)}

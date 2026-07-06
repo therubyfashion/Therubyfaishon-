@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 import admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
 import { initializeApp as initClientApp, getApps as getClientApps } from 'firebase/app';
-import { getFirestore as getClientFirestore, doc as cDoc, getDoc as cGetDoc, collection as cCollection, getDocs as cGetDocs, limit as cLimit, query as cQuery, where as cWhere, addDoc as cAddDoc, updateDoc as cUpdateDoc, onSnapshot as cOnSnapshot } from 'firebase/firestore';
+import { getFirestore as getClientFirestore, doc as cDoc, getDoc as cGetDoc, collection as cCollection, getDocs as cGetDocs, limit as cLimit, query as cQuery, where as cWhere, addDoc as cAddDoc, updateDoc as cUpdateDoc, onSnapshot as cOnSnapshot, setDoc as cSetDoc } from 'firebase/firestore';
 import fs from 'fs';
 import axios from 'axios';
 import * as OneSignal from 'onesignal-node';
@@ -1156,6 +1156,38 @@ async function runCartAbandonmentRecovery() {
   }
 }
 
+async function acquireNotificationLock(orderId: string, lockType: string): Promise<boolean> {
+  const lockId = `${orderId}_${lockType}`;
+  if (db && isDbWriteable !== false) {
+    try {
+      await db.collection('notification_locks').doc(lockId).create({
+        lockedAt: new Date().toISOString()
+      });
+      console.log(`🔒 [push-service] Lock successfully acquired for ${lockId} (Admin SDK)`);
+      return true;
+    } catch (err: any) {
+      console.log(`🔒 [push-service] Lock already acquired or failed for ${lockId}: ${err.message}`);
+      return false;
+    }
+  } else if (clientDb && isClientDbReady) {
+    try {
+      const lockRef = cDoc(clientDb, 'notification_locks', lockId);
+      const lockSnap = await cGetDoc(lockRef);
+      if (lockSnap.exists()) {
+        console.log(`🔒 [push-service] Lock already exists for ${lockId} (Client SDK fallback)`);
+        return false;
+      }
+      await cSetDoc(lockRef, { lockedAt: new Date().toISOString() });
+      console.log(`🔒 [push-service] Lock successfully set for ${lockId} (Client SDK fallback)`);
+      return true;
+    } catch (err: any) {
+      console.error(`🔒 [push-service] Error acquiring lock for ${lockId} in Client SDK fallback:`, err.message);
+      return false;
+    }
+  }
+  return true;
+}
+
 let isPushServiceInitialized = false;
 
 async function initializeAutoPushes() {
@@ -1247,34 +1279,12 @@ async function initializeAutoPushes() {
           // Send admin push notification
           const isHighValue = Number(order.total || 0) >= 5000;
           const adminTemplateKey = isHighValue ? 'admin_high_value_order' : 'admin_new_order';
-          const adminTemplate = TEMPLATES[adminTemplateKey];
-          if (adminTemplate) {
-            let adminTitle = adminTemplate.title;
-            let adminBody = adminTemplate.body;
-            const params: Record<string, string> = {
-              orderId: humanReadableOrderId,
-              customerName,
-              total: formattedTotal
-            };
-            Object.entries(params).forEach(([key, val]) => {
-              const placeholder = new RegExp(`{{${key}}}`, 'g');
-              adminTitle = adminTitle.replace(placeholder, val);
-              adminBody = adminBody.replace(placeholder, val);
-            });
-
-            await NotificationService.sendAdmin(adminTitle, adminBody, {
-              url: `/admin?tab=orders`,
-              templateKey: adminTemplateKey,
-              orderId: humanReadableOrderId
-            });
-          }
-
-          // Send customer push notification
-          if (order.userId) {
-            const customerTemplate = TEMPLATES['order_placed'];
-            if (customerTemplate) {
-              let customerTitle = customerTemplate.title;
-              let customerBody = customerTemplate.body;
+          const hasAdminLock = await acquireNotificationLock(orderId, adminTemplateKey);
+          if (hasAdminLock) {
+            const adminTemplate = TEMPLATES[adminTemplateKey];
+            if (adminTemplate) {
+              let adminTitle = adminTemplate.title;
+              let adminBody = adminTemplate.body;
               const params: Record<string, string> = {
                 orderId: humanReadableOrderId,
                 customerName,
@@ -1282,15 +1292,43 @@ async function initializeAutoPushes() {
               };
               Object.entries(params).forEach(([key, val]) => {
                 const placeholder = new RegExp(`{{${key}}}`, 'g');
-                customerTitle = customerTitle.replace(placeholder, val);
-                customerBody = customerBody.replace(placeholder, val);
+                adminTitle = adminTitle.replace(placeholder, val);
+                adminBody = adminBody.replace(placeholder, val);
               });
 
-              await NotificationService.sendCustomer(order.userId, customerTitle, customerBody, {
-                url: `/track/${humanReadableOrderId}`,
-                templateKey: 'order_placed',
+              await NotificationService.sendAdmin(adminTitle, adminBody, {
+                url: `/admin?tab=orders`,
+                templateKey: adminTemplateKey,
                 orderId: humanReadableOrderId
               });
+            }
+          }
+
+          // Send customer push notification
+          if (order.userId) {
+            const hasCustomerLock = await acquireNotificationLock(orderId, 'order_placed');
+            if (hasCustomerLock) {
+              const customerTemplate = TEMPLATES['order_placed'];
+              if (customerTemplate) {
+                let customerTitle = customerTemplate.title;
+                let customerBody = customerTemplate.body;
+                const params: Record<string, string> = {
+                  orderId: humanReadableOrderId,
+                  customerName,
+                  total: formattedTotal
+                };
+                Object.entries(params).forEach(([key, val]) => {
+                  const placeholder = new RegExp(`{{${key}}}`, 'g');
+                  customerTitle = customerTitle.replace(placeholder, val);
+                  customerBody = customerBody.replace(placeholder, val);
+                });
+
+                await NotificationService.sendCustomer(order.userId, customerTitle, customerBody, {
+                  url: `/track/${humanReadableOrderId}`,
+                  templateKey: 'order_placed',
+                  orderId: humanReadableOrderId
+                });
+              }
             }
           }
         }
@@ -1306,18 +1344,20 @@ async function initializeAutoPushes() {
             switch (String(newStatus).trim()) {
               case 'Confirmed':
               case 'Paid':
-                await sendAdminNotification("Payment Received 💳", `Payment received for Order #${orderId}.`);
-                if (order.userId) {
+                if (await acquireNotificationLock(orderId, 'status_Confirmed_admin')) {
+                  await sendAdminNotification("Payment Received 💳", `Payment received for Order #${orderId}.`);
+                }
+                if (order.userId && await acquireNotificationLock(orderId, 'status_Confirmed_customer')) {
                   await sendCustomerNotification(order.userId, "Order Confirmed ✅", "Your order is confirmed.");
                 }
                 break;
               case 'Processing':
-                if (order.userId) {
+                if (order.userId && await acquireNotificationLock(orderId, 'status_Processing_customer')) {
                   await sendCustomerNotification(order.userId, "Order Processing ⚙️", "We are preparing your order.");
                 }
                 break;
               case 'Packed':
-                if (order.userId) {
+                if (order.userId && await acquireNotificationLock(orderId, 'status_Packed_customer')) {
                   await sendCustomerNotification(
                     order.userId,
                     "Order Packed 📦",
@@ -1327,36 +1367,42 @@ async function initializeAutoPushes() {
                 }
                 break;
               case 'Shipped':
-                if (order.userId) {
+                if (order.userId && await acquireNotificationLock(orderId, 'status_Shipped_customer')) {
                   await sendCustomerNotification(order.userId, "Order Shipped 🚚", "Your package is on the way!");
                 }
                 break;
               case 'In Delivery':
               case 'Out for Delivery':
-                if (order.userId) {
+                if (order.userId && await acquireNotificationLock(orderId, 'status_OutForDelivery_customer')) {
                   await sendCustomerNotification(order.userId, "Out For Delivery 📍", "Your order will arrive soon.");
                 }
                 break;
               case 'Delivered':
                 if (order.userId) {
-                  await sendCustomerNotification(order.userId, "Order Delivered 🎁", "Your package has been delivered.");
-                  await sendCustomerNotification(order.userId, "Rate Your Purchase ⭐", "Share your experience with the product.");
+                  if (await acquireNotificationLock(orderId, 'status_Delivered_customer')) {
+                    await sendCustomerNotification(order.userId, "Order Delivered 🎁", "Your package has been delivered.");
+                  }
+                  if (await acquireNotificationLock(orderId, 'status_Rate_customer')) {
+                    await sendCustomerNotification(order.userId, "Rate Your Purchase ⭐", "Share your experience with the product.");
+                  }
                 }
                 break;
               case 'Cancelled':
-                await sendAdminNotification("Cancellation Request ❌", `Order #${orderId} was cancelled.`);
-                if (order.userId) {
+                if (await acquireNotificationLock(orderId, 'status_Cancelled_admin')) {
+                  await sendAdminNotification("Cancellation Request ❌", `Order #${orderId} was cancelled.`);
+                }
+                if (order.userId && await acquireNotificationLock(orderId, 'status_Cancelled_customer')) {
                   await sendCustomerNotification(order.userId, "Order Cancelled 🚫", "Your order has been cancelled.");
                 }
                 break;
               case 'Refunded':
-                if (order.userId) {
+                if (order.userId && await acquireNotificationLock(orderId, 'status_Refunded_customer')) {
                   await sendCustomerNotification(order.userId, "Refund Initiated 💰", "Your refund is being processed. It will reflect in your account within 5-7 business days.");
                 }
                 break;
               case 'Refund_Completed':
               case 'RefundCompleted':
-                if (order.userId) {
+                if (order.userId && await acquireNotificationLock(orderId, 'status_RefundCompleted_customer')) {
                   await sendCustomerNotification(order.userId, "Refund Completed ✅", "Refund has been successfully credited to your original payment source.");
                 }
                 break;
@@ -1389,17 +1435,21 @@ async function initializeAutoPushes() {
 
         if (change.type === 'added') {
           userPointsCache.set(userId, user.loyaltyPoints || 0);
-          await sendAdminNotification(
-            "New User Registered 👤",
-            `${user.displayName || user.email || 'A user'} joined The Ruby Fashion.`
-          );
+          if (await acquireNotificationLock(userId, 'user_registered_admin')) {
+            await sendAdminNotification(
+              "New User Registered 👤",
+              `${user.displayName || user.email || 'A user'} joined The Ruby Fashion.`
+            );
+          }
 
-          await sendCustomerNotification(
-            userId,
-            "Welcome to The Ruby Fashion! ✨",
-            "Thank you for joining us. Check out our latest selection!",
-            "/"
-          );
+          if (await acquireNotificationLock(userId, 'user_registered_customer')) {
+            await sendCustomerNotification(
+              userId,
+              "Welcome to The Ruby Fashion! ✨",
+              "Thank you for joining us. Check out our latest selection!",
+              "/"
+            );
+          }
         }
 
         if (change.type === 'modified') {
@@ -1413,20 +1463,24 @@ async function initializeAutoPushes() {
             // I. Immediate, automatic push for ANY point balance modification
             if (newPoints > oldPoints) {
               const gained = newPoints - oldPoints;
-              await sendCustomerNotification(
-                userId,
-                "Loyalty Points Earned! 🌟",
-                `Success! You received +${gained} loyalty points. Your current status balance is ${newPoints} points. 💎`,
-                "/settings?tab=coupons"
-              );
+              if (await acquireNotificationLock(userId, `points_earned_${newPoints}`)) {
+                await sendCustomerNotification(
+                  userId,
+                  "Loyalty Points Earned! 🌟",
+                  `Success! You received +${gained} loyalty points. Your current status balance is ${newPoints} points. 💎`,
+                  "/settings?tab=coupons"
+                );
+              }
             } else {
               const spent = oldPoints - newPoints;
-              await sendCustomerNotification(
-                userId,
-                "Loyalty Points Redeemed! 🎟️",
-                `Voucher claimed! Redeemed -${spent} points. Your new loyalty balance: ${newPoints} points.`,
-                "/settings?tab=coupons"
-              );
+              if (await acquireNotificationLock(userId, `points_redeemed_${newPoints}`)) {
+                await sendCustomerNotification(
+                  userId,
+                  "Loyalty Points Redeemed! 🎟️",
+                  `Voucher claimed! Redeemed -${spent} points. Your new loyalty balance: ${newPoints} points.`,
+                  "/settings?tab=coupons"
+                );
+              }
             }
 
             // II. Check Milestones Achieved (with a slight timeout delay to prevent overlapping push alerts)
@@ -2658,66 +2712,52 @@ async function startServer() {
   });
 
 
-  app.get("/api/payment-config", async (req, res) => {
-    const vId = process.env.VITE_RAZORPAY_KEY_ID;
-    const rId = process.env.RAZORPAY_KEY_ID;
-    const rKey = process.env.RAZORPAY_ID;
-    
-    let keyId = (vId || rId || rKey)?.trim();
-    let hasSecret = !!(process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET);
+  async function getRazorpayCredentials() {
+    let keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim() || null;
+    let keySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)?.trim() || null;
 
-    // Fallback to Firestore
-    if (!keyId) {
-      try {
-        const settings = await resilientGetSettings();
-        if (settings) {
-          keyId = settings.razorpayKeyId;
-          hasSecret = !!settings.razorpayKeySecret;
+    try {
+      const settings = await resilientGetSettings();
+      if (settings) {
+        if (settings.razorpayKeyId && settings.razorpayKeyId.trim()) {
+          keyId = settings.razorpayKeyId.trim();
         }
-      } catch (err: any) {
-        console.error("Error fetching settings for config:", err.message);
+        if (settings.razorpayKeySecret && settings.razorpayKeySecret.trim()) {
+          keySecret = settings.razorpayKeySecret.trim();
+        }
       }
+    } catch (err: any) {
+      console.error("Error loading Razorpay credentials from settings:", err.message);
     }
+
+    return { keyId, keySecret };
+  }
+
+  app.get("/api/payment-config", async (req, res) => {
+    const { keyId, keySecret } = await getRazorpayCredentials();
     
     // Diagnostic info
     console.log("Payment Config Request:", {
       foundKey: !!keyId,
-      foundSecret: hasSecret
+      foundSecret: !!keySecret
     });
 
     res.json({ 
       razorpayKeyId: keyId || null,
       diagnostics: {
         serverHasViteKey: !!keyId,
-        serverHasSecretKey: hasSecret
+        serverHasSecretKey: !!keySecret
       }
     });
   });
 
   app.post("/api/create-razorpay-order", async (req, res) => {
-    // Check for both prefixed and non-prefixed versions, and common variations
-    let keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim();
-    let keySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)?.trim();
-
-    // Fallback: Try to load from Firestore if missing
-    if (!keyId || !keySecret) {
-      try {
-        console.log("Keys missing in env, attempting to load from Firestore...");
-        const settings = await resilientGetSettings();
-        if (settings && settings.razorpayKeyId && settings.razorpayKeySecret) {
-          keyId = settings.razorpayKeyId.trim();
-          keySecret = settings.razorpayKeySecret.trim();
-          console.log("Loaded Razorpay keys from settings");
-        }
-      } catch (err: any) {
-        console.error("Error loading settings from Firestore fallback:", err.message);
-      }
-    }
+    const { keyId, keySecret } = await getRazorpayCredentials();
 
     if (!keyId || !keySecret) {
-      console.error("Razorpay keys missing in environment. Available env keys:", Object.keys(process.env).filter(k => k.includes('RAZORPAY')));
+      console.error("Razorpay keys missing in environment/settings. Available env keys:", Object.keys(process.env).filter(k => k.includes('RAZORPAY')));
       return res.status(500).json({ 
-        error: "Razorpay API is not configured on the server. Please ensure you have added VITE_RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to your Secrets in AI Studio, and then click 'Deploy' to apply the changes." 
+        error: "Razorpay API is not configured on the server. Please ensure you have added VITE_RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to your Settings or Secrets in AI Studio, and then click 'Deploy' to apply the changes." 
       });
     }
 
@@ -3380,33 +3420,8 @@ async function startServer() {
     const { to, subject, html, from, fromName: providedFromName, replyTo } = req.body;
     
     try {
-      // 1. Fetch Latest Settings (Caching handles performance)
-      const now = Date.now();
-      if (!cachedSettings || (now - lastSettingsFetch > SETTINGS_CACHE_TTL)) {
-        try {
-          if (db && isDbWriteable !== false) {
-            const settingsSnap = await db.collection('settings').limit(1).get();
-            if (!settingsSnap.empty) {
-              cachedSettings = settingsSnap.docs[0].data();
-              lastSettingsFetch = now;
-            } else {
-              lastSettingsFetch = now;
-            }
-          }
-        } catch (dbErr: any) {
-          console.error("Firestore settings fetch failed:", dbErr.message);
-          lastSettingsFetch = now - (SETTINGS_CACHE_TTL - 120000); 
-        }
-      }
-
-      const effectiveSettings = cachedSettings || {
-        storeName: 'The Ruby',
-        fromEmail: process.env.RESEND_FROM_EMAIL || DEFAULT_FROM_EMAIL,
-        resendApiKey: process.env.RESEND_API_KEY,
-        smtpUser: process.env.SMTP_USER,
-        smtpPass: process.env.SMTP_PASS,
-        otpMonthlyLimit: 9999
-      };
+      // 1. Fetch Latest Settings (Caching handles performance resiliently)
+      const effectiveSettings = await resilientGetSettings();
 
       // 2. USAGE LIMIT CHECK (Safety Guard for Billing)
       const monthlyLimit = effectiveSettings.otpMonthlyLimit || 9999;

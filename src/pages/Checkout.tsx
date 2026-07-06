@@ -621,16 +621,26 @@ export default function Checkout() {
             }
           };
 
-          // AWAIT all 4 parallel notification/email tasks to settle safely (success or failure) before navigating
-          try {
-            await Promise.allSettled([
+          // If Cash on Delivery, trigger emails/notifications asynchronously in the background so it completes in milliseconds
+          if (selectedPayment === 'cod') {
+            Promise.allSettled([
               sendCustomerPush(),
               sendAdminPush(),
               sendCustomerEmail(),
               sendAdminEmail()
-            ]);
-          } catch (settledError) {
-            console.error("Promise.allSettled for critical communications encountered an error:", settledError);
+            ]).catch(err => console.error("Background notification tasks failed:", err));
+          } else {
+            // AWAIT all 4 parallel notification/email tasks to settle safely (success or failure) before navigating for UPI payments
+            try {
+              await Promise.allSettled([
+                sendCustomerPush(),
+                sendAdminPush(),
+                sendCustomerEmail(),
+                sendAdminEmail()
+              ]);
+            } catch (settledError) {
+              console.error("Promise.allSettled for critical communications encountered an error:", settledError);
+            }
           }
 
           // Clear checkout state & cart

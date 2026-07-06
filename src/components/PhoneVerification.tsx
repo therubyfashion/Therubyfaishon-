@@ -368,8 +368,9 @@ export default function PhoneVerification({ onSuccess, onClose, prefillPhone }: 
                     <input 
                       key={idx}
                       id={`otp-${idx}`}
-                      type="text"
+                      type="tel"
                       inputMode="numeric"
+                      pattern="[0-9]*"
                       maxLength={1}
                       value={digit}
                       onChange={(e) => handleOtpChange(idx, e.target.value)}

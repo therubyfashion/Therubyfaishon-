@@ -200,8 +200,9 @@ export default function EmailVerification({ onSuccess, onClose, email, userId }:
                     <input 
                       key={idx}
                       id={`email-otp-${idx}`}
-                      type="text"
+                      type="tel"
                       inputMode="numeric"
+                      pattern="[0-9]*"
                       maxLength={1}
                       value={digit}
                       onChange={(e) => handleOtpChange(idx, e.target.value)}

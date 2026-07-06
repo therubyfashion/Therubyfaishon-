@@ -23,8 +23,67 @@ export default function OrderSuccess() {
   const [showPassword, setShowPassword] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
 
-  // Track purchased behavior
+  // Track purchased behavior and play success sound
   React.useEffect(() => {
+    // 1. Play GPay/PhonePe-style synthesized success chime
+    try {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioContext) {
+        const ctx = new AudioContext();
+        const now = ctx.currentTime;
+        
+        // Tone 1: Base warm start (E5)
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(659.25, now);
+        gain1.gain.setValueAtTime(0.12, now);
+        gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.15);
+
+        // Tone 2: Mid rise (G5)
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(783.99, now + 0.08);
+        gain2.gain.setValueAtTime(0.12, now + 0.08);
+        gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.start(now + 0.08);
+        osc2.stop(now + 0.25);
+
+        // Tone 3: High resonant climax (C6)
+        const osc3 = ctx.createOscillator();
+        const gain3 = ctx.createGain();
+        osc3.type = 'sine';
+        osc3.frequency.setValueAtTime(1046.50, now + 0.16);
+        gain3.gain.setValueAtTime(0.20, now + 0.16);
+        gain3.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
+        osc3.connect(gain3);
+        gain3.connect(ctx.destination);
+        osc3.start(now + 0.16);
+        osc3.stop(now + 0.85);
+        
+        // Tone 4: Sub-harmony (C5) for warm depth
+        const oscSub = ctx.createOscillator();
+        const gainSub = ctx.createGain();
+        oscSub.type = 'sine';
+        oscSub.frequency.setValueAtTime(523.25, now + 0.16);
+        gainSub.gain.setValueAtTime(0.10, now + 0.16);
+        gainSub.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+        oscSub.connect(gainSub);
+        gainSub.connect(ctx.destination);
+        oscSub.start(now + 0.16);
+        oscSub.stop(now + 0.7);
+      }
+    } catch (e) {
+      console.warn("Failed to play synthesized success audio chime:", e);
+    }
+
     const socket = io();
     socket.emit('checkpoint_reached', {
       type: 'purchased',
@@ -187,6 +246,19 @@ export default function OrderSuccess() {
             transition={{ type: "spring", stiffness: 220, damping: 14, delay: 0.15 }}
             className="w-32 h-32 bg-[#107C41]/10 rounded-full flex items-center justify-center mx-auto relative"
           >
+            {/* Concentric expanding ripples matching the audio chime beats */}
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0.6 }}
+              animate={{ scale: [1, 2.4], opacity: [0.5, 0] }}
+              transition={{ duration: 1.4, ease: "easeOut", delay: 0.16, repeat: 3, repeatType: "loop" }}
+              className="absolute inset-0 bg-[#107C41]/25 rounded-full"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0.6 }}
+              animate={{ scale: [1, 1.9], opacity: [0.4, 0] }}
+              transition={{ duration: 1.2, ease: "easeOut", delay: 0.28, repeat: 3, repeatType: "loop" }}
+              className="absolute inset-0 bg-[#107C41]/15 rounded-full"
+            />
             <div className="absolute inset-0 bg-[#107C41] rounded-full blur-2xl opacity-20 animate-pulse" />
             <motion.div 
               initial={{ scale: 0 }}

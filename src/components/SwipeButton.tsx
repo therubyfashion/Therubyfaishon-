@@ -121,10 +121,12 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
         <motion.div
           drag="x"
           dragConstraints={{ left: 0, right: swipeRange }}
-          dragElastic={0.12}
+          dragElastic={0.05}
           onDragEnd={handleDragEnd}
           style={{ x }}
-          className="absolute left-2 top-2 w-[56px] h-[56px] bg-ruby rounded-[18px] shadow-lg shadow-ruby/20 flex items-center justify-center z-10 cursor-grab active:cursor-grabbing hover:scale-105 active:scale-95 transition-all duration-150"
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          className="absolute left-2 top-2 w-[56px] h-[56px] bg-ruby rounded-[18px] shadow-lg shadow-ruby/20 flex items-center justify-center z-10 cursor-grab active:cursor-grabbing"
         >
           <motion.div
             animate={{ x: [0, 4, 0] }}
