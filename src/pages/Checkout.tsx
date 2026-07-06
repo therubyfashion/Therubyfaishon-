@@ -641,7 +641,7 @@ export default function Checkout() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  to: finalOrderData.address?.email,
+                  to: finalOrderData.address?.email || finalOrderData.email || '',
                   from: settingsData.fromEmail || settingsData.smtpUser || undefined,
                   replyTo: settingsData.supportEmail || undefined,
                   subject: `Order Confirmed! ${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`} ✨`,
@@ -680,7 +680,7 @@ export default function Checkout() {
                     <div style="font-family: sans-serif; padding: 20px;">
                       <h2>New Order Received: ${finalOrderData.orderId}</h2>
                       <p><strong>Customer:</strong> ${finalOrderData.customerName}</p>
-                      <p><strong>Email:</strong> ${finalOrderData.address?.email}</p>
+                      <p><strong>Email:</strong> ${finalOrderData.address?.email || finalOrderData.email || ''}</p>
                       <p><strong>Amount:</strong> ₹${Number(finalOrderData.total || 0).toLocaleString()}</p>
                       <p><strong>Payment:</strong> ${finalOrderData.paymentMethod}</p>
                       <br/>
