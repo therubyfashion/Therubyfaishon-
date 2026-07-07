@@ -34,21 +34,35 @@ export const sendNotification = async (data: {
 
     if (data.userId) {
       // Targeted push for specific user
-      fetch('/api/send-user-push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(pushData)
-      }).catch(e => console.error("Push failed:", e));
+      try {
+        const response = await fetch('/api/send-user-push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(pushData)
+        });
+        if (!response.ok) {
+          console.warn("Targeted push notification returned non-ok status:", response.status);
+        }
+      } catch (e) {
+        console.error("Push failed:", e);
+      }
     } else {
       // Broadcast push for global alerts
-      fetch('/api/send-push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...pushData,
-          type: 'all'
-        })
-      }).catch(e => console.error("Broadcast push failed:", e));
+      try {
+        const response = await fetch('/api/send-push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...pushData,
+            type: 'all'
+          })
+        });
+        if (!response.ok) {
+          console.warn("Broadcast push notification returned non-ok status:", response.status);
+        }
+      } catch (e) {
+        console.error("Broadcast push failed:", e);
+      }
     }
   } catch (error) {
     console.error("Error sending notification:", error);

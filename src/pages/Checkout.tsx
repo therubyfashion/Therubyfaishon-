@@ -544,8 +544,25 @@ export default function Checkout() {
           };
 
           const sendAdminPush = async () => {
-            // Admin push and customer push are handled server-side in the central onSnapshot listener
-            console.log("Central push notifications are triggered asynchronously from the Firestore background listener");
+            try {
+              // Direct client-side trigger to ensure admin push notification is delivered 100% reliably in real time!
+              const res = await fetch('/api/send-admin-push', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  title: 'New Order Received! 🛍️',
+                  body: `Order ${finalOrderData.orderId} of ₹${Number(finalOrderData.total).toLocaleString()} placed by ${finalOrderData.customerName}.`,
+                  url: '/admin?tab=orders'
+                })
+              });
+              if (res.ok) {
+                console.log("Admin push notification sent successfully from client-side fallback");
+              } else {
+                console.warn("Admin push notification from client-side fallback returned non-ok status:", res.status);
+              }
+            } catch (pushErr) {
+              console.error("Failed to trigger client-side admin push notification fallback:", pushErr);
+            }
           };
 
           const sendCustomerEmail = async () => {
@@ -621,26 +638,16 @@ export default function Checkout() {
             }
           };
 
-          // If Cash on Delivery, trigger emails/notifications asynchronously in the background so it completes in milliseconds
-          if (selectedPayment === 'cod') {
-            Promise.allSettled([
+          // AWAIT all 4 parallel notification/email tasks to settle safely (success or failure) before navigating to ensure requests are not aborted by the browser
+          try {
+            await Promise.allSettled([
               sendCustomerPush(),
               sendAdminPush(),
               sendCustomerEmail(),
               sendAdminEmail()
-            ]).catch(err => console.error("Background notification tasks failed:", err));
-          } else {
-            // AWAIT all 4 parallel notification/email tasks to settle safely (success or failure) before navigating for UPI payments
-            try {
-              await Promise.allSettled([
-                sendCustomerPush(),
-                sendAdminPush(),
-                sendCustomerEmail(),
-                sendAdminEmail()
-              ]);
-            } catch (settledError) {
-              console.error("Promise.allSettled for critical communications encountered an error:", settledError);
-            }
+            ]);
+          } catch (settledError) {
+            console.error("Promise.allSettled for critical communications encountered an error:", settledError);
           }
 
           // Clear checkout state & cart
