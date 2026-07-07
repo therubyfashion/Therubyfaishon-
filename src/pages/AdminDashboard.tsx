@@ -3461,7 +3461,7 @@ export default function AdminDashboard() {
         const userData = userSnap.data();
         
         // 1. Send Push Notification
-        if (userData?.onesignalId) {
+        try {
           await fetch('/api/send-user-push', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3472,6 +3472,8 @@ export default function AdminDashboard() {
               url: '/cart'
             })
           });
+        } catch (pushErr) {
+          console.error("Failed to send push notification:", pushErr);
         }
 
         // 2. Save to Database Notifications Collection
@@ -3550,7 +3552,7 @@ export default function AdminDashboard() {
             const userData = userSnap.data();
             
             // Push Notification
-            if (userData?.onesignalId) {
+            try {
               await fetch('/api/send-user-push', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -3561,6 +3563,8 @@ export default function AdminDashboard() {
                   url: '/cart'
                 })
               });
+            } catch (pushErr) {
+              console.error("Failed to send push notification:", pushErr);
             }
 
             // Database Notification

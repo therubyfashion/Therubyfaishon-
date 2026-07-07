@@ -524,7 +524,7 @@ export default function Checkout() {
           const sendCustomerPush = async () => {
             if (user?.uid) {
               try {
-                // Log inside in-app notifications history (kept client-side for immediate web UI feedback)
+                // Log inside in-app notifications history and trigger the actual push notification (skipPush = false)
                 await sendNotification({
                   userId: user.uid,
                   title: 'Order Placed!',
@@ -532,8 +532,8 @@ export default function Checkout() {
                   type: 'order',
                   iconType: 'package',
                   link: '/my-orders'
-                }, true);
-                console.log("Customer in-app notification logging succeeded");
+                }, false);
+                console.log("Customer in-app notification logging and push notification triggered successfully");
               } catch (notifErr: any) {
                 console.error("❌ [DIAGNOSTIC] Customer in-app notification logging failed! Detailed Error:", {
                   message: notifErr.message || notifErr,
@@ -557,7 +557,7 @@ export default function Checkout() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  to: finalOrderData.address?.email || finalOrderData.email || '',
+                  to: finalOrderData.email || finalOrderData.address?.email || user?.email || '',
                   from: settingsData.fromEmail || settingsData.smtpUser || undefined,
                   replyTo: settingsData.supportEmail || undefined,
                   subject: `Order Confirmed! ${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`} ✨`,
