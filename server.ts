@@ -804,7 +804,10 @@ export const NotificationService = {
         url: url,
         android_accent_color: "A11B35",
         android_led_color: "A11B35",
-        android_visibility: 1
+        android_visibility: 1,
+        android_sound: "shopify",
+        ios_sound: "shopify.wav",
+        sound: "shopify.wav",
       };
 
       if (imageUrl) {
@@ -3534,20 +3537,25 @@ async function startServer() {
           
           let hint = "Gmail login failed. ";
           if (smtpErr.message.includes('Invalid login') || smtpErr.message.includes('Username and Password not accepted')) {
-            hint += "Your 'App Password' is likely incorrect. Create a new 16-letter code in your Google Account.";
+            hint += "Your 'App Password' is likely incorrect. Create a new 16-letter code in your Google Account Settings.";
           } else {
             hint += smtpErr.message;
           }
 
-          return res.status(500).json({ 
-            error: "Gmail Delivery Failed", 
-            message: smtpErr.message,
-            hint: hint 
-          });
+          // If Resend API Key is available, fallback to Resend!
+          if (apiKey) {
+            console.warn("⚠️ Gmail SMTP failed. Falling back to Resend API since a key is configured...");
+          } else {
+            return res.status(500).json({ 
+              error: "Gmail Delivery Failed", 
+              message: smtpErr.message,
+              hint: hint 
+            });
+          }
         }
       }
 
-      // 4. Default to Resend API if SMTP not configured
+      // 4. Default to Resend API if SMTP not configured or failed with fallback available
       if (!apiKey) {
         console.error("Email configuration missing (No SMTP and no API Key).");
         return res.status(400).json({ 
@@ -3576,39 +3584,46 @@ async function startServer() {
         }
 
         try {
+          console.log(`Resend: Attempting to send to ${recipient} from ${formattedFrom}...`);
           let { data, error } = await dynamicResend.emails.send(emailPayload);
           
           if (error) {
-            const errorMessage = (error as any).message || "Resend failed with primary email";
-            const errLower = errorMessage.toLowerCase();
-            
-            if (errLower.includes("not verified") || 
-                errLower.includes("onboarding") || 
-                errLower.includes("authorized") || 
-                errLower.includes("testing emails") ||
-                errLower.includes("403") ||
-                errLower.includes("restricted") ||
-                errLower.includes("domain")) {
-              
-              console.warn(`⚠️ Resend domain verification error for ${recipient}. Attempting temporary fallback using onboarding@resend.dev...`);
-              const fallbackPayload = {
-                ...emailPayload,
-                from: `"${fromName}" <onboarding@resend.dev>`
-              };
-              const fallbackResult = await dynamicResend.emails.send(fallbackPayload);
-              if (!fallbackResult.error) {
-                console.log(`✅ Resend fallback transmission succeeded for ${recipient}! ID:`, fallbackResult.data?.id);
-                return { recipient, success: true, id: fallbackResult.data?.id };
-              } else {
-                console.error(`❌ Resend onboarding fallback failed for ${recipient}:`, fallbackResult.error);
-                return { recipient, success: false, error: fallbackResult.error };
-              }
+            console.warn(`⚠️ Resend primary send error for ${recipient}:`, error);
+            console.log(`Attempting onboarding@resend.dev fallback for ${recipient}...`);
+            const fallbackPayload = {
+              ...emailPayload,
+              from: `"${fromName}" <onboarding@resend.dev>`
+            };
+            const fallbackResult = await dynamicResend.emails.send(fallbackPayload);
+            if (!fallbackResult.error) {
+              console.log(`✅ Resend onboarding fallback succeeded for ${recipient}! ID:`, fallbackResult.data?.id);
+              return { recipient, success: true, id: fallbackResult.data?.id };
+            } else {
+              console.error(`❌ Resend onboarding fallback also failed for ${recipient}:`, fallbackResult.error);
+              return { recipient, success: false, error: fallbackResult.error };
             }
-            return { recipient, success: false, error };
           }
+          console.log(`✅ Resend primary send succeeded for ${recipient}! ID:`, data?.id);
           return { recipient, success: true, id: data?.id };
         } catch (apiErr: any) {
-          return { recipient, success: false, error: apiErr.message };
+          console.warn(`⚠️ Resend primary send threw exception for ${recipient}: ${apiErr.message}. Trying onboarding@resend.dev fallback...`);
+          try {
+            const fallbackPayload = {
+              ...emailPayload,
+              from: `"${fromName}" <onboarding@resend.dev>`
+            };
+            const fallbackResult = await dynamicResend.emails.send(fallbackPayload);
+            if (!fallbackResult.error) {
+              console.log(`✅ Resend onboarding fallback succeeded after exception for ${recipient}! ID:`, fallbackResult.data?.id);
+              return { recipient, success: true, id: fallbackResult.data?.id };
+            } else {
+              console.error(`❌ Resend onboarding fallback after exception failed for ${recipient}:`, fallbackResult.error);
+              return { recipient, success: false, error: fallbackResult.error };
+            }
+          } catch (fallbackEx: any) {
+            console.error(`❌ Resend fallback threw exception for ${recipient}:`, fallbackEx.message);
+            return { recipient, success: false, error: apiErr.message };
+          }
         }
       });
 
@@ -3907,6 +3922,9 @@ async function startServer() {
           en: title || "New Order",
         },
         url: url || '/',
+        android_sound: "shopify",
+        ios_sound: "shopify.wav",
+        sound: "shopify.wav",
       };
 
       if (imageUrl) {

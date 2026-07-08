@@ -544,6 +544,9 @@ export default function Checkout() {
                   link: '/my-orders'
                 }, false);
 
+                // Add a deliberate 3-second delay to prevent the two push notifications from collapsing or overwriting each other on the device
+                await new Promise(resolve => setTimeout(resolve, 3000));
+
                 // Second customer notification (🛍️ Order Placed Successfully!)
                 await sendNotification({
                   userId: user.uid,
