@@ -3481,12 +3481,22 @@ async function startServer() {
         requestBaseHost
       );
 
-      console.log(`📧 Routing Email: To=${to}, From=${formattedFrom}, Subject=${subject}`);
+      // Parse recipients into a clean array
+      let recipientList: string[] = [];
+      if (typeof to === 'string') {
+        recipientList = to.split(',').map(e => e.trim()).filter(Boolean);
+      } else if (Array.isArray(to)) {
+        recipientList = to.map(e => String(e).trim()).filter(Boolean);
+      } else {
+        recipientList = [String(to).trim()];
+      }
+
+      console.log(`📧 Routing Email: To=${recipientList.join(', ')}, From=${formattedFrom}, Subject=${subject}`);
       console.log(`Email Service Selection: ${smtpUser ? 'Gmail SMTP' : (apiKey ? 'Resend API' : 'NONE')}`);
       console.log(`DEBUG: Target Verified Domain is ${VERIFIED_DOMAIN}`);
 
       if (smtpUser && smtpPass) {
-        console.log("📨 Normal Gmail SMTP mode: Sending OTP...");
+        console.log("📨 Normal Gmail SMTP mode: Sending email...");
         
         const cleanUser = String(smtpUser).trim();
         const cleanPass = String(smtpPass).replace(/\s/g, ''); 
@@ -3502,7 +3512,7 @@ async function startServer() {
         try {
           const result = await transporter.sendMail({
             from: `"${fromName}" <${cleanUser}>`,
-            to: Array.isArray(to) ? to.join(', ') : to,
+            to: recipientList.join(', '),
             subject: subject,
             html: finalHtml,
             replyTo: replyTo || cleanUser
@@ -3529,7 +3539,6 @@ async function startServer() {
             hint += smtpErr.message;
           }
 
-          // Force stop here if SMTP was intended. No fallback to Resend to avoid confusing 403 errors.
           return res.status(500).json({ 
             error: "Gmail Delivery Failed", 
             message: smtpErr.message,
@@ -3547,49 +3556,84 @@ async function startServer() {
       }
 
       const dynamicResend = new Resend(apiKey);
-      
-      const emailPayload: any = {
-        from: formattedFrom,
-        to: Array.isArray(to) ? to : [to],
-        subject: subject,
-        html: finalHtml,
-      };
-
-      if (replyTo) {
-        emailPayload.reply_to = replyTo;
-      }
-
       console.log("--- Resend API Attempt ---");
-      let { data, error } = await dynamicResend.emails.send(emailPayload);
-      
-      if (error) {
-        const errorMessage = (error as any).message || "Resend failed with primary email";
-        const errLower = errorMessage.toLowerCase();
-        
-        if (errLower.includes("not verified") || 
-            errLower.includes("onboarding") || 
-            errLower.includes("authorized") || 
-            errLower.includes("testing emails") ||
-            errLower.includes("403") ||
-            errLower.includes("restricted") ||
-            errLower.includes("domain")) {
-          
-          console.warn("⚠️ Resend domain verification error. Attempting temporary fallback using onboarding@resend.dev...");
-          const fallbackPayload = {
-            ...emailPayload,
-            from: `"${fromName}" <onboarding@resend.dev>`
-          };
-          const fallbackResult = await dynamicResend.emails.send(fallbackPayload);
-          if (!fallbackResult.error) {
-            console.log("✅ Resend fallback transmission succeeded! ID:", fallbackResult.data?.id);
-            data = fallbackResult.data;
-            error = null;
-          } else {
-            console.error("❌ Resend onboarding fallback failed too:", fallbackResult.error);
-            error = fallbackResult.error;
-          }
+
+      // Send to recipients individually in parallel so that unverified errors on one email address
+      // do NOT block delivery to verified/onboarding developer accounts (e.g. testing checkout)
+      let finalData: any = null;
+      let finalError: any = null;
+
+      const sendPromises = recipientList.map(async (recipient) => {
+        const emailPayload: any = {
+          from: formattedFrom,
+          to: [recipient],
+          subject: subject,
+          html: finalHtml,
+        };
+
+        if (replyTo) {
+          emailPayload.reply_to = replyTo;
         }
+
+        try {
+          let { data, error } = await dynamicResend.emails.send(emailPayload);
+          
+          if (error) {
+            const errorMessage = (error as any).message || "Resend failed with primary email";
+            const errLower = errorMessage.toLowerCase();
+            
+            if (errLower.includes("not verified") || 
+                errLower.includes("onboarding") || 
+                errLower.includes("authorized") || 
+                errLower.includes("testing emails") ||
+                errLower.includes("403") ||
+                errLower.includes("restricted") ||
+                errLower.includes("domain")) {
+              
+              console.warn(`⚠️ Resend domain verification error for ${recipient}. Attempting temporary fallback using onboarding@resend.dev...`);
+              const fallbackPayload = {
+                ...emailPayload,
+                from: `"${fromName}" <onboarding@resend.dev>`
+              };
+              const fallbackResult = await dynamicResend.emails.send(fallbackPayload);
+              if (!fallbackResult.error) {
+                console.log(`✅ Resend fallback transmission succeeded for ${recipient}! ID:`, fallbackResult.data?.id);
+                return { recipient, success: true, id: fallbackResult.data?.id };
+              } else {
+                console.error(`❌ Resend onboarding fallback failed for ${recipient}:`, fallbackResult.error);
+                return { recipient, success: false, error: fallbackResult.error };
+              }
+            }
+            return { recipient, success: false, error };
+          }
+          return { recipient, success: true, id: data?.id };
+        } catch (apiErr: any) {
+          return { recipient, success: false, error: apiErr.message };
+        }
+      });
+
+      const sendResults = await Promise.allSettled(sendPromises);
+      console.log("Individual Resend recipient results:", sendResults);
+
+      // Consolidate status: If at least one email sent successfully, consider it successful
+      const successfulSends = sendResults.filter(
+        (r) => r.status === 'fulfilled' && r.value.success
+      ) as any[];
+
+      if (successfulSends.length > 0) {
+        finalData = { id: successfulSends[0].value.id, results: sendResults };
+        finalError = null;
+      } else {
+        const failedSends = sendResults.filter(
+          (r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.success)
+        ) as any[];
+        finalError = failedSends.length > 0 
+          ? (failedSends[0].status === 'rejected' ? { message: failedSends[0].reason } : failedSends[0].value.error)
+          : { message: "All email transmissions failed." };
       }
+
+      let data = finalData;
+      let error = finalError;
 
       if (!error && db && isDbWriteable !== false) {
         const currentMonth = new Date().toISOString().substring(0, 7);
@@ -3813,7 +3857,7 @@ async function startServer() {
 
   // Send notification to admins (for new orders)
   app.post("/api/send-admin-push", async (req, res) => {
-    const { title, body, imageUrl, url } = req.body;
+    const { title, body, imageUrl, url, userId } = req.body;
     
     try {
       console.log("OneSignal: Constructing push to admins...");
@@ -3833,6 +3877,25 @@ async function startServer() {
           }
         } catch (dbErr: any) {
           console.warn("OneSignal: Failed to query admins from Firestore:", dbErr.message);
+        }
+
+        // Support testing: Add the current user's device if they are placing the order and testing
+        if (userId) {
+          try {
+            const userDoc = await db.collection('users').doc(String(userId)).get();
+            if (userDoc.exists) {
+              const uData = userDoc.data();
+              if (uData && uData.onesignalId) {
+                const pid = String(uData.onesignalId).trim();
+                if (!adminPlayerIds.includes(pid)) {
+                  adminPlayerIds.push(pid);
+                  console.log(`OneSignal: Appended testing user ${userId}'s device ${pid} to admin list.`);
+                }
+              }
+            }
+          } catch (uErr: any) {
+            console.warn("OneSignal testing user lookup failed:", uErr.message);
+          }
         }
       }
 

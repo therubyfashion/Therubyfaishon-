@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
-import { collection, addDoc, getDocs, doc, runTransaction, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, runTransaction, getDoc, deleteDoc, updateDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { toast } from 'sonner';
 import { cn, syncToGoogleSheets } from '../lib/utils';
@@ -524,16 +524,37 @@ export default function Checkout() {
           const sendCustomerPush = async () => {
             if (user?.uid) {
               try {
-                // Log inside in-app notifications history and trigger the actual push notification (skipPush = false)
+                // Client-side locking: write the order_placed lock to Firestore immediately so the background snapshot listener skips sending a duplicate notification
+                try {
+                  await setDoc(doc(db, 'notification_locks', `${finalOrderData.orderId}_order_placed`), {
+                    lockedAt: new Date().toISOString()
+                  });
+                  console.log("Customer push lock acquired successfully on client side.");
+                } catch (lockErr) {
+                  console.warn("Could not write customer push lock on client:", lockErr);
+                }
+
+                // First customer notification (🎉 Order Confirmed!)
                 await sendNotification({
                   userId: user.uid,
-                  title: 'Order Placed!',
-                  body: `Your order ${finalOrderData.orderId} of ₹${Number(finalOrderData.total).toLocaleString()} has been placed successfully.`,
+                  title: '🎉 Order Confirmed!',
+                  body: `Hi ${finalOrderData.customerName}, your order ${finalOrderData.orderId} of ₹${Number(finalOrderData.total).toLocaleString()} has been successfully placed. We are preparing it now.`,
                   type: 'order',
                   iconType: 'package',
                   link: '/my-orders'
                 }, false);
-                console.log("Customer in-app notification logging and push notification triggered successfully");
+
+                // Second customer notification (🛍️ Order Placed Successfully!)
+                await sendNotification({
+                  userId: user.uid,
+                  title: '🛍️ Order Placed Successfully!',
+                  body: `Your order ${finalOrderData.orderId} is being processed. View tracking details in My Orders.`,
+                  type: 'order',
+                  iconType: 'package',
+                  link: '/my-orders'
+                }, false);
+
+                console.log("Customer in-app notification logging and BOTH push notifications triggered successfully");
               } catch (notifErr: any) {
                 console.error("❌ [DIAGNOSTIC] Customer in-app notification logging failed! Detailed Error:", {
                   message: notifErr.message || notifErr,
@@ -545,14 +566,29 @@ export default function Checkout() {
 
           const sendAdminPush = async () => {
             try {
+              // Client-side locking: write the admin push locks to Firestore immediately to prevent duplicate admin push notifications from the background snapshot listener
+              try {
+                await setDoc(doc(db, 'notification_locks', `${finalOrderData.orderId}_admin_new_order`), {
+                  lockedAt: new Date().toISOString()
+                });
+                await setDoc(doc(db, 'notification_locks', `${finalOrderData.orderId}_admin_high_value_order`), {
+                  lockedAt: new Date().toISOString()
+                });
+                console.log("Admin push locks acquired successfully on client side.");
+              } catch (lockErr) {
+                console.warn("Could not write admin push locks on client:", lockErr);
+              }
+
               // Direct client-side trigger to ensure admin push notification is delivered 100% reliably in real time!
+              // Also pass the current logged-in userId to support instant delivery on the tester's device!
               const res = await fetch('/api/send-admin-push', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   title: 'New Order Received! 🛍️',
                   body: `Order ${finalOrderData.orderId} of ₹${Number(finalOrderData.total).toLocaleString()} placed by ${finalOrderData.customerName}.`,
-                  url: '/admin?tab=orders'
+                  url: '/admin?tab=orders',
+                  userId: user?.uid
                 })
               });
               if (res.ok) {
