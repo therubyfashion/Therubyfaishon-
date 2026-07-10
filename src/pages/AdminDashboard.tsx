@@ -1201,6 +1201,9 @@ export default function AdminDashboard() {
     fast2smsTestPhone: '',
     oneSignalAppId: '',
     oneSignalRestApiKey: '',
+    textbeeApiKey: '',
+    textbeeDeviceId: '',
+    textbeeOtpEnabled: false,
     footerSocials: {
       instagram: '',
       x: '',
@@ -2100,7 +2103,10 @@ export default function AdminDashboard() {
           oneSignalAppId: finalizedSettings.oneSignalAppId,
           oneSignalRestApiKey: finalizedSettings.oneSignalRestApiKey,
           smtpUser: finalizedSettings.smtpUser,
-          smtpPass: finalizedSettings.smtpPass
+          smtpPass: finalizedSettings.smtpPass,
+          textbeeApiKey: finalizedSettings.textbeeApiKey,
+          textbeeDeviceId: finalizedSettings.textbeeDeviceId,
+          textbeeOtpEnabled: finalizedSettings.textbeeOtpEnabled
         })
       });
       
@@ -2187,6 +2193,45 @@ export default function AdminDashboard() {
       toast.error('Error sending test email');
     } finally {
       setIsTestingEmail(false);
+    }
+  };
+
+  const [testPhone, setTestPhone] = useState('');
+  const [isTestingSms, setIsTestingSms] = useState(false);
+  const handleSendTestSms = async () => {
+    if (!settings.textbeeApiKey || !settings.textbeeDeviceId) {
+      toast.error('Please enter both Textbee API Key and Device ID first.');
+      return;
+    }
+    if (!testPhone) {
+      toast.error('Please enter a test phone number.');
+      return;
+    }
+    setIsTestingSms(true);
+    try {
+      // Save settings first
+      await handleSaveSettings();
+
+      const response = await fetch('/api/send-phone-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber: testPhone })
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        toast.success(`Test SMS OTP dispatched successfully to ${testPhone}!`);
+      } else {
+        toast.error(data.message || data.error || 'Failed to dispatch test SMS OTP');
+        if (data.testingOtp) {
+          toast.info(`[DEV FALLBACK] OTP is logged: ${data.testingOtp}`, { duration: 8000 });
+        }
+      }
+    } catch (error: any) {
+      console.error('Error testing SMS:', error);
+      toast.error('Network error occurred during SMS OTP test.');
+    } finally {
+      setIsTestingSms(false);
     }
   };
 
@@ -4850,6 +4895,7 @@ export default function AdminDashboard() {
                             { id: 'firebase', label: 'Firebase Status', icon: Cloud },
                             { id: 'sheets', label: 'Google Sheet URL', icon: Database },
                             { id: 'email', label: 'Email Settings', icon: Mail },
+                            { id: 'sms', label: 'SMS & OTP (Textbee)', icon: Smartphone },
                             { id: 'security', label: 'Security & Limits', icon: Shield },
                             { id: 'sound', label: 'Notification Sound', icon: Volume2 },
                             { id: 'seo', label: 'SEO & Branding', icon: Globe },
@@ -9755,6 +9801,118 @@ export default function AdminDashboard() {
                         </div>
                       </motion.div>
                     )}
+
+                    {activeSettingsTab === 'sms' && (
+                      <motion.div 
+                        key="sms"
+                        initial={{ opacity: 0, x: 10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -10 }}
+                        className="space-y-6"
+                      >
+                        <h3 className="text-lg font-bold text-[#1A2C54] flex items-center">
+                          <Smartphone size={20} className="mr-2 text-ruby" /> SMS & OTP Configuration (Textbee)
+                        </h3>
+                        <div className="space-y-6">
+                          <div className="p-5 border border-gray-100 rounded-3xl space-y-4">
+                            <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-wider flex items-center gap-2">
+                              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                              Service: Textbee SMS Gateway (Free Android SMS)
+                            </h4>
+                            
+                            <div className="bg-green-50 border border-green-100 rounded-2xl p-4 space-y-2">
+                              <h4 className="text-[11px] font-bold text-green-700 uppercase tracking-widest flex items-center">
+                                <Info size={14} className="mr-2" /> Textbee Setup Instructions
+                              </h4>
+                              <ul className="text-[10px] text-green-600 space-y-1 font-medium leading-relaxed">
+                                <li>• Go to <a href="https://textbee.dev" target="_blank" rel="noopener noreferrer" className="underline font-bold">textbee.dev</a> and log in.</li>
+                                <li>• Install the Textbee Android app on your phone and register the device.</li>
+                                <li>• Copy your <b>API Key</b> and your <b>Device ID</b> from the dashboard.</li>
+                                <li>• Enable the OTP verification toggle below to require OTP verification when saving addresses during checkout.</li>
+                              </ul>
+                            </div>
+
+                            {/* OTP Enable Toggle */}
+                            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
+                              <div>
+                                <h5 className="text-xs font-bold text-[#1A2C54]">Enable Phone OTP Verification</h5>
+                                <p className="text-[10px] text-gray-400 font-medium">Require customer mobile number verification before saving an address</p>
+                              </div>
+                              <label className="relative inline-flex items-center cursor-pointer">
+                                <input 
+                                  type="checkbox" 
+                                  checked={settings.textbeeOtpEnabled || false}
+                                  onChange={(e) => setSettings({...settings, textbeeOtpEnabled: e.target.checked})}
+                                  className="sr-only peer"
+                                />
+                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-ruby"></div>
+                              </label>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Textbee API Key</label>
+                                <input 
+                                  type="password" 
+                                  placeholder="Enter Textbee API Key"
+                                  value={settings.textbeeApiKey || ''}
+                                  onChange={(e) => setSettings({...settings, textbeeApiKey: e.target.value})}
+                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Textbee Device ID</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="Enter Textbee Device ID"
+                                  value={settings.textbeeDeviceId || ''}
+                                  onChange={(e) => setSettings({...settings, textbeeDeviceId: e.target.value})}
+                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Test SMS dispatch block */}
+                          <div className="p-5 border border-ruby/10 bg-ruby/[0.01] rounded-3xl space-y-4">
+                            <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-wider">
+                              Test Gateway SMS Connection
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Test Phone Number</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="+919876543210"
+                                  value={testPhone}
+                                  onChange={(e) => setTestPhone(e.target.value)}
+                                  className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
+                                />
+                              </div>
+                              <div className="flex items-end">
+                                <button 
+                                  onClick={handleSendTestSms}
+                                  disabled={isTestingSms || !testPhone}
+                                  className="w-full bg-gray-900 text-white py-3.5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-black transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                >
+                                  {isTestingSms ? 'Sending...' : 'Send Test SMS'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="pt-2">
+                            <button 
+                              onClick={handleSaveSettings}
+                              className="w-full bg-ruby text-white py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-lg shadow-ruby/20 active:scale-95"
+                            >
+                              Save All Settings
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+
                     {activeSettingsTab === 'security' && (
                       <motion.div 
                         key="security"

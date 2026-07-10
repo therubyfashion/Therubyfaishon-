@@ -38,6 +38,7 @@ export const sendNotification = async (data: {
         const response = await fetch('/api/send-user-push', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          keepalive: true,
           body: JSON.stringify(pushData)
         });
         if (!response.ok) {
@@ -52,6 +53,7 @@ export const sendNotification = async (data: {
         const response = await fetch('/api/send-push', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          keepalive: true,
           body: JSON.stringify({
             ...pushData,
             type: 'all'

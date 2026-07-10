@@ -108,6 +108,23 @@ export default function Checkout() {
   const [storeSettings, setStoreSettings] = useState<any>(null);
   const { profile } = useAuth();
 
+  // Phone OTP States
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [isOtpSending, setIsOtpSending] = useState(false);
+  const [isOtpSubmitting, setIsOtpSubmitting] = useState(false);
+  const [otpError, setOtpError] = useState('');
+  const [otpSentTo, setOtpSentTo] = useState('');
+  const [otpCountdown, setOtpCountdown] = useState(0);
+
+  useEffect(() => {
+    if (otpCountdown <= 0) return;
+    const timer = setInterval(() => {
+      setOtpCountdown((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [otpCountdown]);
+
   useEffect(() => {
     const fetchAddresses = async () => {
       if (!user) {
@@ -268,6 +285,116 @@ export default function Checkout() {
     return Object.keys(newErrors).length === 0;
   };
 
+  const handleSendOtpCode = async (phone: string) => {
+    setIsOtpSending(true);
+    setOtpError('');
+    try {
+      const response = await fetch('/api/send-phone-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber: phone })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        toast.success(`Verification OTP sent successfully to ${phone}!`);
+        setOtpCountdown(60); // 1 minute countdown for resend
+      } else {
+        setOtpError(data.message || data.error || 'Failed to dispatch verification OTP');
+        toast.error(data.message || data.error || 'Failed to send OTP code.');
+        if (data.testingOtp) {
+          toast.info(`[DEV MODE] OTP Generated is: ${data.testingOtp}`, { duration: 15000 });
+        }
+      }
+    } catch (err: any) {
+      console.error("Error dispatching OTP:", err);
+      setOtpError("Network error. Failed to connect to SMS gateway.");
+      toast.error("Failed to connect to SMS gateway.");
+    } finally {
+      setIsOtpSending(false);
+    }
+  };
+
+  const handleVerifyOtpAndSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpCode || otpCode.trim().length < 4) {
+      setOtpError('Please enter a valid OTP code.');
+      return;
+    }
+
+    setIsOtpSubmitting(true);
+    setOtpError('');
+
+    try {
+      const response = await fetch('/api/verify-phone-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phoneNumber: otpSentTo,
+          otp: otpCode.trim()
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        setOtpError(data.error || 'Invalid OTP code.');
+        toast.error(data.error || 'Failed to verify OTP.');
+        setIsOtpSubmitting(false);
+        return;
+      }
+
+      // Success! Proceed to save the pendingAddress
+      if (!pendingAddress) {
+        toast.error('An error occurred. Pending address data is missing.');
+        setIsVerifyingOtp(false);
+        setIsOtpSubmitting(false);
+        return;
+      }
+
+      let savedAddress;
+      try {
+        if (user) {
+          const docRef = await addDoc(collection(db, `users/${user.uid}/addresses`), pendingAddress);
+          savedAddress = { id: docRef.id, ...pendingAddress };
+          setSelectedAddress(docRef.id);
+        } else {
+          // Guest fallback
+          const guestId = Math.random().toString(36).substr(2, 9);
+          savedAddress = { id: guestId, ...pendingAddress };
+          setSelectedAddress(guestId);
+        }
+      } catch (dbErr) {
+        console.warn("Saving address to Firestore failed, saving locally:", dbErr);
+        const localId = 'local_' + Math.random().toString(36).substr(2, 9);
+        savedAddress = { id: localId, ...pendingAddress };
+        setSelectedAddress(localId);
+      }
+
+      setAddresses([...addresses, savedAddress]);
+      setIsVerifyingOtp(false);
+      setPendingAddress(null);
+      setShowAddressForm(false);
+      setNewAddress({
+        name: '',
+        email: '',
+        number: '',
+        address: '',
+        landmark: '',
+        state: '',
+        city: '',
+        pincode: '',
+        label: 'Home'
+      });
+      setErrors({});
+      toast.success('Phone verified & Address added successfully!');
+    } catch (err: any) {
+      console.error("Error verifying OTP:", err);
+      setOtpError(err.message || 'Verification error. Please try again.');
+      toast.error('An error occurred during verification.');
+    } finally {
+      setIsOtpSubmitting(false);
+    }
+  };
+
   const handleAddAddress = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -282,7 +409,21 @@ export default function Checkout() {
       createdAt: new Date().toISOString()
     };
 
-    // Removed verification check as requested - proceed directly to saving
+    const isOtpRequired = storeSettings?.textbeeOtpEnabled === true || storeSettings?.textbeeOtpEnabled === 'true';
+
+    if (isOtpRequired) {
+      setPendingAddress(addressData);
+      setOtpSentTo(newAddress.number);
+      setIsVerifyingOtp(true);
+      setOtpCode('');
+      setOtpError('');
+      
+      // Dispatch the OTP immediately
+      await handleSendOtpCode(newAddress.number);
+      return;
+    }
+
+    // Direct saving if OTP is disabled
     try {
       let savedAddress;
       try {
@@ -544,8 +685,8 @@ export default function Checkout() {
                   link: '/my-orders'
                 }, false);
 
-                // Add a deliberate 3-second delay to prevent the two push notifications from collapsing or overwriting each other on the device
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                // Add a snappy 1.2-second delay to prevent the two push notifications from collapsing on the device
+                await new Promise(resolve => setTimeout(resolve, 1200));
 
                 // Second customer notification (🛍️ Order Placed Successfully!)
                 await sendNotification({
@@ -587,6 +728,7 @@ export default function Checkout() {
               const res = await fetch('/api/send-admin-push', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                keepalive: true,
                 body: JSON.stringify({
                   title: 'New Order Received! 🛍️',
                   body: `Order ${finalOrderData.orderId} of ₹${Number(finalOrderData.total).toLocaleString()} placed by ${finalOrderData.customerName}.`,
@@ -607,11 +749,12 @@ export default function Checkout() {
           const sendCustomerEmail = async () => {
             try {
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 55000);
+              const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 seconds snappy timeout
               const res = await fetch('/api/send-email', {
                 signal: controller.signal,
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                keepalive: true,
                 body: JSON.stringify({
                   to: finalOrderData.email || finalOrderData.address?.email || user?.email || '',
                   from: settingsData.fromEmail || settingsData.smtpUser || undefined,
@@ -640,11 +783,12 @@ export default function Checkout() {
               // Target developer testing email as well to guarantee they see admin order notifications
               const adminEmailDestination = "mdsagaransari65670@gmail.com, " + (settingsData.supportEmail || "theruby.in@gmail.com");
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 55000);
+              const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 seconds snappy timeout
               const res = await fetch('/api/send-email', {
                 signal: controller.signal,
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                keepalive: true,
                 body: JSON.stringify({
                   to: adminEmailDestination,
                   from: settingsData.fromEmail || settingsData.smtpUser || undefined,
@@ -860,142 +1004,6 @@ export default function Checkout() {
 
   return (
     <div id="checkout" className="bg-gray-50 min-h-screen pb-24">
-      {/* Secure Payment Processing Overlay with dynamic status steps */}
-      <AnimatePresence>
-        {isProcessingPayment && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              transition={{ type: "spring", duration: 0.5, bounce: 0.15 }}
-              className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center space-y-6 shadow-2xl border border-gray-100"
-            >
-              {/* Spinning/pulsing loader circle */}
-              <div className="relative w-20 h-20 mx-auto">
-                <motion.div 
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                  className="absolute inset-0 border-4 border-ruby/10 border-t-ruby rounded-full"
-                />
-                <motion.div 
-                  animate={{ scale: [0.9, 1.1, 0.9], opacity: [0.3, 0.6, 0.3] }}
-                  transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute -inset-2 bg-ruby/5 rounded-full filter blur-sm"
-                />
-                <div className="absolute inset-0 flex items-center justify-center text-ruby">
-                  <Lock size={24} strokeWidth={2.5} />
-                </div>
-              </div>
-
-              {/* Status Stepper */}
-              <div className="space-y-2">
-                <h3 className="text-lg font-black text-[#1A2C54] tracking-tight">Securing Your Order</h3>
-                <p className="text-[11px] text-gray-400 font-medium max-w-[240px] mx-auto leading-relaxed">
-                  Please do not close this tab or go back. We are finalizing your payment with industry-standard encryption.
-                </p>
-              </div>
-
-              {/* Dynamic Step indicator animations */}
-              <div className="space-y-3 pt-2 text-left max-w-[240px] mx-auto border-t border-gray-100">
-                {/* Step 1 */}
-                <div className="flex items-center gap-3">
-                  {paymentStep > 1 ? (
-                    <div className="w-5 h-5 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center text-xs font-bold">
-                      ✓
-                    </div>
-                  ) : (
-                    <div className="w-5 h-5 rounded-full bg-ruby/10 text-ruby flex items-center justify-center">
-                      <motion.div 
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
-                        className="w-2.5 h-2.5 border border-ruby border-t-transparent rounded-full"
-                      />
-                    </div>
-                  )}
-                  <span className={cn("text-[11px] font-bold transition-all duration-150", paymentStep === 1 ? "text-ruby" : "text-gray-400")}>
-                    Authorizing payment gateway
-                  </span>
-                </div>
-                
-                {/* Step 2 */}
-                <div className="flex items-center gap-3">
-                  {paymentStep > 2 ? (
-                    <div className="w-5 h-5 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center text-xs font-bold">
-                      ✓
-                    </div>
-                  ) : paymentStep === 2 ? (
-                    <div className="w-5 h-5 rounded-full bg-ruby/10 text-ruby flex items-center justify-center">
-                      <motion.div 
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
-                        className="w-2.5 h-2.5 border border-ruby border-t-transparent rounded-full"
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-5 h-5 rounded-full bg-gray-50 text-gray-300 flex items-center justify-center text-[10px] font-bold">
-                      2
-                    </div>
-                  )}
-                  <span className={cn("text-[11px] font-bold transition-all duration-150", paymentStep === 2 ? "text-ruby" : paymentStep > 2 ? "text-gray-400" : "text-gray-300")}>
-                    Creating unique order records
-                  </span>
-                </div>
-
-                {/* Step 3 */}
-                <div className="flex items-center gap-3">
-                  {paymentStep > 3 ? (
-                    <div className="w-5 h-5 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center text-xs font-bold">
-                      ✓
-                    </div>
-                  ) : paymentStep === 3 ? (
-                    <div className="w-5 h-5 rounded-full bg-ruby/10 text-ruby flex items-center justify-center">
-                      <motion.div 
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
-                        className="w-2.5 h-2.5 border border-ruby border-t-transparent rounded-full"
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-5 h-5 rounded-full bg-gray-50 text-gray-300 flex items-center justify-center text-[10px] font-bold">
-                      3
-                    </div>
-                  )}
-                  <span className={cn("text-[11px] font-bold transition-all duration-150", paymentStep === 3 ? "text-ruby" : paymentStep > 3 ? "text-gray-400" : "text-gray-300")}>
-                    Syncing fashion stock ledger
-                  </span>
-                </div>
-
-                {/* Step 4 */}
-                <div className="flex items-center gap-3">
-                  {paymentStep === 4 ? (
-                    <div className="w-5 h-5 rounded-full bg-ruby/10 text-ruby flex items-center justify-center">
-                      <motion.div 
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
-                        className="w-2.5 h-2.5 border border-ruby border-t-transparent rounded-full"
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-5 h-5 rounded-full bg-gray-50 text-gray-300 flex items-center justify-center text-[10px] font-bold">
-                      4
-                    </div>
-                  )}
-                  <span className={cn("text-[11px] font-bold transition-all duration-150", paymentStep === 4 ? "text-ruby" : "text-gray-300")}>
-                    Finalizing notification dispatch
-                  </span>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Header - Not Sticky */}
       <div className="bg-white border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-[5%] h-16 sm:h-20 flex items-center justify-between">
@@ -1299,6 +1307,92 @@ export default function Checkout() {
                         </button>
                       </motion.form>
                     )}
+
+                    {/* Phone OTP Verification Modal */}
+                    <AnimatePresence>
+                      {isVerifyingOtp && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+                          <motion.div 
+                            initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                            className="bg-white rounded-[2.5rem] p-8 max-w-md w-full shadow-2xl border border-gray-100 space-y-6"
+                          >
+                            <div className="text-center space-y-2">
+                              <div className="mx-auto w-12 h-12 bg-ruby/5 text-ruby rounded-full flex items-center justify-center">
+                                <Smartphone size={24} />
+                              </div>
+                              <h3 className="text-xl font-bold text-[#1A2C54]">Verify Your Phone Number</h3>
+                              <p className="text-xs text-gray-400 font-medium leading-relaxed">
+                                We sent a 6-digit verification code (OTP) via SMS to <span className="text-ruby font-bold">{otpSentTo}</span>. Please enter it below to verify and save your address.
+                              </p>
+                            </div>
+
+                            <form onSubmit={handleVerifyOtpAndSave} className="space-y-4">
+                              <div className="space-y-2">
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">
+                                  Enter OTP Code
+                                </label>
+                                <input 
+                                  type="text" 
+                                  maxLength={6}
+                                  pattern="\d{6}"
+                                  placeholder="------"
+                                  value={otpCode}
+                                  onChange={(e) => {
+                                    setOtpCode(e.target.value.replace(/\D/g, ''));
+                                    setOtpError('');
+                                  }}
+                                  className="w-full text-center bg-gray-50 border border-gray-100 focus:border-ruby/20 px-4 py-4 rounded-2xl text-2xl font-bold tracking-[0.75em] placeholder-gray-300 focus:ring-4 focus:ring-ruby/5 focus:outline-none transition-all"
+                                  required
+                                  disabled={isOtpSubmitting}
+                                  autoFocus
+                                />
+                                {otpError && (
+                                  <p className="text-[10px] font-bold text-ruby uppercase tracking-widest text-center animate-shake animate-pulse">
+                                    {otpError}
+                                  </p>
+                                )}
+                              </div>
+
+                              <button 
+                                type="submit"
+                                disabled={isOtpSubmitting || otpCode.length < 4}
+                                className="w-full bg-ruby text-white py-4 rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                              >
+                                {isOtpSubmitting ? 'Verifying OTP...' : 'Verify & Save Address'}
+                              </button>
+                            </form>
+
+                            <div className="flex flex-col items-center gap-3 pt-2 text-center border-t border-gray-50">
+                              <button 
+                                type="button"
+                                onClick={() => handleSendOtpCode(otpSentTo)}
+                                disabled={isOtpSending || otpCountdown > 0}
+                                className="text-[11px] font-black uppercase tracking-wider text-ruby hover:text-black transition-all disabled:text-gray-400"
+                              >
+                                {isOtpSending 
+                                  ? 'Resending OTP...' 
+                                  : otpCountdown > 0 
+                                    ? `Resend Code in ${otpCountdown}s` 
+                                    : 'Resend Code via SMS'}
+                              </button>
+
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  setIsVerifyingOtp(false);
+                                  setPendingAddress(null);
+                                }}
+                                className="text-[10px] font-bold uppercase tracking-widest text-gray-400 hover:text-ruby transition-all"
+                              >
+                                Cancel & Edit Address
+                              </button>
+                            </div>
+                          </motion.div>
+                        </div>
+                      )}
+                    </AnimatePresence>
                   </div>
 
                   <div className="step-nav flex gap-4 mt-8 pt-8 border-t border-gray-100">

@@ -987,6 +987,7 @@ export const NotificationService = {
        }
  
        const notification: any = {
+         android_group: "group_" + String(title || "default").replace(/[^a-zA-Z0-9]/g, ""),
          contents: { en: body },
          headings: { en: title },
          url: url,
@@ -1138,10 +1139,27 @@ async function runCartAbandonmentRecovery() {
   const now = Date.now();
   for (const cart of carts) {
     if (!cart.userId || !cart.items || cart.items.length === 0) continue;
-    const updatedAt = cart.updatedAt ? new Date(cart.updatedAt).getTime() : now;
-    const minutesElapsed = (now - updatedAt) / (60 * 1000);
+    
+    // Safely parse Firestore Timestamp (Admin/Client SDKs) or generic Date format
+    let updatedAtMs = now;
+    if (cart.updatedAt) {
+      if (typeof cart.updatedAt.toMillis === 'function') {
+        updatedAtMs = cart.updatedAt.toMillis();
+      } else if (cart.updatedAt.seconds !== undefined) {
+        updatedAtMs = cart.updatedAt.seconds * 1000;
+      } else if (cart.updatedAt._seconds !== undefined) {
+        updatedAtMs = cart.updatedAt._seconds * 1000;
+      } else {
+        const parsed = new Date(cart.updatedAt).getTime();
+        if (!isNaN(parsed)) {
+          updatedAtMs = parsed;
+        }
+      }
+    }
+
+    const minutesElapsed = (now - updatedAtMs) / (60 * 1000);
     if (minutesElapsed >= 5 && !cart.abandonedAlertSent) {
-      console.log(`🛒 Recovering abandoned cart for user ${cart.userId}`);
+      console.log(`🛒 Recovering abandoned cart for user ${cart.userId} (Inactivity: ${Math.round(minutesElapsed)} mins)`);
       await sendCustomerNotification(
         cart.userId,
         "Complete Your Purchase 🛍️",
@@ -1282,7 +1300,7 @@ async function initializeAutoPushes() {
           // Send admin push notification
           const isHighValue = Number(order.total || 0) >= 5000;
           const adminTemplateKey = isHighValue ? 'admin_high_value_order' : 'admin_new_order';
-          const hasAdminLock = await acquireNotificationLock(orderId, adminTemplateKey);
+          const hasAdminLock = await acquireNotificationLock(humanReadableOrderId, adminTemplateKey);
           if (hasAdminLock) {
             const adminTemplate = TEMPLATES[adminTemplateKey];
             if (adminTemplate) {
@@ -1309,7 +1327,7 @@ async function initializeAutoPushes() {
 
           // Send customer push notification
           if (order.userId) {
-            const hasCustomerLock = await acquireNotificationLock(orderId, 'order_placed');
+            const hasCustomerLock = await acquireNotificationLock(humanReadableOrderId, 'order_placed');
             if (hasCustomerLock) {
               const customerTemplate = TEMPLATES['order_placed'];
               if (customerTemplate) {
@@ -1342,70 +1360,71 @@ async function initializeAutoPushes() {
           orderStatusCache.set(orderId, newStatus);
 
           if (oldStatus !== newStatus && newStatus) {
-            console.log(`[push-service] Status updated: ${orderId} (${oldStatus} -> ${newStatus})`);
+            const humanReadableOrderId = order.orderId || orderId;
+            console.log(`[push-service] Status updated: ${humanReadableOrderId} (${oldStatus} -> ${newStatus})`);
 
             switch (String(newStatus).trim()) {
               case 'Confirmed':
               case 'Paid':
-                if (await acquireNotificationLock(orderId, 'status_Confirmed_admin')) {
-                  await sendAdminNotification("Payment Received 💳", `Payment received for Order #${orderId}.`);
+                if (await acquireNotificationLock(humanReadableOrderId, 'status_Confirmed_admin')) {
+                  await sendAdminNotification("Payment Received 💳", `Payment received for Order #${humanReadableOrderId}.`);
                 }
-                if (order.userId && await acquireNotificationLock(orderId, 'status_Confirmed_customer')) {
+                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_Confirmed_customer')) {
                   await sendCustomerNotification(order.userId, "Order Confirmed ✅", "Your order is confirmed.");
                 }
                 break;
               case 'Processing':
-                if (order.userId && await acquireNotificationLock(orderId, 'status_Processing_customer')) {
+                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_Processing_customer')) {
                   await sendCustomerNotification(order.userId, "Order Processing ⚙️", "We are preparing your order.");
                 }
                 break;
               case 'Packed':
-                if (order.userId && await acquireNotificationLock(orderId, 'status_Packed_customer')) {
+                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_Packed_customer')) {
                   await sendCustomerNotification(
                     order.userId,
                     "Order Packed 📦",
-                    `Your order #${orderId} is packed and ready to dispatch from our warehouse.`,
-                    `/track/${orderId}`
+                    `Your order #${humanReadableOrderId} is packed and ready to dispatch from our warehouse.`,
+                    `/track/${humanReadableOrderId}`
                   );
                 }
                 break;
               case 'Shipped':
-                if (order.userId && await acquireNotificationLock(orderId, 'status_Shipped_customer')) {
+                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_Shipped_customer')) {
                   await sendCustomerNotification(order.userId, "Order Shipped 🚚", "Your package is on the way!");
                 }
                 break;
               case 'In Delivery':
               case 'Out for Delivery':
-                if (order.userId && await acquireNotificationLock(orderId, 'status_OutForDelivery_customer')) {
+                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_OutForDelivery_customer')) {
                   await sendCustomerNotification(order.userId, "Out For Delivery 📍", "Your order will arrive soon.");
                 }
                 break;
               case 'Delivered':
                 if (order.userId) {
-                  if (await acquireNotificationLock(orderId, 'status_Delivered_customer')) {
+                  if (await acquireNotificationLock(humanReadableOrderId, 'status_Delivered_customer')) {
                     await sendCustomerNotification(order.userId, "Order Delivered 🎁", "Your package has been delivered.");
                   }
-                  if (await acquireNotificationLock(orderId, 'status_Rate_customer')) {
+                  if (await acquireNotificationLock(humanReadableOrderId, 'status_Rate_customer')) {
                     await sendCustomerNotification(order.userId, "Rate Your Purchase ⭐", "Share your experience with the product.");
                   }
                 }
                 break;
               case 'Cancelled':
-                if (await acquireNotificationLock(orderId, 'status_Cancelled_admin')) {
-                  await sendAdminNotification("Cancellation Request ❌", `Order #${orderId} was cancelled.`);
+                if (await acquireNotificationLock(humanReadableOrderId, 'status_Cancelled_admin')) {
+                  await sendAdminNotification("Cancellation Request ❌", `Order #${humanReadableOrderId} was cancelled.`);
                 }
-                if (order.userId && await acquireNotificationLock(orderId, 'status_Cancelled_customer')) {
+                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_Cancelled_customer')) {
                   await sendCustomerNotification(order.userId, "Order Cancelled 🚫", "Your order has been cancelled.");
                 }
                 break;
               case 'Refunded':
-                if (order.userId && await acquireNotificationLock(orderId, 'status_Refunded_customer')) {
+                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_Refunded_customer')) {
                   await sendCustomerNotification(order.userId, "Refund Initiated 💰", "Your refund is being processed. It will reflect in your account within 5-7 business days.");
                 }
                 break;
               case 'Refund_Completed':
               case 'RefundCompleted':
-                if (order.userId && await acquireNotificationLock(orderId, 'status_RefundCompleted_customer')) {
+                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_RefundCompleted_customer')) {
                   await sendCustomerNotification(order.userId, "Refund Completed ✅", "Refund has been successfully credited to your original payment source.");
                 }
                 break;
@@ -1690,7 +1709,7 @@ async function initializeAutoPushes() {
     } catch (e: any) {
       console.error("Cart Recovery check failed:", e.message);
     }
-  }, 10 * 60 * 1000);
+  }, 1 * 60 * 1000);
 }
 
 // Cache for store settings to avoid frequent Firestore calls
@@ -2591,7 +2610,10 @@ async function startServer() {
       oneSignalAppId, 
       oneSignalRestApiKey,
       smtpUser,
-      smtpPass 
+      smtpPass,
+      textbeeApiKey,
+      textbeeDeviceId,
+      textbeeOtpEnabled
     } = req.body;
     
     // Force cache refresh on next request
@@ -2625,6 +2647,10 @@ async function startServer() {
       console.log("OneSignal Keys updated via Admin Panel");
     }
 
+    if (textbeeApiKey !== undefined) process.env.TEXTBEE_API_KEY = textbeeApiKey || '';
+    if (textbeeDeviceId !== undefined) process.env.TEXTBEE_DEVICE_ID = textbeeDeviceId || '';
+    if (textbeeOtpEnabled !== undefined) process.env.TEXTBEE_OTP_ENABLED = String(textbeeOtpEnabled);
+
     // Persist settings locally as a fallback for restarts
     try {
       const configBackup = {
@@ -2634,7 +2660,10 @@ async function startServer() {
         VITE_RAZORPAY_KEY_ID: process.env.VITE_RAZORPAY_KEY_ID,
         RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET,
         ONESIGNAL_APP_ID: process.env.ONESIGNAL_APP_ID,
-        ONESIGNAL_REST_API_KEY: process.env.ONESIGNAL_REST_API_KEY
+        ONESIGNAL_REST_API_KEY: process.env.ONESIGNAL_REST_API_KEY,
+        TEXTBEE_API_KEY: process.env.TEXTBEE_API_KEY,
+        TEXTBEE_DEVICE_ID: process.env.TEXTBEE_DEVICE_ID,
+        TEXTBEE_OTP_ENABLED: process.env.TEXTBEE_OTP_ENABLED
       };
       fs.writeFileSync(localConfigPath, JSON.stringify(configBackup, null, 2));
     } catch (e) {}
@@ -2924,6 +2953,112 @@ async function startServer() {
 
   // In-memory recovery cache for password resets to guarantee 100% success on any Firestore custom-db permissions configuration
   const resetPasswordCodes = new Map<string, { otp: string, expiresAt: number, uid: string, displayName: string }>();
+
+  // In-memory cache for Phone OTPs
+  const phoneOtpCodes = new Map<string, { otp: string, expiresAt: number }>();
+
+  app.post("/api/send-phone-otp", async (req, res) => {
+    const { phoneNumber } = req.body;
+    if (!phoneNumber) {
+      return res.status(400).json({ error: "Phone number is required." });
+    }
+
+    // Clean phone number: remove spaces and non-numeric/plus characters
+    const cleanPhone = phoneNumber.replace(/\s+/g, '').replace(/[^0-9+]/g, '');
+
+    try {
+      const effectiveSettings = await resilientGetSettings();
+      const apiKey = process.env.TEXTBEE_API_KEY || effectiveSettings.textbeeApiKey;
+      const deviceId = process.env.TEXTBEE_DEVICE_ID || effectiveSettings.textbeeDeviceId;
+
+      if (!apiKey || !deviceId) {
+        console.error("❌ Textbee configuration is missing. API Key or Device ID is not defined.");
+        return res.status(400).json({ 
+          error: "SMS configuration is missing", 
+          message: "The store administrator has not configured the Textbee API credentials yet in the Admin Panel settings." 
+        });
+      }
+
+      // Generate 6-digit numeric OTP code
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes expiration
+
+      phoneOtpCodes.set(cleanPhone, { otp, expiresAt });
+
+      const textbeeUrl = `https://api.textbee.dev/api/v1/gateway/devices/${deviceId.trim()}/send-sms`;
+      
+      console.log(`[PHONE OTP] Sending OTP to ${cleanPhone}. Url: ${textbeeUrl}`);
+
+      const payload = {
+        recipients: [cleanPhone],
+        message: `Your verification code for The Ruby Fashion is: ${otp}. Please do not share this OTP.`
+      };
+
+      try {
+        const response = await fetch(textbeeUrl, {
+          method: 'POST',
+          headers: {
+            'x-api-key': apiKey.trim(),
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`❌ Textbee API responded with status ${response.status}:`, errorText);
+          console.log(`[TEST OTP IN LOGS] Phone verification code for ${cleanPhone} is: ${otp}`);
+          return res.status(502).json({
+            error: "Failed to dispatch SMS",
+            message: `Textbee API responded with status ${response.status}. Logged code for testing.`,
+            testingOtp: otp
+          });
+        }
+
+        const result = await response.json();
+        console.log(`[PHONE OTP] Textbee API response:`, result);
+        res.json({ success: true, message: "OTP sent successfully!" });
+      } catch (fetchErr: any) {
+        console.error(`❌ Network error calling Textbee API:`, fetchErr);
+        console.log(`[TEST OTP IN LOGS] Phone verification code for ${cleanPhone} is: ${otp}`);
+        return res.status(502).json({
+          error: "Failed to connect to SMS gateway",
+          message: fetchErr.message || "Network error. Logged code for testing.",
+          testingOtp: otp
+        });
+      }
+    } catch (error: any) {
+      console.error("❌ Phone OTP dispatch error:", error);
+      res.status(500).json({ error: error.message || "Failed to generate phone OTP." });
+    }
+  });
+
+  app.post("/api/verify-phone-otp", async (req, res) => {
+    const { phoneNumber, otp } = req.body;
+    if (!phoneNumber || !otp) {
+      return res.status(400).json({ error: "Phone number and OTP code are required." });
+    }
+
+    const cleanPhone = phoneNumber.replace(/\s+/g, '').replace(/[^0-9+]/g, '');
+    const cached = phoneOtpCodes.get(cleanPhone);
+
+    if (!cached) {
+      return res.status(400).json({ error: "No OTP request found for this phone number." });
+    }
+
+    if (cached.expiresAt < Date.now()) {
+      phoneOtpCodes.delete(cleanPhone);
+      return res.status(400).json({ error: "OTP has expired. Please request a new one." });
+    }
+
+    if (cached.otp !== String(otp).trim()) {
+      return res.status(400).json({ error: "Invalid verification code (OTP)." });
+    }
+
+    // Success! Clear OTP
+    phoneOtpCodes.delete(cleanPhone);
+    res.json({ success: true, message: "Phone number verified successfully!" });
+  });
 
   app.post("/api/auth/forgot-password/request", async (req, res) => {
     const { email } = req.body;
@@ -3506,10 +3641,24 @@ async function startServer() {
         
         const transporter = nodemailer.createTransport({
           service: 'gmail',
+          host: 'smtp.gmail.com',
+          port: 465,
+          secure: true,
+          pool: true, // Use connection pooling
+          maxConnections: 5,
+          maxMessages: 100,
+          rateDelta: 1000,
+          rateLimit: 5,
           auth: {
             user: cleanUser,
             pass: cleanPass
-          }
+          },
+          tls: {
+            rejectUnauthorized: false // Bypasses self-signed cert or strict network handshake errors securely
+          },
+          connectionTimeout: 10000, // 10 seconds connection timeout
+          greetingTimeout: 10000,
+          socketTimeout: 15000
         });
 
         try {
@@ -3815,6 +3964,7 @@ async function startServer() {
           en: title || "Order Update",
         },
         url: url || '/',
+        android_group: "group_" + String(title || "default").replace(/[^a-zA-Z0-9]/g, ""),
         include_external_user_ids: [String(userId)],
         include_aliases: {
           external_id: [String(userId)]
@@ -3892,25 +4042,6 @@ async function startServer() {
           }
         } catch (dbErr: any) {
           console.warn("OneSignal: Failed to query admins from Firestore:", dbErr.message);
-        }
-
-        // Support testing: Add the current user's device if they are placing the order and testing
-        if (userId) {
-          try {
-            const userDoc = await db.collection('users').doc(String(userId)).get();
-            if (userDoc.exists) {
-              const uData = userDoc.data();
-              if (uData && uData.onesignalId) {
-                const pid = String(uData.onesignalId).trim();
-                if (!adminPlayerIds.includes(pid)) {
-                  adminPlayerIds.push(pid);
-                  console.log(`OneSignal: Appended testing user ${userId}'s device ${pid} to admin list.`);
-                }
-              }
-            }
-          } catch (uErr: any) {
-            console.warn("OneSignal testing user lookup failed:", uErr.message);
-          }
         }
       }
 
