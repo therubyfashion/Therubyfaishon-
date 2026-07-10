@@ -85,6 +85,7 @@ function AppContent() {
   const navigate = useNavigate();
   const isAdminPath = location.pathname.startsWith('/admin');
   const [showSplash, setShowSplash] = useState(true);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
   
   // Track live visitors
   useVisitorTracking();
@@ -93,6 +94,17 @@ function AppContent() {
   useEffect(() => {
     trackPixelEvent('PageView');
   }, [location.pathname]);
+
+  // Listen to firestore quota exceeded events
+  useEffect(() => {
+    const handleQuotaExceeded = () => {
+      setQuotaExceeded(true);
+    };
+    window.addEventListener('firestore-quota-exceeded', handleQuotaExceeded);
+    return () => {
+      window.removeEventListener('firestore-quota-exceeded', handleQuotaExceeded);
+    };
+  }, []);
 
   const { user, profile, isAdmin, loading: authLoading } = useAuth();
   const { settings, loading: settingsLoading } = useSettings();
@@ -500,6 +512,39 @@ function AppContent() {
         {showSplash && <SplashScreen />}
       </AnimatePresence>
       <ScrollToTop />
+      
+      {quotaExceeded && (
+        <div className="bg-amber-50 border-b border-amber-200/60 p-4 text-amber-900 transition-all shadow-sm">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <span className="flex-shrink-0 w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-lg shadow-inner">💡</span>
+              <div>
+                <h4 className="font-semibold text-sm text-amber-950">Firestore Daily Free Quota Exceeded</h4>
+                <p className="text-xs text-amber-800 leading-relaxed mt-0.5">
+                  The database daily free read limit has been reached. You can continue using the application with robust offline/local fallbacks, or upgrade your Firebase Spark plan to remove this limit.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+              <a 
+                href="https://console.firebase.google.com/project/gen-lang-client-0266079178/firestore/databases/ai-studio-7e49bc2d-5269-463a-a740-bbf9c06449c0/data?openUpgradeDialog=true"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs py-2 px-4 rounded-xl transition duration-200 whitespace-nowrap shadow-sm text-center w-full md:w-auto"
+              >
+                Upgrade Plan
+              </a>
+              <button 
+                onClick={() => setQuotaExceeded(false)}
+                className="text-amber-600 hover:text-amber-800 hover:bg-amber-100/50 px-3 py-2 rounded-lg text-xs font-semibold transition duration-200 whitespace-nowrap"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="flex-grow">
         <Suspense fallback={<PageLoader variant="minimal" message="Gathering Collections" />}>
           <Routes>

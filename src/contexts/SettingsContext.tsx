@@ -50,8 +50,18 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           setSettings(DEFAULT_CLIENT_SETTINGS);
         }
       } catch (error: any) {
-        if (error.code === 'resource-exhausted') {
+        const errMsg = String(error?.message || error || '').toLowerCase();
+        const isQuota = error.code === 'resource-exhausted' || 
+                        errMsg.includes('quota exceeded') || 
+                        errMsg.includes('quota-exceeded') || 
+                        errMsg.includes('resource-exhausted') ||
+                        errMsg.includes('free daily read units per project');
+        
+        if (isQuota) {
           console.warn("Firestore Quota exceeded. Using local defaults.");
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('firestore-quota-exceeded'));
+          }
         } else {
           console.error("Error fetching settings:", error);
         }
