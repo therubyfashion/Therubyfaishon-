@@ -1118,7 +1118,12 @@ async function runCartAbandonmentRecovery() {
       });
       fetched = true;
     } catch (e: any) {
-      console.warn("Recovery cart query via Admin SDK failed:", e.message);
+      const msg = String(e?.message || e || '').toLowerCase();
+      if (msg.includes('quota') || msg.includes('resource-exhausted')) {
+        console.warn("⚠️ [Firestore Quota] Recovery cart query via Admin SDK skipped (daily quota exceeded).");
+      } else {
+        console.warn("Recovery cart query via Admin SDK failed:", e.message);
+      }
     }
   }
 
@@ -1132,7 +1137,12 @@ async function runCartAbandonmentRecovery() {
         carts.push({ id: doc.id, ...doc.data() });
       });
     } catch (e: any) {
-      console.warn("Recovery cart query via Client SDK failed:", e.message);
+      const msg = String(e?.message || e || '').toLowerCase();
+      if (msg.includes('quota') || msg.includes('resource-exhausted')) {
+        console.warn("⚠️ [Firestore Quota] Recovery cart query via Client SDK skipped (daily quota exceeded).");
+      } else {
+        console.warn("Recovery cart query via Client SDK failed:", e.message);
+      }
     }
   }
 

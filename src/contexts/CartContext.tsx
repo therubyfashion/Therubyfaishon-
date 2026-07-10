@@ -98,8 +98,20 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
         const snap = await getDocs(q);
         setPromotions(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Promotion)));
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error fetching promotions in checkout:", error);
+        const errMsg = String(error?.message || error || '').toLowerCase();
+        if (
+          error?.code === 'resource-exhausted' ||
+          errMsg.includes('quota exceeded') ||
+          errMsg.includes('quota-exceeded') ||
+          errMsg.includes('resource-exhausted') ||
+          errMsg.includes('free daily read units per project')
+        ) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('firestore-quota-exceeded'));
+          }
+        }
       }
     };
     fetchActivePromotions();
