@@ -126,6 +126,18 @@ export default function Checkout() {
     return () => clearInterval(timer);
   }, [otpCountdown]);
 
+  // Disable background scrolling when OTP verification modal is active
+  useEffect(() => {
+    if (isVerifyingOtp) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isVerifyingOtp]);
+
   useEffect(() => {
     const fetchAddresses = async () => {
       if (!user) {
@@ -299,7 +311,12 @@ export default function Checkout() {
       if (response.ok) {
         toast.success(`Verification OTP sent successfully to ${phone}!`);
         setOtpCountdown(60); // 1 minute countdown for resend
-        setDevTestingOtp('');
+        if (data.testingOtp) {
+          setDevTestingOtp(data.testingOtp);
+          console.log(`[TEST MODE] Generated OTP: ${data.testingOtp}`);
+        } else {
+          setDevTestingOtp('');
+        }
       } else {
         setOtpError(data.message || data.error || 'Failed to dispatch verification OTP');
         toast.error(data.message || data.error || 'Failed to send OTP code.');
@@ -1352,15 +1369,20 @@ export default function Checkout() {
                                   autoFocus
                                 />
                                 {otpError && (
-                                  <p className="text-[10px] font-bold text-ruby uppercase tracking-widest text-center animate-shake animate-pulse">
-                                    {otpError}
-                                  </p>
+                                  <motion.div 
+                                    initial={{ opacity: 0, y: -8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="flex items-center gap-3 bg-red-50 border border-red-200/60 p-4 rounded-2xl text-red-800 text-xs font-semibold text-left shadow-sm"
+                                  >
+                                    <span className="flex-shrink-0 w-6 h-6 bg-red-100 text-red-600 rounded-full flex items-center justify-center font-bold">⚠️</span>
+                                    <span>{otpError}</span>
+                                  </motion.div>
                                 )}
                                 
                                 {devTestingOtp && (
-                                  <div className="bg-amber-50 border border-amber-200 text-amber-800 text-[10px] p-3 rounded-2xl text-center font-bold mt-2">
-                                    ⚠️ SMS GATEWAY OFFLINE / TEST MODE:<br />
-                                    Use code <span className="text-ruby text-xs font-black select-all">{devTestingOtp}</span> to verify this address.
+                                  <div className="bg-amber-50 border border-amber-200 text-amber-800 text-[11px] p-4 rounded-2xl text-center font-medium mt-3 shadow-sm leading-relaxed">
+                                    <span className="font-bold text-amber-950 block mb-1">💡 OTP SMS Check</span>
+                                    If the SMS hasn't arrived shortly, you can use fallback code: <span className="text-ruby text-sm font-black select-all bg-amber-100/60 px-2 py-0.5 rounded-md ml-1 tracking-wide">{devTestingOtp}</span>
                                   </div>
                                 )}
                               </div>

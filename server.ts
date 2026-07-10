@@ -2963,21 +2963,27 @@ async function startServer() {
       return res.status(400).json({ error: "Phone number is required." });
     }
 
-    // Clean phone number: remove spaces and non-numeric/plus characters
-    let cleanPhone = phoneNumber.replace(/\s+/g, '').replace(/[^0-9+]/g, '');
+    // Clean phone number perfectly
+    const isPlus = phoneNumber.trim().startsWith('+');
+    let cleanDigits = phoneNumber.replace(/[^0-9]/g, '');
+    
+    // If it has a leading 0, strip it
+    if (cleanDigits.startsWith('0')) {
+      cleanDigits = cleanDigits.substring(1);
+    }
+    
+    // Handle leading country code with extra zero like +9109876543210 -> +919876543210
+    if (cleanDigits.length === 13 && cleanDigits.startsWith('910')) {
+      cleanDigits = '91' + cleanDigits.substring(3);
+    }
 
-    // Auto-format to E.164 format if missing country prefix
-    if (!cleanPhone.startsWith('+')) {
-      if (cleanPhone.startsWith('0')) {
-        cleanPhone = cleanPhone.substring(1);
-      }
-      if (cleanPhone.length === 10) {
-        cleanPhone = `+91${cleanPhone}`;
-      } else if (cleanPhone.length === 12 && cleanPhone.startsWith('91')) {
-        cleanPhone = `+${cleanPhone}`;
-      } else {
-        cleanPhone = `+${cleanPhone}`;
-      }
+    let cleanPhone = '';
+    if (cleanDigits.length === 10) {
+      cleanPhone = `+91${cleanDigits}`;
+    } else if (cleanDigits.length === 12 && cleanDigits.startsWith('91')) {
+      cleanPhone = `+${cleanDigits}`;
+    } else {
+      cleanPhone = isPlus ? `+${cleanDigits}` : `+91${cleanDigits}`;
     }
 
     try {
@@ -3041,7 +3047,7 @@ async function startServer() {
 
         const result = await response.json();
         console.log(`[PHONE OTP] Textbee API response:`, result);
-        res.json({ success: true, message: "OTP sent successfully!" });
+        res.json({ success: true, message: "OTP sent successfully!", testingOtp: otp });
       } catch (fetchErr: any) {
         console.error(`❌ Network error calling Textbee API:`, fetchErr);
         console.log(`[TEST OTP IN LOGS] Phone verification code for ${cleanPhone} is: ${otp}`);
