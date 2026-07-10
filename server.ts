@@ -2964,7 +2964,21 @@ async function startServer() {
     }
 
     // Clean phone number: remove spaces and non-numeric/plus characters
-    const cleanPhone = phoneNumber.replace(/\s+/g, '').replace(/[^0-9+]/g, '');
+    let cleanPhone = phoneNumber.replace(/\s+/g, '').replace(/[^0-9+]/g, '');
+
+    // Auto-format to E.164 format if missing country prefix
+    if (!cleanPhone.startsWith('+')) {
+      if (cleanPhone.startsWith('0')) {
+        cleanPhone = cleanPhone.substring(1);
+      }
+      if (cleanPhone.length === 10) {
+        cleanPhone = `+91${cleanPhone}`;
+      } else if (cleanPhone.length === 12 && cleanPhone.startsWith('91')) {
+        cleanPhone = `+${cleanPhone}`;
+      } else {
+        cleanPhone = `+${cleanPhone}`;
+      }
+    }
 
     try {
       const effectiveSettings = await resilientGetSettings();
@@ -2983,7 +2997,10 @@ async function startServer() {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes expiration
 
+      // Store in memory using both formats (E.164 and clean numeric digits) for perfect verification lookup matching
+      const numericDigitsOnly = phoneNumber.replace(/[^0-9]/g, '');
       phoneOtpCodes.set(cleanPhone, { otp, expiresAt });
+      phoneOtpCodes.set(numericDigitsOnly, { otp, expiresAt });
 
       const textbeeUrl = `https://api.textbee.dev/api/v1/gateway/devices/${deviceId.trim()}/send-sms`;
       
@@ -3008,9 +3025,16 @@ async function startServer() {
           const errorText = await response.text();
           console.error(`❌ Textbee API responded with status ${response.status}:`, errorText);
           console.log(`[TEST OTP IN LOGS] Phone verification code for ${cleanPhone} is: ${otp}`);
+          
+          let parsedError = errorText;
+          try {
+            const parsed = JSON.parse(errorText);
+            parsedError = parsed.message || parsed.error || errorText;
+          } catch (_) {}
+
           return res.status(502).json({
             error: "Failed to dispatch SMS",
-            message: `Textbee API responded with status ${response.status}. Logged code for testing.`,
+            message: `Textbee API Error (${response.status}): ${parsedError}. Entered OTP ${otp} directly in checkout modal fallback so you can continue testing.`,
             testingOtp: otp
           });
         }
@@ -3023,7 +3047,7 @@ async function startServer() {
         console.log(`[TEST OTP IN LOGS] Phone verification code for ${cleanPhone} is: ${otp}`);
         return res.status(502).json({
           error: "Failed to connect to SMS gateway",
-          message: fetchErr.message || "Network error. Logged code for testing.",
+          message: `${fetchErr.message || "Network error"}. Entered OTP ${otp} directly in checkout modal fallback so you can continue testing.`,
           testingOtp: otp
         });
       }
@@ -3040,7 +3064,9 @@ async function startServer() {
     }
 
     const cleanPhone = phoneNumber.replace(/\s+/g, '').replace(/[^0-9+]/g, '');
-    const cached = phoneOtpCodes.get(cleanPhone);
+    const numericDigitsOnly = phoneNumber.replace(/[^0-9]/g, '');
+    
+    const cached = phoneOtpCodes.get(cleanPhone) || phoneOtpCodes.get(numericDigitsOnly);
 
     if (!cached) {
       return res.status(400).json({ error: "No OTP request found for this phone number." });
@@ -3048,6 +3074,7 @@ async function startServer() {
 
     if (cached.expiresAt < Date.now()) {
       phoneOtpCodes.delete(cleanPhone);
+      phoneOtpCodes.delete(numericDigitsOnly);
       return res.status(400).json({ error: "OTP has expired. Please request a new one." });
     }
 
@@ -3057,6 +3084,7 @@ async function startServer() {
 
     // Success! Clear OTP
     phoneOtpCodes.delete(cleanPhone);
+    phoneOtpCodes.delete(numericDigitsOnly);
     res.json({ success: true, message: "Phone number verified successfully!" });
   });
 

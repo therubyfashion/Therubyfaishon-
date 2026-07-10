@@ -116,6 +116,7 @@ export default function Checkout() {
   const [otpError, setOtpError] = useState('');
   const [otpSentTo, setOtpSentTo] = useState('');
   const [otpCountdown, setOtpCountdown] = useState(0);
+  const [devTestingOtp, setDevTestingOtp] = useState('');
 
   useEffect(() => {
     if (otpCountdown <= 0) return;
@@ -298,10 +299,12 @@ export default function Checkout() {
       if (response.ok) {
         toast.success(`Verification OTP sent successfully to ${phone}!`);
         setOtpCountdown(60); // 1 minute countdown for resend
+        setDevTestingOtp('');
       } else {
         setOtpError(data.message || data.error || 'Failed to dispatch verification OTP');
         toast.error(data.message || data.error || 'Failed to send OTP code.');
         if (data.testingOtp) {
+          setDevTestingOtp(data.testingOtp);
           toast.info(`[DEV MODE] OTP Generated is: ${data.testingOtp}`, { duration: 15000 });
         }
       }
@@ -1352,6 +1355,13 @@ export default function Checkout() {
                                   <p className="text-[10px] font-bold text-ruby uppercase tracking-widest text-center animate-shake animate-pulse">
                                     {otpError}
                                   </p>
+                                )}
+                                
+                                {devTestingOtp && (
+                                  <div className="bg-amber-50 border border-amber-200 text-amber-800 text-[10px] p-3 rounded-2xl text-center font-bold mt-2">
+                                    ⚠️ SMS GATEWAY OFFLINE / TEST MODE:<br />
+                                    Use code <span className="text-ruby text-xs font-black select-all">{devTestingOtp}</span> to verify this address.
+                                  </div>
                                 )}
                               </div>
 
