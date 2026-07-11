@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { collection, query, where, getDocs, orderBy, setDoc, doc, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, getDoc, orderBy, setDoc, doc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { CartItem, Product, Promotion } from '../types';
 import { useSettings } from './SettingsContext';
@@ -24,7 +24,7 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [items, setItems] = useState<CartItem[]>(() => {
     try {
       const saved = localStorage.getItem('ruby_cart');
@@ -40,6 +40,75 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discount: number } | null>(null);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [cartLoaded, setCartLoaded] = useState(false);
+
+  // Load and Merge cart from Firestore on user/auth state resolution
+  useEffect(() => {
+    if (authLoading) return;
+
+    if (!user) {
+      setCartLoaded(true);
+      return;
+    }
+
+    const fetchAndMergeCart = async () => {
+      try {
+        const docRef = doc(db, 'carts', user.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const dbItems = Array.isArray(data?.items) ? data.items : [];
+          
+          if (dbItems.length > 0) {
+            setItems(prev => {
+              const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
+              const merged = [...safePrev];
+              
+              dbItems.forEach((dbItem: any) => {
+                if (!dbItem || !dbItem.id) return;
+                
+                const existingIndex = merged.findIndex(i => 
+                  i && i.id === dbItem.id && 
+                  i.selectedSize === dbItem.selectedSize && 
+                  i.selectedColor === dbItem.selectedColor
+                );
+                
+                if (existingIndex !== -1) {
+                  // Keep larger quantity to avoid wiping progress
+                  merged[existingIndex].quantity = Math.max(
+                    Number(merged[existingIndex].quantity) || 1,
+                    Number(dbItem.quantity) || 1
+                  );
+                } else {
+                  // Add database item as it was not in the local cart
+                  merged.push({
+                    id: dbItem.id,
+                    name: dbItem.name || '',
+                    price: Number(dbItem.price) || 0,
+                    quantity: Number(dbItem.quantity) || 1,
+                    selectedSize: dbItem.selectedSize || '',
+                    selectedColor: dbItem.selectedColor || '',
+                    images: dbItem.image ? [dbItem.image] : [],
+                    category: dbItem.category || '',
+                    stock: dbItem.stock !== undefined ? dbItem.stock : 99
+                  } as any);
+                }
+              });
+              
+              return merged;
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Error loading/merging cart from Firestore:", err);
+      } finally {
+        setCartLoaded(true);
+      }
+    };
+
+    setCartLoaded(false);
+    fetchAndMergeCart();
+  }, [user, authLoading]);
 
   useEffect(() => {
     if (Array.isArray(items)) {
@@ -50,8 +119,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
     
-    // Abandoned Cart Tracking Logic
-    if (user && Array.isArray(items)) {
+    // Abandoned Cart Tracking Logic - Only sync to database after Firestore load is fully completed
+    if (cartLoaded && user && Array.isArray(items)) {
       const syncCartToFirestore = async () => {
         try {
           const validItems = items.filter(Boolean);
@@ -74,7 +143,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
               status: 'active'
             });
           } else {
-            // If cart becomes empty, remove from Firestore
+            // If cart becomes empty (after load was complete), remove from Firestore
             await deleteDoc(doc(db, 'carts', user.uid));
           }
         } catch (e) {
@@ -86,7 +155,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const timer = setTimeout(syncCartToFirestore, 1000);
       return () => clearTimeout(timer);
     }
-  }, [items, user]);
+  }, [items, user, cartLoaded]);
 
   useEffect(() => {
     const fetchActivePromotions = async () => {

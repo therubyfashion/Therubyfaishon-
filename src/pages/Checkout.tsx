@@ -1378,13 +1378,6 @@ export default function Checkout() {
                                     <span>{otpError}</span>
                                   </motion.div>
                                 )}
-                                
-                                {devTestingOtp && (
-                                  <div className="bg-amber-50 border border-amber-200 text-amber-800 text-[11px] p-4 rounded-2xl text-center font-medium mt-3 shadow-sm leading-relaxed">
-                                    <span className="font-bold text-amber-950 block mb-1">💡 OTP SMS Check</span>
-                                    If the SMS hasn't arrived shortly, you can use fallback code: <span className="text-ruby text-sm font-black select-all bg-amber-100/60 px-2 py-0.5 rounded-md ml-1 tracking-wide">{devTestingOtp}</span>
-                                  </div>
-                                )}
                               </div>
 
                               <button 

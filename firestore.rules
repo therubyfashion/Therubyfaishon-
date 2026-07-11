@@ -205,6 +205,24 @@ service cloud.firestore {
              (!('link' in data) || data.link == null || (data.link is string && data.link.size() < 1000));
     }
 
+    function isValidPushNotificationLog(data) {
+      return data.keys().hasAll(['title', 'body', 'recipient', 'status', 'deliveryStatus', 'timestamp']) &&
+             data.title is string && data.title.size() <= 1000 &&
+             data.body is string && data.body.size() <= 5000 &&
+             data.recipient is string && data.recipient.size() <= 200 &&
+             data.status is string && data.status.size() <= 100 &&
+             data.deliveryStatus is string && data.deliveryStatus.size() <= 100 &&
+             data.timestamp is string &&
+             (!('notificationId' in data) || data.notificationId == null || data.notificationId is string) &&
+             (!('templateKey' in data) || data.templateKey == null || data.templateKey is string) &&
+             (!('orderId' in data) || data.orderId == null || data.orderId is string);
+    }
+
+    function isValidNotificationLock(data) {
+      return data.keys().hasAll(['lockedAt']) && data.keys().size() == 1 &&
+             data.lockedAt is string;
+    }
+
     // Rules
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
@@ -372,6 +390,17 @@ service cloud.firestore {
       allow create: if isAdmin() && isValidPromotion(request.resource.data);
       allow update: if isAdmin() && isValidPromotion(request.resource.data);
       allow delete: if isAdmin();
+    }
+
+    match /push_notification_logs/{logId} {
+      allow create: if isValidPushNotificationLog(request.resource.data);
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /notification_locks/{lockId} {
+      allow read: if true;
+      allow create: if isValidNotificationLock(request.resource.data);
+      allow update, delete: if isAdmin();
     }
   }
 }

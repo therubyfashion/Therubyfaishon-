@@ -254,6 +254,32 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "priority", "status", "type"]
+    },
+    "PushNotificationLog": {
+      "title": "PushNotificationLog",
+      "description": "Log of dispatched push notifications.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "recipient": { "type": "string" },
+        "status": { "type": "string" },
+        "deliveryStatus": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "notificationId": { "type": "string" },
+        "templateKey": { "type": "string" },
+        "orderId": { "type": "string" }
+      },
+      "required": ["title", "body", "recipient", "status", "deliveryStatus", "timestamp"]
+    },
+    "NotificationLock": {
+      "title": "NotificationLock",
+      "description": "Distributed lock for push notifications to prevent duplicate deliveries.",
+      "type": "object",
+      "properties": {
+        "lockedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["lockedAt"]
     }
   },
   "firestore": {
@@ -271,6 +297,8 @@
     "/settings/{settingId}": { "schema": "object", "description": "Global store settings" },
     "/active_sessions/{sessionId}": { "schema": "ActiveSession", "description": "Live visitor sessions" },
     "/notifications/{notificationId}": { "schema": "Notification", "description": "Push notification history" },
-    "/promotions/{promotionId}": { "schema": "Promotion", "description": "Promotion rules" }
+    "/promotions/{promotionId}": { "schema": "Promotion", "description": "Promotion rules" },
+    "/push_notification_logs/{logId}": { "schema": "PushNotificationLog", "description": "Dispatched push notification logs" },
+    "/notification_locks/{lockId}": { "schema": "NotificationLock", "description": "De-duplication locks" }
   }
 }
