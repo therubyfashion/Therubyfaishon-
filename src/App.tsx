@@ -66,7 +66,7 @@ export default function App() {
         <NotificationProvider>
           <CartProvider>
             <WishlistProvider>
-              <Router>
+              <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                 <AppContent />
               </Router>
             </WishlistProvider>
@@ -271,15 +271,18 @@ function AppContent() {
                 isOneSignalWebInitialized = true;
                 console.log("✅ OneSignal: Web SDK Initialized Successfully");
               } catch (initErr: any) {
-                console.warn("OneSignal Web SDK Init skipped or restricted (expected in local/dev previews):", initErr.message || initErr);
                 const errMsg = String(initErr.message || initErr || "").toLowerCase();
                 if (errMsg.includes("already initialized") || errMsg.includes("already-exists")) {
                   isOneSignalWebInitialized = true;
+                } else if (errMsg.includes("can only be used on") || errMsg.includes("unsupported")) {
+                  console.info(`ℹ️ OneSignal: Web SDK skipped in development env (expected domain constraint).`);
+                } else {
+                  console.warn("OneSignal Web SDK Init skipped or restricted (expected in local/dev previews):", initErr.message || initErr);
                 }
               }
             }
             
-            if (user) {
+            if (isOneSignalWebInitialized && user) {
               try {
                 if (typeof OneSignalWeb.login === 'function') {
                   await OneSignalWeb.login(user.uid);

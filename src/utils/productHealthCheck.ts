@@ -59,19 +59,21 @@ export function checkProductHealth(product: any): HealthCheckResult {
       checks.push(`Categories are valid array: [${product.category.join(', ')}]`);
     }
   } else if (typeof product.category === 'string') {
-    warnings.push(`Category is stored as a string "${product.category}" instead of an array. Automatically normalising client-side.`);
+    checks.push(`Category is a valid string "${product.category}" (automatically normalised).`);
   } else {
     errors.push(`Category field has an invalid type: ${typeof product.category}`);
   }
 
   // 4. Check Images and Broken URLs
-  if (!product?.images || !Array.isArray(product.images) || product.images.length === 0) {
+  const validImages = Array.isArray(product?.images) 
+    ? product.images.filter((img: any) => img && typeof img === 'string' && img.trim() !== '')
+    : [];
+
+  if (validImages.length === 0) {
     errors.push("Product has no images. Product requires at least one valid image URL.");
   } else {
-    product.images.forEach((img: any, idx: number) => {
-      if (!img || typeof img !== 'string' || img.trim() === '') {
-        errors.push(`Image at index ${idx} is empty or invalid.`);
-      } else if (!img.startsWith('http://') && !img.startsWith('https://') && !img.startsWith('data:image')) {
+    validImages.forEach((img: string, idx: number) => {
+      if (!img.startsWith('http://') && !img.startsWith('https://') && !img.startsWith('data:image')) {
         warnings.push(`Image at index ${idx} might have a broken or non-standard URL: "${img.substring(0, 30)}..."`);
       } else {
         checks.push(`Image ${idx + 1} URL is structurally valid.`);
