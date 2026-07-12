@@ -731,10 +731,10 @@ export const NotificationService = {
       orderId: extra.orderId || null
     };
     try {
-      if (clientDb && isClientDbReady) {
-        await cAddDoc(cCollection(clientDb, 'push_notification_logs'), logData);
-      } else if (db && isDbWriteable !== false) {
+      if (db && isDbWriteable !== false) {
         await db.collection('push_notification_logs').add(logData);
+      } else if (clientDb && isClientDbReady) {
+        await cAddDoc(cCollection(clientDb, 'push_notification_logs'), logData);
       }
       console.log(`📝 [NotificationService] Logged notification: [${status}] ${title} -> ${recipient}`);
     } catch (err: any) {
@@ -4008,11 +4008,7 @@ async function startServer() {
           en: title || "Order Update",
         },
         url: url || '/',
-        android_group: "group_" + String(title || "default").replace(/[^a-zA-Z0-9]/g, ""),
-        include_external_user_ids: [String(userId)],
-        include_aliases: {
-          external_id: [String(userId)]
-        }
+        android_group: "group_" + String(title || "default").replace(/[^a-zA-Z0-9]/g, "")
       };
 
       if (onesignalId) {
@@ -4026,6 +4022,12 @@ async function startServer() {
           });
         }
         notification.include_subscription_ids = [onesignalId];
+      } else {
+        // Only target by external_id alias if no specific onesignal subscription ID is found
+        notification.include_aliases = {
+          external_id: [String(userId)]
+        };
+        notification.target_channel = "push";
       }
 
       const response = await sendOneSignalNotification(notification);
@@ -4033,7 +4035,14 @@ async function startServer() {
 
       if (responseData.errors && Array.isArray(responseData.errors)) {
         const errorMsg = responseData.errors.join(', ');
-        if (errorMsg.includes("not subscribed") || errorMsg.includes("not found") || errorMsg.includes("players are not subscribed")) {
+        if (
+          errorMsg.includes("not subscribed") || 
+          errorMsg.includes("not found") || 
+          errorMsg.includes("players are not subscribed") ||
+          errorMsg.includes("no users") ||
+          errorMsg.includes("unrecognized") ||
+          errorMsg.includes("external_id")
+        ) {
           console.warn(`OneSignal: Targeted user ${userId} is not subscribed yet.`);
           return res.json({ success: true, warning: "User not yet subscribed to push notifications.", id: null });
         }
@@ -4044,9 +4053,19 @@ async function startServer() {
     } catch (error: any) {
       const errorData = error.response?.data;
       const errorMsg = errorData?.errors ? (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : JSON.stringify(errorData.errors)) : error.message;
+      const errLower = String(errorMsg || '').toLowerCase();
 
       // Specific user error: usually means user hasn't accepted push permissions yet or synced yet
-      if (errorMsg.includes("not subscribed") || errorMsg.includes("not found") || errorMsg.includes("players are not subscribed")) {
+      if (
+        errLower.includes("not subscribed") || 
+        errLower.includes("not found") || 
+        errLower.includes("players are not subscribed") ||
+        errLower.includes("no users") ||
+        errLower.includes("unrecognized") ||
+        errLower.includes("external_id") ||
+        errLower.includes("external id") ||
+        errLower.includes("no subscribed players")
+      ) {
         console.warn(`OneSignal Targeted Push Warning for ${userId}:`, errorMsg);
         return res.json({ success: true, warning: "User not yet subscribed to push notifications.", id: null });
       }
