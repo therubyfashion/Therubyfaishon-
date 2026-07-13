@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { 
   collection, 
   query, 
@@ -102,19 +102,19 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
-  const markAsRead = async (notificationId: string) => {
+  const markAsRead = useCallback(async (notificationId: string) => {
     try {
       const ref = doc(db, 'notifications', notificationId);
       await updateDoc(ref, { isRead: true });
     } catch (error) {
       console.error("Error marking notification as read:", error);
     }
-  };
+  }, []);
 
-  const markAllAsRead = async () => {
+  const markAllAsRead = useCallback(async () => {
     if (!user) return;
     try {
-      const unreadNotifications = notifications.filter(n => !n.isRead && n.userId === user.uid);
+      const unreadNotifications = notifications.filter(n => !n.isRead && (n.userId === user.uid || !n.userId));
       if (unreadNotifications.length === 0) return;
 
       const batch = writeBatch(db);
@@ -126,9 +126,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     } catch (error) {
       console.error("Error marking all as read:", error);
     }
-  };
+  }, [user, notifications]);
 
-  const createNotification = async (data: Omit<Notification, 'id' | 'createdAt' | 'isRead'>) => {
+  const createNotification = useCallback(async (data: Omit<Notification, 'id' | 'createdAt' | 'isRead'>) => {
     try {
       await addDoc(collection(db, 'notifications'), {
         ...data,
@@ -138,7 +138,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     } catch (error) {
       console.error("Error creating notification:", error);
     }
-  };
+  }, []);
 
   return (
     <NotificationContext.Provider value={{ 

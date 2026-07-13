@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNotifications } from '../contexts/NotificationContext';
+import { useAuth } from '../contexts/AuthContext';
 import { format, isToday, isYesterday, parseISO } from 'date-fns';
 
 const iconMap: Record<string, React.ReactNode> = {
@@ -32,6 +33,7 @@ const iconMap: Record<string, React.ReactNode> = {
 
 const Notifications: React.FC = () => {
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const { notifications, unreadCount, markAllAsRead, markAsRead, loading } = useNotifications();
 
   const [permissionGranted, setPermissionGranted] = React.useState<boolean>(() => {
@@ -55,9 +57,11 @@ const Notifications: React.FC = () => {
   });
 
   useEffect(() => {
-    // Mark all as read when page is opened
+    // Mark all as read when page is opened or notifications are loaded
     markAllAsRead();
+  }, [notifications, markAllAsRead]);
 
+  useEffect(() => {
     const checkPermission = setInterval(() => {
       const OS = (window as any).OneSignal;
       setOneSignalActive(!!OS);
@@ -253,6 +257,43 @@ const Notifications: React.FC = () => {
             {renderSection('OLDER', older)}
           </>
         )}
+
+        {/* Push Notifications Diagnostics Panel */}
+        <div className="mt-8 p-5 border border-gray-100 bg-gray-50/50 rounded-2xl">
+          <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-2 mb-3">
+            <Info size={15} className="text-gray-500" />
+            Push Delivery Diagnostics
+          </h4>
+          <div className="space-y-2 text-[11px] font-medium leading-relaxed">
+            <div className="flex items-center justify-between py-1 border-b border-gray-100/50">
+              <span className="text-gray-400">Device Permission:</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${permissionGranted ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'}`}>
+                {permissionGranted ? 'GRANTED' : 'PENDING / BLOCKED'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-1 border-b border-gray-100/50">
+              <span className="text-gray-400">OneSignal Integration:</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${oneSignalActive ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
+                {oneSignalActive ? 'ACTIVE' : 'NOT INITIALIZED'}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1 py-1">
+              <span className="text-gray-400">Synced Subscription ID:</span>
+              <span className="font-mono text-[9px] text-gray-600 break-all bg-white p-1.5 rounded-lg border border-gray-100 block">
+                {profile?.onesignalId || 'None synced yet. Open app in a new tab and grant permission.'}
+              </span>
+            </div>
+            
+            <div className="pt-3 border-t border-gray-100 mt-2">
+              <h5 className="font-bold text-gray-800 text-[10px] uppercase tracking-wider mb-1.5">Troubleshooting Checklist:</h5>
+              <ul className="list-disc pl-4 space-y-1 text-gray-500">
+                <li><b>Iframe Block:</b> Browser security blocks push notification prompts inside sandbox iframes. Click the <b>"Open in New Tab"</b> icon at the top right of your preview to test.</li>
+                <li><b>Mobile PWA Test:</b> On iOS (Safari) or Android (Chrome), use the "Add to Home Screen" option in your browser menu to run the app as a true PWA, then register.</li>
+                <li><b>Admin Notifications:</b> Go to Admin Dashboard &rarr; Settings to configure <b>Gmail SMTP</b> or <b>Resend</b> to enable fully functional transaction and status emails.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
