@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { collection, query, where, getDocs, getDoc, orderBy, setDoc, doc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { CartItem, Product, Promotion } from '../types';
@@ -41,12 +41,20 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discount: number } | null>(null);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [cartLoaded, setCartLoaded] = useState(false);
+  const lastFetchedUserId = useRef<string | null>(null);
 
   // Load and Merge cart from Firestore on user/auth state resolution
   useEffect(() => {
     if (authLoading) return;
 
     if (!user) {
+      lastFetchedUserId.current = null;
+      setCartLoaded(true);
+      return;
+    }
+
+    // If we have already loaded and merged for this specific user, skip to prevent overriding local changes with stale DB merges
+    if (lastFetchedUserId.current === user.uid) {
       setCartLoaded(true);
       return;
     }
@@ -99,6 +107,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
           }
         }
+        lastFetchedUserId.current = user.uid;
       } catch (err) {
         console.error("Error loading/merging cart from Firestore:", err);
       } finally {
@@ -151,8 +160,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       };
       
-      // Debounce sync slightly
-      const timer = setTimeout(syncCartToFirestore, 1000);
+      // Debounce sync slightly - shorten to 200ms to avoid disappearing items on immediate navigation or refresh
+      const timer = setTimeout(syncCartToFirestore, 200);
       return () => clearTimeout(timer);
     }
   }, [items, user, cartLoaded]);

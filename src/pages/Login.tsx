@@ -597,11 +597,7 @@ export default function Login() {
         return;
       }
 
-      if (isQuotaError) {
-        toast.success("🔐 Logged in via Quota Fallback Mode!");
-      } else {
-        toast.success("Logged in successfully!");
-      }
+      toast.success("Logged in successfully! Welcome back ✨");
       
       // Trigger Welcome Push & Email
       try {

@@ -34,10 +34,60 @@ const Notifications: React.FC = () => {
   const navigate = useNavigate();
   const { notifications, unreadCount, markAllAsRead, markAsRead, loading } = useNotifications();
 
+  const [permissionGranted, setPermissionGranted] = React.useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const OS = (window as any).OneSignal;
+      if (OS && OS.Notifications) {
+        return OS.Notifications.permission === true || OS.Notifications.permission === 'granted';
+      }
+      if ('Notification' in window) {
+        return Notification.permission === 'granted';
+      }
+    }
+    return false;
+  });
+
+  const [oneSignalActive, setOneSignalActive] = React.useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return !!(window as any).OneSignal;
+    }
+    return false;
+  });
+
   useEffect(() => {
     // Mark all as read when page is opened
     markAllAsRead();
+
+    const checkPermission = setInterval(() => {
+      const OS = (window as any).OneSignal;
+      setOneSignalActive(!!OS);
+      if (OS && OS.Notifications) {
+        const granted = OS.Notifications.permission === true || OS.Notifications.permission === 'granted';
+        setPermissionGranted(granted);
+      } else if ('Notification' in window) {
+        setPermissionGranted(Notification.permission === 'granted');
+      }
+    }, 1500);
+    return () => clearInterval(checkPermission);
   }, []);
+
+  const requestPushPermission = async () => {
+    try {
+      const OS = (window as any).OneSignal;
+      if (OS && OS.Notifications) {
+        await OS.Notifications.requestPermission();
+        const granted = OS.Notifications.permission === true || OS.Notifications.permission === 'granted';
+        setPermissionGranted(granted);
+      } else if ('Notification' in window) {
+        const res = await Notification.requestPermission();
+        setPermissionGranted(res === 'granted');
+      } else {
+        alert("Push notifications are not supported on this device/browser.");
+      }
+    } catch (e) {
+      console.error("Error requesting permission:", e);
+    }
+  };
 
   const groupNotifications = () => {
     const today: any[] = [];
@@ -160,6 +210,29 @@ const Notifications: React.FC = () => {
       </div>
 
       <div className="px-4 py-6">
+        {/* Push Notification Permission Banner */}
+        {!permissionGranted && (
+          <div className="mb-6 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-sm">
+            <div className="flex gap-3">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center flex-shrink-0 text-rose-600">
+                <Bell size={20} className="animate-pulse" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-gray-900">Enable Push Notifications</h4>
+                <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                  Allow notifications to receive real-time updates and checkout reminders on this device!
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={requestPushPermission}
+              className="self-start sm:self-center bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold px-4 py-2 rounded-xl transition-all shadow-sm shrink-0"
+            >
+              Enable Now ✨
+            </button>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
             <Bell className="animate-bounce mb-4 text-gray-200" size={48} />
