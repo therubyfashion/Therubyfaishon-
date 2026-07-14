@@ -69,6 +69,7 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [todayOrders, setTodayOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const mapRef = useRef<L.Map | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
@@ -177,107 +178,13 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
         }
       });
 
-      // If database is completely empty (no active sessions yet), seed 2 real-looking visitors inside India.
-      if (visitorsList.length === 0) {
-        visitorsList.push({
-          id: 'mock_delhi',
-          sessionId: 'mock_delhi',
-          city: 'Delhi',
-          country: 'India',
-          lat: 28.6139,
-          lng: 77.2090,
-          path: '/product/elegant-banarasi-red-silk-saree',
-          lastSeen: Timestamp.now(),
-          startTime: new Date(Date.now() - 250000).toISOString(),
-          browser: 'Chrome',
-          device: 'iPhone',
-          activeProduct: 'Elegant Banarasi Red Silk Saree',
-          cartValue: 0
-        });
-        visitorsList.push({
-          id: 'mock_ranchi',
-          sessionId: 'mock_ranchi',
-          city: 'Ranchi',
-          country: 'India',
-          lat: 23.3441,
-          lng: 85.3096,
-          path: '/cart',
-          lastSeen: Timestamp.now(),
-          startTime: new Date(Date.now() - 120000).toISOString(),
-          browser: 'Safari',
-          device: 'Android',
-          activeProduct: 'Royal Crimson Anarkali Kurta Set',
-          cartValue: 1899
-        });
-      }
-
+      setError(null);
       setActiveVisitors(visitorsList);
       setLoading(false);
     }, (error) => {
       console.error("Quota limit / onSnapshot error in LiveView active sessions:", error);
-      // Resilience fallback: set high fidelity mock Indian visitors
-      const fallbackList: Visitor[] = [
-        {
-          id: 'f_delhi',
-          sessionId: 'f_delhi',
-          city: 'Delhi',
-          country: 'India',
-          lat: 28.6139,
-          lng: 77.2090,
-          path: '/product/elegant-banarasi-red-silk-saree',
-          lastSeen: Timestamp.now(),
-          startTime: new Date(Date.now() - 250000).toISOString(),
-          browser: 'Chrome',
-          device: 'iPhone',
-          activeProduct: 'Elegant Banarasi Red Silk Saree',
-          cartValue: 0
-        },
-        {
-          id: 'f_ranchi',
-          sessionId: 'f_ranchi',
-          city: 'Ranchi',
-          country: 'India',
-          lat: 23.3441,
-          lng: 85.3096,
-          path: '/cart',
-          lastSeen: Timestamp.now(),
-          startTime: new Date(Date.now() - 120000).toISOString(),
-          browser: 'Chrome',
-          device: 'Android',
-          activeProduct: 'Royal Crimson Anarkali Kurta Set',
-          cartValue: 1899
-        },
-        {
-          id: 'f_mumbai',
-          sessionId: 'f_mumbai',
-          city: 'Mumbai',
-          country: 'India',
-          lat: 19.0760,
-          lng: 72.8777,
-          path: '/checkout',
-          lastSeen: Timestamp.now(),
-          startTime: new Date(Date.now() - 50000).toISOString(),
-          browser: 'Safari',
-          device: 'iPhone',
-          activeProduct: 'Sapphire Blue Velvet Lehenga Choli',
-          cartValue: 4999
-        },
-        {
-          id: 'f_pune',
-          sessionId: 'f_pune',
-          city: 'Pune',
-          country: 'India',
-          lat: 18.5204,
-          lng: 73.8567,
-          path: '/shop',
-          lastSeen: Timestamp.now(),
-          startTime: new Date(Date.now() - 600000).toISOString(),
-          browser: 'Firefox',
-          device: 'Desktop',
-          cartValue: 0
-        }
-      ];
-      setActiveVisitors(fallbackList);
+      setError(error.message || "Unable to load live data");
+      setActiveVisitors([]);
       setLoading(false);
     });
 
@@ -314,12 +221,8 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
       ordersList.sort((a, b) => b.parsedDate.getTime() - a.parsedDate.getTime());
       setTodayOrders(ordersList);
     }, (error) => {
-      console.warn("Orders live sync backup fallback triggered:", error);
-      // Graceful fallback values for today
-      setTodayOrders([
-        { id: 'o1', total: 3499, deliveryCity: 'Delhi', createdAt: new Date().toISOString(), items: [{ name: 'Elegant Banarasi Red Silk Saree' }], parsedDate: new Date() },
-        { id: 'o2', total: 1899, deliveryCity: 'Ranchi', createdAt: new Date(Date.now() - 15000000).toISOString(), items: [{ name: 'Royal Crimson Anarkali Kurta Set' }], parsedDate: new Date(Date.now() - 15000000) }
-      ]);
+      console.warn("Orders live sync error:", error);
+      setTodayOrders([]);
     });
 
     return () => unsubscribe();
@@ -598,6 +501,22 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
               id="india-live-map" 
               className="absolute inset-0 h-full w-full bg-[#f8f9fa]" 
             />
+
+            {error ? (
+              <div className="absolute inset-0 bg-white/80 backdrop-blur-[2px] z-[1000] flex flex-col items-center justify-center p-6 text-center">
+                <div className="bg-red-50 text-red-600 border border-red-100 px-5 py-4 rounded-3xl max-w-sm shadow-md space-y-1 pointer-events-auto">
+                  <p className="text-sm font-bold">Unable to load live data</p>
+                  <p className="text-xs text-red-500 font-medium">Please check your connection or Firestore quota limits.</p>
+                </div>
+              </div>
+            ) : activeVisitors.length === 0 ? (
+              <div className="absolute inset-0 bg-white/45 z-[1000] flex flex-col items-center justify-center pointer-events-none p-6 text-center">
+                <div className="bg-white/95 backdrop-blur-sm border border-neutral-100 px-6 py-5 rounded-3xl shadow-lg space-y-1.5 max-w-xs animate-fade-in pointer-events-auto">
+                  <p className="text-sm font-bold text-neutral-800">No active visitors right now</p>
+                  <p className="text-xs text-neutral-400 font-medium leading-relaxed">There are currently no users active on the site.</p>
+                </div>
+              </div>
+            ) : null}
             
             {/* Visual constraints overlay tag */}
             <div className="absolute bottom-4 left-4 z-10 pointer-events-none bg-white/95 backdrop-blur-sm border border-neutral-100 px-3 py-1.5 rounded-full shadow-sm text-[10px] font-bold text-neutral-500 uppercase tracking-widest">

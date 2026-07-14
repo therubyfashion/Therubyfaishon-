@@ -314,6 +314,7 @@ export default function Settings() {
     try {
       // Clean up home, shop, product caches
       localStorage.removeItem('ruby_home_cache');
+      localStorage.removeItem('ruby_home_cache_v2');
       
       // Clean up dynamic keys
       const keys = Object.keys(localStorage);

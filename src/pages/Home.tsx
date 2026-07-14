@@ -10,7 +10,6 @@ import {
 import { collection, getDocs, query, where, limit, orderBy, addDoc, doc, updateDoc, increment, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Product, Category } from '../types';
-import { fallbackCategories, fallbackBanners, fallbackReviews, fallbackProducts } from '../data/fallbackData';
 import ProductCard from '../components/ProductCard';
 import { ProductCardSkeleton } from '../components/Skeleton';
 import PromoTickerBar from '../components/PromoTickerBar';
@@ -50,14 +49,15 @@ export default function Home() {
   // Load initial cached values to avoid showing skeleton loading and render instantly
   useEffect(() => {
     try {
-      const cached = localStorage.getItem('ruby_home_cache');
+      const cached = localStorage.getItem('ruby_home_cache_v2');
       if (cached) {
         const parsed = JSON.parse(cached);
         // Clean cache of old fallback items to prevent flash of dummy data
-        const hasDummy = (parsed.trendingProducts && parsed.trendingProducts.some((p: any) => p.id && p.id.startsWith('fp'))) ||
-                         (parsed.categories && parsed.categories.some((c: any) => c.id && c.id.startsWith('kurti')));
+        const hasDummy = (parsed.trendingProducts && parsed.trendingProducts.some((p: any) => !p.id || String(p.id).length < 10 || String(p.id).startsWith('fp'))) ||
+                         (parsed.popularProducts && parsed.popularProducts.some((p: any) => !p.id || String(p.id).length < 10 || String(p.id).startsWith('fp'))) ||
+                         (parsed.categories && parsed.categories.some((c: any) => !c.id || String(c.id).length < 10 || String(c.id).startsWith('kurti')));
         if (hasDummy) {
-          localStorage.removeItem('ruby_home_cache');
+          localStorage.removeItem('ruby_home_cache_v2');
         } else {
           if (parsed.trendingProducts) setTrendingProducts(parsed.trendingProducts);
           if (parsed.popularProducts) setPopularProducts(parsed.popularProducts);
@@ -80,7 +80,7 @@ export default function Home() {
 
   useEffect(() => {
     // Keep loading false if we have fallback data to render instantly, otherwise show skeletons
-    const hasCache = localStorage.getItem('ruby_home_cache') !== null;
+    const hasCache = localStorage.getItem('ruby_home_cache_v2') !== null;
     if (!hasCache && trendingProducts.length === 0) {
       setLoading(true);
     }
@@ -94,11 +94,11 @@ export default function Home() {
 
     const cacheAndSave = (key: string, data: any) => {
       try {
-        const cached = localStorage.getItem('ruby_home_cache');
+        const cached = localStorage.getItem('ruby_home_cache_v2');
         const parsed = cached ? JSON.parse(cached) : {};
         parsed[key] = data;
         parsed.cachedAt = Date.now();
-        localStorage.setItem('ruby_home_cache', JSON.stringify(parsed));
+        localStorage.setItem('ruby_home_cache_v2', JSON.stringify(parsed));
       } catch (e) {
         console.warn("Failed to write home cache:", e);
       }
@@ -117,7 +117,7 @@ export default function Home() {
       cacheAndSave('categories', docs);
     }, (error) => {
       console.warn("Categories real-time snapshot error:", error);
-      setCategories(prev => prev.length > 0 ? prev : fallbackCategories);
+      setCategories(prev => prev.length > 0 ? prev : []);
     });
 
     // 2. Real-time Banners listener
@@ -128,7 +128,7 @@ export default function Home() {
       cacheAndSave('banners', activeBanners);
     }, (error) => {
       console.warn("Banners real-time snapshot error:", error);
-      setBanners(prev => prev.length > 0 ? prev : fallbackBanners);
+      setBanners(prev => prev.length > 0 ? prev : []);
     });
 
     // 3. Real-time Reviews listener
@@ -144,7 +144,7 @@ export default function Home() {
       cacheAndSave('reviews', firestoreReviews);
     }, (error) => {
       console.warn("Reviews real-time snapshot error:", error);
-      setReviews(prev => prev.length > 0 ? prev : fallbackReviews);
+      setReviews(prev => prev.length > 0 ? prev : []);
     });
 
     // 4. Real-time Settings listener (Promo Config)
@@ -200,8 +200,8 @@ export default function Home() {
       const popular = allProds.filter(p => p.isPopular);
       
       // If there are absolutely zero trending/popular tags on products, fallback cleanly to slicing the active ones
-      trendingData = trending.length > 0 ? trending : (allProds.length > 0 ? allProds.slice(0, 8) : fallbackProducts.filter(p => p.isTrending || true));
-      popularData = popular.length > 0 ? popular : (allProds.length > 0 ? allProds.slice(0, 8) : fallbackProducts);
+      trendingData = trending.length > 0 ? trending : (allProds.length > 0 ? allProds.slice(0, 8) : []);
+      popularData = popular.length > 0 ? popular : (allProds.length > 0 ? allProds.slice(0, 8) : []);
       
       setTrendingProducts(trendingData);
       setPopularProducts(popularData);
@@ -210,8 +210,8 @@ export default function Home() {
       cacheAndSave('popularProducts', popularData);
     }, (error) => {
       console.warn("Products real-time snapshot error:", error);
-      setTrendingProducts(prev => prev.length > 0 ? prev : fallbackProducts.filter(p => p.isTrending || true));
-      setPopularProducts(prev => prev.length > 0 ? prev : fallbackProducts);
+      setTrendingProducts(prev => prev.length > 0 ? prev : []);
+      setPopularProducts(prev => prev.length > 0 ? prev : []);
       setLoading(false);
     });
 
@@ -355,6 +355,11 @@ export default function Home() {
     : popularProducts.filter(p => Array.isArray(p.category) ? p.category.includes(activeFilter) : p.category === activeFilter);
 
   const categoryIcons: Record<string, any> = {
+    'Kurti': Shirt,
+    'Sarees': Gem,
+    'Lehengas': Gem,
+    'Suits': Shirt,
+    'Dupatta': Shirt,
     'Clothes': Shirt,
     'Shoes': Package, // Using Package as a fallback for shoes if needed
     'Bags': ShoppingBag,

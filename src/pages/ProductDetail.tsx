@@ -18,7 +18,6 @@ import { Navigation, Pagination, Zoom, Thumbs } from 'swiper/modules';
 import type { Swiper as SwiperType } from 'swiper';
 import { ProductDetailSkeleton } from '../components/Skeleton';
 import ProductCard from '../components/ProductCard';
-import { fallbackReviews } from '../data/fallbackData';
 import { compressImage } from '../utils/imageUtils';
 import { formatPrice } from '../utils/currency';
 
@@ -484,19 +483,7 @@ export default function ProductDetail() {
         }
       } catch (error) {
         console.error("Error fetching reviews:", error);
-        // Resiliently fallback to local default reviews if Firestore quota/reads are blocked
-        const defaultReviews = fallbackReviews.map(r => ({
-          id: r.id,
-          productId: id,
-          userName: r.name,
-          userEmail: '',
-          userImage: '',
-          rating: r.rating,
-          comment: r.text,
-          createdAt: new Date().toISOString(),
-          likes: r.likes
-        } as Review));
-        setReviews(defaultReviews);
+        setReviews([]);
       }
     };
 
@@ -541,28 +528,13 @@ export default function ProductDetail() {
     }
   };
 
-  // Deterministic stable dummy reviews
-  const dummyCount = 42 + ((product?.id || '').split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0) % 97);
-  
-  // Deterministic dummy split
-  const dummy1Stars = Math.max(1, Math.floor(dummyCount * 0.01));
-  const dummy2Stars = Math.max(1, Math.floor(dummyCount * 0.03));
-  const dummy3Stars = Math.max(2, Math.floor(dummyCount * 0.07));
-  const dummy4Stars = Math.max(5, Math.floor(dummyCount * 0.15));
-  const dummy5Stars = dummyCount - (dummy1Stars + dummy2Stars + dummy3Stars + dummy4Stars);
-
   const getStarCount = (star: number) => {
-    const realCount = reviews.filter(r => r.rating === star).length;
-    if (star === 5) return dummy5Stars + realCount;
-    if (star === 4) return dummy4Stars + realCount;
-    if (star === 3) return dummy3Stars + realCount;
-    if (star === 2) return dummy2Stars + realCount;
-    return dummy1Stars + realCount;
+    return reviews.filter(r => r.rating === star).length;
   };
 
-  const totalReviewsCount = dummyCount + reviews.length;
+  const totalReviewsCount = reviews.length;
 
-  const totalRatingSum = (dummy5Stars * 5 + dummy4Stars * 4 + dummy3Stars * 3 + dummy2Stars * 2 + dummy1Stars * 1) + reviews.reduce((acc, r) => acc + r.rating, 0);
+  const totalRatingSum = reviews.reduce((acc, r) => acc + r.rating, 0);
   const averageRating = totalReviewsCount > 0
     ? (totalRatingSum / totalReviewsCount).toFixed(1)
     : "0.0";

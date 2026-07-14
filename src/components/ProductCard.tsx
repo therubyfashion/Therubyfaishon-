@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShoppingBag, Heart, Star } from 'lucide-react';
 import { Product } from '../types';
@@ -8,6 +8,8 @@ import { trackPixelEvent } from '../lib/pixel';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
 import { formatPrice } from '../utils/currency';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../firebase';
 
 interface ProductCardProps {
   product: Product;
@@ -17,6 +19,27 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const navigate = useNavigate();
   const { addToCart } = useCart();
   const { toggleWishlist, isInWishlist } = useWishlist();
+  const [reviewStats, setReviewStats] = useState({ average: 0, count: 0 });
+
+  useEffect(() => {
+    let active = true;
+    if (!product || !product.id) return;
+    const fetchStats = async () => {
+      try {
+        const q = query(collection(db, 'reviews'), where('productId', '==', product.id));
+        const snap = await getDocs(q);
+        if (!active) return;
+        const ratings = snap.docs.map(doc => Number(doc.data().rating || 0));
+        const count = ratings.length;
+        const average = count > 0 ? ratings.reduce((sum, r) => sum + r, 0) / count : 0;
+        setReviewStats({ average, count });
+      } catch (err) {
+        console.warn("Failed to fetch product review stats:", err);
+      }
+    };
+    fetchStats();
+    return () => { active = false; };
+  }, [product?.id]);
 
   if (!product || !product.id) {
     return null;
@@ -125,20 +148,20 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           )}
         </div>
         
-        {/* Deterministic count matching product details page logic */}
-        {(() => {
-          const idStr = String(product.id || '');
-          const dummyCount = 42 + (idStr.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 97);
-          return (
-            <div className="product-rating flex items-center gap-1 mt-1 text-[12px] text-gray-400">
-              <div className="flex text-yellow-400">
-                <Star size={10} fill="currentColor" />
-              </div>
-              <span className="font-semibold text-gray-700">{(4.2 + ((idStr.split('').reduce((acc, char) => acc + char.charCodeAt(0) * 31, 0) % 8) / 10)).toFixed(1)}</span>
-              <span className="text-[10px] text-gray-400 leading-none">({dummyCount})</span>
+        {/* Real-time review count matching product details page logic */}
+        {reviewStats.count > 0 ? (
+          <div className="product-rating flex items-center gap-1 mt-1 text-[12px] text-gray-400">
+            <div className="flex text-yellow-400">
+              <Star size={10} fill="currentColor" />
             </div>
-          );
-        })()}
+            <span className="font-semibold text-gray-700">{reviewStats.average.toFixed(1)}</span>
+            <span className="text-[10px] text-gray-400 leading-none">({reviewStats.count})</span>
+          </div>
+        ) : (
+          <div className="product-rating flex items-center gap-1 mt-1 text-[11px] text-gray-400 font-medium">
+            No reviews yet
+          </div>
+        )}
       </div>
     </div>
   );
