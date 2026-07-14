@@ -21,7 +21,7 @@ import { useVisitorTracking } from './hooks/useVisitorTracking';
 import { trackPixelEvent } from './lib/pixel';
 
 // Lazy load pages
-const Home = React.lazy(() => import('./pages/Home'));
+import Home from './pages/Home';
 const Shop = React.lazy(() => import('./pages/Shop'));
 const ProductDetail = React.lazy(() => import('./pages/ProductDetail'));
 const Cart = React.lazy(() => import('./pages/Cart'));

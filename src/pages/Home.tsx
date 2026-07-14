@@ -30,7 +30,29 @@ export default function Home() {
   const [promoConfig, setPromoConfig] = useState<any>({ promoText: "Welcome to The Ruby Ethnic Wear Store! 🎉" });
   const [categories, setCategories] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
+  const [productsLoaded, setProductsLoaded] = useState(false);
+  const [bannersLoaded, setBannersLoaded] = useState(false);
+  const [minLoadingActive, setMinLoadingActive] = useState(true);
+  const [safetyTimeoutActive, setSafetyTimeoutActive] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setMinLoadingActive(false);
+    }, 450); // 450ms minimum loader duration for smooth page transition
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSafetyTimeoutActive(false);
+    }, 2500); // 2.5s safety timeout
+    return () => clearTimeout(timer);
+  }, []);
+
+  const hasRealData = categories.length > 0 && banners.length > 0 && trendingProducts.length > 0;
+  const loading = minLoadingActive || (!hasRealData && safetyTimeoutActive);
   const [activeFilter, setActiveFilter] = useState('All');
   const [currentReview, setCurrentReview] = useState(0);
   const [currentBanner, setCurrentBanner] = useState(0);
@@ -61,11 +83,19 @@ export default function Home() {
         } else {
           if (parsed.trendingProducts) setTrendingProducts(parsed.trendingProducts);
           if (parsed.popularProducts) setPopularProducts(parsed.popularProducts);
-          if (parsed.categories) setCategories(parsed.categories);
+          if (parsed.categories) {
+            const filtered = parsed.categories.filter((c: any) => {
+              const nameLower = String(c.name || '').toLowerCase();
+              return nameLower !== 'kurti' && nameLower !== 'sarees' && nameLower !== 'saree' && nameLower !== 'kurtis';
+            });
+            setCategories(filtered);
+          }
           if (parsed.banners) setBanners(parsed.banners);
           if (parsed.reviews) setReviews(parsed.reviews);
           if (parsed.promoConfig) setPromoConfig(parsed.promoConfig);
-          setLoading(false); // Instantly turn off the skeleton loaders
+          setCategoriesLoaded(true);
+          setProductsLoaded(true);
+          setBannersLoaded(true);
         }
       }
     } catch (e) {
@@ -79,12 +109,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    // Keep loading false if we have fallback data to render instantly, otherwise show skeletons
-    const hasCache = localStorage.getItem('ruby_home_cache_v2') !== null;
-    if (!hasCache && trendingProducts.length === 0) {
-      setLoading(true);
-    }
-
     let trendingData: Product[] = [];
     let popularData: Product[] = [];
     let sortedCats: any[] = [];
@@ -112,12 +136,19 @@ export default function Home() {
         const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
         return orderA - orderB;
       });
-      sortedCats = docs;
-      setCategories(docs);
-      cacheAndSave('categories', docs);
+      // Filter out 'Kurti' and 'Sarees' dummy categories
+      const filteredDocs = docs.filter(c => {
+        const nameLower = String(c.name || '').toLowerCase();
+        return nameLower !== 'kurti' && nameLower !== 'sarees' && nameLower !== 'saree' && nameLower !== 'kurtis';
+      });
+      sortedCats = filteredDocs;
+      setCategories(filteredDocs);
+      cacheAndSave('categories', filteredDocs);
+      setCategoriesLoaded(true);
     }, (error) => {
       console.warn("Categories real-time snapshot error:", error);
       setCategories(prev => prev.length > 0 ? prev : []);
+      setCategoriesLoaded(true);
     });
 
     // 2. Real-time Banners listener
@@ -126,9 +157,11 @@ export default function Home() {
       activeBanners = bannerData.filter(b => b.active !== false && b.active !== 'false');
       setBanners(activeBanners);
       cacheAndSave('banners', activeBanners);
+      setBannersLoaded(true);
     }, (error) => {
       console.warn("Banners real-time snapshot error:", error);
       setBanners(prev => prev.length > 0 ? prev : []);
+      setBannersLoaded(true);
     });
 
     // 3. Real-time Reviews listener
@@ -205,14 +238,14 @@ export default function Home() {
       
       setTrendingProducts(trendingData);
       setPopularProducts(popularData);
-      setLoading(false);
+      setProductsLoaded(true);
       cacheAndSave('trendingProducts', trendingData);
       cacheAndSave('popularProducts', popularData);
     }, (error) => {
       console.warn("Products real-time snapshot error:", error);
       setTrendingProducts(prev => prev.length > 0 ? prev : []);
       setPopularProducts(prev => prev.length > 0 ? prev : []);
-      setLoading(false);
+      setProductsLoaded(true);
     });
 
     return () => {

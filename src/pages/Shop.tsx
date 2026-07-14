@@ -40,7 +40,13 @@ export default function Shop() {
           localStorage.removeItem(cacheKey);
         } else {
           if (parsed.products) setProducts(parsed.products);
-          if (parsed.categories) setCategories(parsed.categories);
+          if (parsed.categories) {
+            const filtered = parsed.categories.filter((c: any) => {
+              const nameLower = String(c || '').toLowerCase();
+              return nameLower !== 'kurti' && nameLower !== 'sarees' && nameLower !== 'saree' && nameLower !== 'kurtis';
+            });
+            setCategories(filtered);
+          }
           setLoading(false);
         }
       }
@@ -79,7 +85,12 @@ export default function Shop() {
         const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
         return orderA - orderB;
       });
-      const catNames = sortedCategoryDocs.map(c => c.name);
+      // Filter out Kurti and Sarees from categories list
+      const filteredCategoryDocs = sortedCategoryDocs.filter(c => {
+        const nameLower = String(c.name || '').toLowerCase();
+        return nameLower !== 'kurti' && nameLower !== 'sarees' && nameLower !== 'saree' && nameLower !== 'kurtis';
+      });
+      const catNames = filteredCategoryDocs.map(c => c.name);
       finalCategories = ['All', ...catNames];
       setCategories(finalCategories);
       saveToCache('categories', finalCategories);
