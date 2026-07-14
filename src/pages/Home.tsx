@@ -21,15 +21,19 @@ import { Capacitor } from '@capacitor/core';
 import { useNotifications } from '../contexts/NotificationContext';
 import { checkProductHealth, logProductDiagnostics } from '../utils/productHealthCheck';
 import { autoSeedDatabase } from '../utils/dbSeeder';
+import { 
+  fallbackCategories, fallbackBanners, fallbackProducts, 
+  fallbackReviews, fallbackPromoConfig 
+} from '../utils/fallbackData';
 
 export default function Home() {
   const { user, profile } = useAuth();
   const { unreadCount } = useNotifications();
-  const [trendingProducts, setTrendingProducts] = useState<Product[]>([]);
-  const [popularProducts, setPopularProducts] = useState<Product[]>([]);
-  const [promoConfig, setPromoConfig] = useState<any>({ promoText: "Welcome to The Ruby Ethnic Wear Store! 🎉" });
-  const [categories, setCategories] = useState<any[]>([]);
-  const [banners, setBanners] = useState<any[]>([]);
+  const [trendingProducts, setTrendingProducts] = useState<Product[]>(() => fallbackProducts.filter(p => p.isTrending));
+  const [popularProducts, setPopularProducts] = useState<Product[]>(() => fallbackProducts.filter(p => p.isPopular));
+  const [promoConfig, setPromoConfig] = useState<any>(fallbackPromoConfig);
+  const [categories, setCategories] = useState<any[]>(fallbackCategories);
+  const [banners, setBanners] = useState<any[]>(fallbackBanners);
   
   const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [productsLoaded, setProductsLoaded] = useState(false);
@@ -59,7 +63,7 @@ export default function Home() {
   const [email, setEmail] = useState('');
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [newReview, setNewReview] = useState({ rating: 5, text: '', tag: 'Fabric', image: '' as string | null });
-  const [reviews, setReviews] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<any[]>(fallbackReviews);
   const [reviewLoading, setReviewLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -81,22 +85,27 @@ export default function Home() {
         if (hasDummy) {
           localStorage.removeItem('ruby_home_cache_v2');
         } else {
-          if (parsed.trendingProducts) setTrendingProducts(parsed.trendingProducts);
-          if (parsed.popularProducts) setPopularProducts(parsed.popularProducts);
-          if (parsed.categories) {
+          if (parsed.trendingProducts && parsed.trendingProducts.length > 0) setTrendingProducts(parsed.trendingProducts);
+          if (parsed.popularProducts && parsed.popularProducts.length > 0) setPopularProducts(parsed.popularProducts);
+          if (parsed.categories && parsed.categories.length > 0) {
             const filtered = parsed.categories.filter((c: any) => {
               const nameLower = String(c.name || '').toLowerCase();
               return nameLower !== 'kurti' && nameLower !== 'sarees' && nameLower !== 'saree' && nameLower !== 'kurtis';
             });
-            setCategories(filtered);
+            if (filtered.length > 0) setCategories(filtered);
           }
-          if (parsed.banners) setBanners(parsed.banners);
-          if (parsed.reviews) setReviews(parsed.reviews);
+          if (parsed.banners && parsed.banners.length > 0) setBanners(parsed.banners);
+          if (parsed.reviews && parsed.reviews.length > 0) setReviews(parsed.reviews);
           if (parsed.promoConfig) setPromoConfig(parsed.promoConfig);
           setCategoriesLoaded(true);
           setProductsLoaded(true);
           setBannersLoaded(true);
         }
+      } else {
+        // No cache, we have fallback data populated so mark loaded to prevent showing raw empty state
+        setCategoriesLoaded(true);
+        setProductsLoaded(true);
+        setBannersLoaded(true);
       }
     } catch (e) {
       console.warn("Failed to load home cache:", e);
@@ -141,13 +150,17 @@ export default function Home() {
         const nameLower = String(c.name || '').toLowerCase();
         return nameLower !== 'kurti' && nameLower !== 'sarees' && nameLower !== 'saree' && nameLower !== 'kurtis';
       });
-      sortedCats = filteredDocs;
-      setCategories(filteredDocs);
-      cacheAndSave('categories', filteredDocs);
+      if (filteredDocs.length > 0) {
+        sortedCats = filteredDocs;
+        setCategories(filteredDocs);
+        cacheAndSave('categories', filteredDocs);
+      } else {
+        setCategories(fallbackCategories);
+      }
       setCategoriesLoaded(true);
     }, (error) => {
       console.warn("Categories real-time snapshot error:", error);
-      setCategories(prev => prev.length > 0 ? prev : []);
+      setCategories(prev => prev.length > 0 ? prev : fallbackCategories);
       setCategoriesLoaded(true);
     });
 
@@ -155,12 +168,16 @@ export default function Home() {
     const unsubscribeBanners = onSnapshot(collection(db, 'banners'), (snapshot) => {
       const bannerData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
       activeBanners = bannerData.filter(b => b.active !== false && b.active !== 'false');
-      setBanners(activeBanners);
-      cacheAndSave('banners', activeBanners);
+      if (activeBanners.length > 0) {
+        setBanners(activeBanners);
+        cacheAndSave('banners', activeBanners);
+      } else {
+        setBanners(fallbackBanners);
+      }
       setBannersLoaded(true);
     }, (error) => {
       console.warn("Banners real-time snapshot error:", error);
-      setBanners(prev => prev.length > 0 ? prev : []);
+      setBanners(prev => prev.length > 0 ? prev : fallbackBanners);
       setBannersLoaded(true);
     });
 
@@ -172,12 +189,16 @@ export default function Home() {
         const dateB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt)) : new Date(0);
         return dateB.getTime() - dateA.getTime();
       });
-      finalReviews = firestoreReviews;
-      setReviews(firestoreReviews);
-      cacheAndSave('reviews', firestoreReviews);
+      if (firestoreReviews.length > 0) {
+        finalReviews = firestoreReviews;
+        setReviews(firestoreReviews);
+        cacheAndSave('reviews', firestoreReviews);
+      } else {
+        setReviews(fallbackReviews);
+      }
     }, (error) => {
       console.warn("Reviews real-time snapshot error:", error);
-      setReviews(prev => prev.length > 0 ? prev : []);
+      setReviews(prev => prev.length > 0 ? prev : fallbackReviews);
     });
 
     // 4. Real-time Settings listener (Promo Config)
@@ -195,30 +216,35 @@ export default function Home() {
         };
         setPromoConfig(promoConfigData);
         cacheAndSave('promoConfig', promoConfigData);
+      } else {
+        setPromoConfig(fallbackPromoConfig);
       }
     }, (error) => {
       console.warn("Settings real-time snapshot error:", error);
-      setPromoConfig(prev => prev || {
-        promoEnabled: true,
-        promoType: 'timer',
-        promoMessage: '🔥 Special Live Sale Ends Soon:',
-        promoEndDate: new Date(Date.now() + 86400000).toISOString(),
-        promoScrolling: false,
-        promoBgColor: '#A11B35',
-        promoTextColor: '#FFFFFF',
-      });
+      setPromoConfig(prev => prev || fallbackPromoConfig);
     });
 
     // 5. Real-time Products listener (Limit 100 and orderBy createdAt desc to get the newest real products)
     const productsQuery = query(collection(db, 'products'), orderBy('createdAt', 'desc'), limit(100));
     const unsubscribeProducts = onSnapshot(productsQuery, (snapshot) => {
-      const allProds = snapshot.docs.map(doc => {
+      let allProds = snapshot.docs.map(doc => {
         const prod = { id: doc.id, ...doc.data() } as Product;
         logProductDiagnostics('Fetched', prod);
         return prod;
       });
+
+      // Sort in-memory to ensure order desc even if missing fields
+      allProds.sort((a, b) => {
+        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return dateB - dateA;
+      });
       
       console.log(`[Product Diagnostic - Query Result Count] Total products fetched for Home screen: ${allProds.length}`);
+
+      if (allProds.length === 0) {
+        allProds = fallbackProducts;
+      }
 
       // Run health checks & log diagnostics
       allProds.forEach(p => {
@@ -243,8 +269,8 @@ export default function Home() {
       cacheAndSave('popularProducts', popularData);
     }, (error) => {
       console.warn("Products real-time snapshot error:", error);
-      setTrendingProducts(prev => prev.length > 0 ? prev : []);
-      setPopularProducts(prev => prev.length > 0 ? prev : []);
+      setTrendingProducts(prev => prev.length > 0 ? prev : fallbackProducts.filter(p => p.isTrending));
+      setPopularProducts(prev => prev.length > 0 ? prev : fallbackProducts.filter(p => p.isPopular));
       setProductsLoaded(true);
     });
 

@@ -8,12 +8,35 @@ import ProductCard from '../components/ProductCard';
 import { ProductCardSkeleton } from '../components/Skeleton';
 import { Filter, ChevronDown, SlidersHorizontal, Truck, RefreshCw, ShieldCheck } from 'lucide-react';
 import { checkProductHealth, logProductDiagnostics } from '../utils/productHealthCheck';
+import { fallbackCategories, fallbackProducts } from '../utils/fallbackData';
 
 export default function Shop() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<Product[]>(() => {
+    try {
+      const activeCategory = searchParams.get('category') || 'All';
+      const cacheKey = `ruby_shop_cache_${activeCategory}_newest`;
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.products && parsed.products.length > 0) return parsed.products;
+      }
+    } catch (e) {}
+    return fallbackProducts;
+  });
   const [loading, setLoading] = useState(true);
-  const [categories, setCategories] = useState<string[]>(['All']);
+  const [categories, setCategories] = useState<string[]>(() => {
+    try {
+      const activeCategory = searchParams.get('category') || 'All';
+      const cacheKey = `ruby_shop_cache_${activeCategory}_newest`;
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.categories && parsed.categories.length > 0) return parsed.categories;
+      }
+    } catch (e) {}
+    return ['All', ...fallbackCategories.map(c => c.name)];
+  });
   const [activeCategory, setActiveCategory] = useState<string>(
     searchParams.get('category') || 'All'
   );
@@ -79,7 +102,10 @@ export default function Shop() {
 
     // 1. Categories real-time sync
     const unsubscribeCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
-      const sortedCategoryDocs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      let sortedCategoryDocs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      if (sortedCategoryDocs.length === 0) {
+        sortedCategoryDocs = fallbackCategories;
+      }
       sortedCategoryDocs.sort((a, b) => {
         const orderA = a.sortOrder !== undefined ? Number(a.sortOrder) : 1000;
         const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
@@ -96,7 +122,7 @@ export default function Shop() {
       saveToCache('categories', finalCategories);
     }, (error) => {
       console.warn("Shop categories real-time error:", error);
-      setCategories(['All']);
+      setCategories(['All', ...fallbackCategories.map(c => c.name)]);
       unsubscribeCategories();
     });
 
@@ -120,7 +146,7 @@ export default function Shop() {
       console.log(`[Product Diagnostic - Query Result Count] Total products fetched from Firestore: ${rawProds.length}`);
 
       if (rawProds.length === 0) {
-        rawProds = [];
+        rawProds = fallbackProducts;
       }
 
       // Client-side category filtering with fallback resilience (supports both category as array or string)
@@ -165,7 +191,11 @@ export default function Shop() {
       saveToCache('products', prods);
     }, (error) => {
       console.warn("Shop products real-time error:", error);
-      setProducts([]);
+      const filteredFallbacks = fallbackProducts.filter(p => {
+        if (activeCategory === 'All') return true;
+        return Array.isArray(p.category) ? p.category.includes(activeCategory) : p.category === activeCategory;
+      });
+      setProducts(filteredFallbacks);
       setLoading(false);
       unsubscribeProducts();
     });

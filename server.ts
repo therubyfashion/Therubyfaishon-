@@ -831,6 +831,30 @@ export async function isNotificationDuplicate(userId: string, title: string, bod
 }
 
 /**
+ * Helper to check if OneSignal response has invalid subscription ID / external user ID errors
+ */
+function hasInvalidIdsError(responseData: any): boolean {
+  if (!responseData || !responseData.errors) return false;
+  const errors = responseData.errors;
+  if (Array.isArray(errors)) {
+    return errors.some((err: any) => {
+      const s = String(err).toLowerCase();
+      return s.includes('invalid_player_ids') || s.includes('invalid_external_user_ids') || s.includes('invalid_player_id') || s.includes('invalid_external_user_id');
+    });
+  } else if (typeof errors === 'object') {
+    if (errors.invalid_player_ids && errors.invalid_player_ids.length > 0) {
+      return true;
+    }
+    if (errors.invalid_external_user_ids && errors.invalid_external_user_ids.length > 0) {
+      return true;
+    }
+    const errStr = JSON.stringify(errors).toLowerCase();
+    return errStr.includes('invalid_player_ids') || errStr.includes('invalid_external_user_ids') || errStr.includes('invalid_player_id') || errStr.includes('invalid_external_user_id');
+  }
+  return false;
+}
+
+/**
  * Single Reusable Notification Service
  * Centralizes credentials checks, targeting fields (using only latest include_subscription_ids),
  * and logging of all administrative / customer notifications.
@@ -940,6 +964,96 @@ export const NotificationService = {
       console.log(`✅ [NotificationService] OneSignal HTTP Response Code: ${response.status}`);
       console.log(`✅ [NotificationService] Response Data Body:`, JSON.stringify(response.data, null, 2));
       console.log(`=============================================================\n`);
+
+      // Auto-cleanup invalid subscriptions if OneSignal tells us the subscription ID is invalid/expired
+      const responseData = response?.data;
+      if (responseData?.errors) {
+        let invalidPlayerIds: string[] = [];
+        let invalidExternalUserIds: string[] = [];
+
+        if (typeof responseData.errors === 'object' && !Array.isArray(responseData.errors)) {
+          if (Array.isArray(responseData.errors.invalid_player_ids)) {
+            invalidPlayerIds = responseData.errors.invalid_player_ids.map((id: any) => String(id).trim());
+          }
+          if (Array.isArray(responseData.errors.invalid_external_user_ids)) {
+            invalidExternalUserIds = responseData.errors.invalid_external_user_ids.map((id: any) => String(id).trim());
+          }
+        } else if (Array.isArray(responseData.errors)) {
+          responseData.errors.forEach((err: any) => {
+            const errStr = String(err).toLowerCase();
+            if (errStr.includes('invalid_player_id')) {
+              const match = errStr.match(/invalid_player_ids?:\s*([a-zA-Z0-9\-]+)/i);
+              if (match) {
+                invalidPlayerIds.push(match[1].trim());
+              }
+            }
+            if (errStr.includes('invalid_external_user_id')) {
+              const match = errStr.match(/invalid_external_user_ids?:\s*([a-zA-Z0-9\-]+)/i);
+              if (match) {
+                invalidExternalUserIds.push(match[1].trim());
+              }
+            }
+          });
+        }
+
+        if (invalidPlayerIds.length > 0) {
+          console.log(`🧹 [NotificationService Auto-Cleanup] Found invalid_player_ids in success response: ${JSON.stringify(invalidPlayerIds)}`);
+          for (const invalidId of invalidPlayerIds) {
+            try {
+              if (db) {
+                const snap = await db.collection('users').where('onesignalId', '==', invalidId).get();
+                if (snap && !snap.empty) {
+                  for (const doc of snap.docs) {
+                    await doc.ref.update({ onesignalId: null });
+                    console.log(`🧹 [NotificationService Auto-Cleanup] Successfully cleared onesignalId for user doc ${doc.id}`);
+                  }
+                }
+              }
+              if (clientDb && isClientDbReady) {
+                const { query: cQuery, collection: cCollection, getDocs: cGetDocs, where: cWhere, updateDoc: cUpdateDoc } = await import('firebase/firestore');
+                const q = cQuery(cCollection(clientDb, 'users'), cWhere('onesignalId', '==', invalidId));
+                const snap = await cGetDocs(q);
+                if (!snap.empty) {
+                  for (const doc of snap.docs) {
+                    await cUpdateDoc(doc.ref, { onesignalId: null });
+                    console.log(`🧹 [NotificationService Auto-Cleanup (Client SDK)] Cleared onesignalId for user doc ${doc.id}`);
+                  }
+                }
+              }
+            } catch (cleanErr: any) {
+              console.error(`❌ [NotificationService Auto-Cleanup] Failed to clear invalid player ID ${invalidId}:`, cleanErr.message);
+            }
+          }
+        }
+
+        if (invalidExternalUserIds.length > 0) {
+          console.log(`🧹 [NotificationService Auto-Cleanup] Found invalid_external_user_ids in success response: ${JSON.stringify(invalidExternalUserIds)}`);
+          for (const invalidUserId of invalidExternalUserIds) {
+            try {
+              if (db) {
+                const docRef = db.collection('users').doc(invalidUserId);
+                const docSnap = await docRef.get();
+                if (docSnap.exists) {
+                  await docRef.update({ onesignalId: null });
+                  console.log(`🧹 [NotificationService Auto-Cleanup] Cleared onesignalId for invalid external user ID ${invalidUserId}`);
+                }
+              }
+              if (clientDb && isClientDbReady) {
+                const { doc: cDoc, getDoc: cGetDoc, updateDoc: cUpdateDoc } = await import('firebase/firestore');
+                const docRef = cDoc(clientDb, 'users', invalidUserId);
+                const docSnap = await cGetDoc(docRef);
+                if (docSnap.exists()) {
+                  await cUpdateDoc(docRef, { onesignalId: null });
+                  console.log(`🧹 [NotificationService Auto-Cleanup (Client SDK)] Cleared onesignalId for invalid external user ID ${invalidUserId}`);
+                }
+              }
+            } catch (cleanErr: any) {
+              console.error(`❌ [NotificationService Auto-Cleanup] Failed to clear invalid external user ID ${invalidUserId}:`, cleanErr.message);
+            }
+          }
+        }
+      }
+
       return response;
     } catch (axiosErr: any) {
       const errorData = axiosErr.response?.data;
@@ -967,6 +1081,74 @@ export const NotificationService = {
             }
           } catch (cleanErr: any) {
             console.error("Failed to run automatic cleanup:", cleanErr.message);
+          }
+        }
+      }
+
+      // Extracted auto-cleanup for invalid player/external IDs in errorData
+      if (errorData?.errors) {
+        let invalidPlayerIds: string[] = [];
+        let invalidExternalUserIds: string[] = [];
+
+        if (typeof errorData.errors === 'object' && !Array.isArray(errorData.errors)) {
+          if (Array.isArray(errorData.errors.invalid_player_ids)) {
+            invalidPlayerIds = errorData.errors.invalid_player_ids.map((id: any) => String(id).trim());
+          }
+          if (Array.isArray(errorData.errors.invalid_external_user_ids)) {
+            invalidExternalUserIds = errorData.errors.invalid_external_user_ids.map((id: any) => String(id).trim());
+          }
+        } else if (Array.isArray(errorData.errors)) {
+          errorData.errors.forEach((err: any) => {
+            const errStr = String(err).toLowerCase();
+            if (errStr.includes('invalid_player_id')) {
+              const match = errStr.match(/invalid_player_ids?:\s*([a-zA-Z0-9\-]+)/i);
+              if (match) {
+                invalidPlayerIds.push(match[1].trim());
+              }
+            }
+            if (errStr.includes('invalid_external_user_id')) {
+              const match = errStr.match(/invalid_external_user_ids?:\s*([a-zA-Z0-9\-]+)/i);
+              if (match) {
+                invalidExternalUserIds.push(match[1].trim());
+              }
+            }
+          });
+        }
+
+        if (invalidPlayerIds.length > 0) {
+          console.log(`🧹 [NotificationService Auto-Cleanup] Found invalid_player_ids in error response: ${JSON.stringify(invalidPlayerIds)}`);
+          for (const invalidId of invalidPlayerIds) {
+            try {
+              if (db) {
+                const snap = await db.collection('users').where('onesignalId', '==', invalidId).get();
+                if (snap && !snap.empty) {
+                  for (const doc of snap.docs) {
+                    await doc.ref.update({ onesignalId: null });
+                    console.log(`🧹 [NotificationService Auto-Cleanup] Successfully cleared onesignalId for user doc ${doc.id}`);
+                  }
+                }
+              }
+            } catch (cleanErr: any) {
+              console.error(`❌ [NotificationService Auto-Cleanup] Failed to clear invalid player ID ${invalidId}:`, cleanErr.message);
+            }
+          }
+        }
+
+        if (invalidExternalUserIds.length > 0) {
+          console.log(`🧹 [NotificationService Auto-Cleanup] Found invalid_external_user_ids in error response: ${JSON.stringify(invalidExternalUserIds)}`);
+          for (const invalidUserId of invalidExternalUserIds) {
+            try {
+              if (db) {
+                const docRef = db.collection('users').doc(invalidUserId);
+                const docSnap = await docRef.get();
+                if (docSnap.exists) {
+                  await docRef.update({ onesignalId: null });
+                  console.log(`🧹 [NotificationService Auto-Cleanup] Cleared onesignalId for invalid external user ID ${invalidUserId}`);
+                }
+              }
+            } catch (cleanErr: any) {
+              console.error(`❌ [NotificationService Auto-Cleanup] Failed to clear invalid external user ID ${invalidUserId}:`, cleanErr.message);
+            }
           }
         }
       }
@@ -1155,7 +1337,7 @@ export const NotificationService = {
           };
           const res = await this.send(directNotif);
           msgId = res?.data?.id || msgId;
-          resultStatus = "success";
+          resultStatus = hasInvalidIdsError(res?.data) ? "failed" : "success";
         } catch (dErr: any) {
           console.warn("[NotificationService] Direct admin subscription push warning:", dErr.message);
           resultStatus = "warning";
@@ -1169,6 +1351,7 @@ export const NotificationService = {
           };
           const res = await this.send(filterNotif);
           msgId = res?.data?.id || msgId;
+          resultStatus = hasInvalidIdsError(res?.data) ? "failed" : "success";
         } catch (fErr: any) {
           console.warn("[NotificationService] Tag filter push warning:", fErr.message);
           resultStatus = "warning";
@@ -1317,7 +1500,9 @@ export const NotificationService = {
        const msgId = responseData?.id || null;
        
        let resultStatus = "success";
-       if (responseData?.errors && Array.isArray(responseData.errors)) {
+       if (hasInvalidIdsError(responseData)) {
+         resultStatus = "failed";
+       } else if (responseData?.errors && Array.isArray(responseData.errors)) {
          const errorMsg = responseData.errors.join(', ');
          if (errorMsg.includes("not subscribed") || errorMsg.includes("not found") || errorMsg.includes("players are not subscribed")) {
            resultStatus = "warning";
