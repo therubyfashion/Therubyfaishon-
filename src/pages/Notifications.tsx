@@ -34,7 +34,7 @@ const iconMap: Record<string, React.ReactNode> = {
 
 const Notifications: React.FC = () => {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const { notifications, unreadCount, markAllAsRead, markAsRead, loading } = useNotifications();
 
   const [permissionGranted, setPermissionGranted] = React.useState<boolean>(() => {

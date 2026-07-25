@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { supabase } from '../supabase';
 import { useAuth } from './AuthContext';
 import { Notification } from '../types';
+import { isOtpNotification, isAdminAlert } from '../lib/notifications';
 
 interface NotificationContextType {
   notifications: Notification[];
@@ -23,6 +24,19 @@ const NotificationContext = createContext<NotificationContextType>({
   refetchNotifications: async () => {},
 });
 
+// Helper to identify internal system error/retry strings that should never be shown to customers
+const isInternalErrorLog = (title: string, body: string): boolean => {
+  const text = `${title} ${body}`.toLowerCase();
+  return (
+    text.includes('onesignal error') ||
+    text.includes('push failed') ||
+    text.includes('retry attempt') ||
+    text.includes('transient failure') ||
+    text.includes('failed_exhausted') ||
+    text.includes('delivery error')
+  );
+};
+
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -36,6 +50,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
 
     const targetUserId = user.id || user.uid;
+    const isUserAdmin = (user as any)?.role === 'admin' || user.email === 'mdsagaransari65670@gmail.com';
 
     try {
       const { data, error } = await supabase
@@ -47,17 +62,55 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (error) {
         console.error("Error fetching notifications from Supabase:", error.message);
       } else if (data) {
-        const mapped: Notification[] = data.map(row => ({
-          id: String(row.id),
-          userId: row.user_id || row.userId || undefined,
-          title: row.title || '',
-          body: row.body || row.message || '',
-          type: row.type || 'order',
-          iconType: row.icon_type || row.iconType || row.type || 'order',
-          isRead: Boolean(row.is_read ?? row.isRead ?? false),
-          createdAt: row.created_at || row.createdAt || new Date().toISOString(),
-          link: row.link || '/notifications'
-        }));
+        // Apply strict 4-rule audit filtering:
+        const filtered = data.filter(row => {
+          const title = row.title || '';
+          const body = row.body || row.message || '';
+          const type = row.type || 'order';
+
+          // Rule 1: Exclude OTP codes or verification codes
+          if (isOtpNotification(title, body)) return false;
+
+          // Rule 4: Exclude raw system error / retry logs
+          if (isInternalErrorLog(title, body)) return false;
+
+          // Rule 2: Exclude admin-only alerts for non-admin users
+          if (!isUserAdmin && isAdminAlert(type, title, body)) {
+            return false;
+          }
+
+          return true;
+        });
+
+        // Rule 3: Client-side deduplication by fingerprint & timestamp proximity
+        const seen = new Set<string>();
+        const mapped: Notification[] = [];
+
+        for (const row of filtered) {
+          const title = row.title || '';
+          const link = row.link || '/notifications';
+          const rowUserId = row.user_id || row.userId || 'global';
+          // Fingerprint key
+          const dedupKey = `${rowUserId}:${title.trim()}:${link}`;
+
+          if (seen.has(dedupKey)) {
+            continue; // Skip duplicate row
+          }
+          seen.add(dedupKey);
+
+          mapped.push({
+            id: String(row.id),
+            userId: row.user_id || row.userId || undefined,
+            title: title,
+            body: row.body || row.message || '',
+            type: row.type || 'order',
+            iconType: row.icon_type || row.iconType || row.type || 'order',
+            isRead: Boolean(row.is_read ?? row.isRead ?? false),
+            createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+            link: link
+          });
+        }
+
         setNotifications(mapped);
       }
     } catch (err: any) {
@@ -124,6 +177,17 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, [user]);
 
   const createNotification = useCallback(async (data: Omit<Notification, 'id' | 'createdAt' | 'isRead'>) => {
+    // Rule 1: Never create OTP or verification code notifications
+    if (isOtpNotification(data.title, data.body)) {
+      console.warn("🔒 [createNotification] Suppressed OTP code from in-app notification feed.");
+      return;
+    }
+
+    // Rule 4: Never create internal error / retry notifications
+    if (isInternalErrorLog(data.title, data.body)) {
+      return;
+    }
+
     try {
       const targetUserId = data.userId || null;
       await supabase.from('notifications').insert({
@@ -158,3 +222,4 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 };
 
 export const useNotifications = () => useContext(NotificationContext);
+

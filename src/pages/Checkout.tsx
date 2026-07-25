@@ -791,30 +791,17 @@ export default function Checkout() {
             const targetUserId = user?.id || user?.uid;
             if (targetUserId) {
               try {
-                // First customer notification (🎉 Order Confirmed!)
+                // Single consolidated customer notification (🎉 Order Confirmed!)
                 await sendNotification({
                   userId: targetUserId,
                   title: '🎉 Order Confirmed!',
                   body: `Hi ${finalOrderData.customerName}, your order ${finalOrderData.orderId} of ₹${Number(finalOrderData.total).toLocaleString()} has been successfully placed. We are preparing it now.`,
                   type: 'order',
                   iconType: 'package',
-                  link: '/my-orders'
+                  link: `/track/${finalOrderData.orderId}`
                 }, false);
 
-                // Add a snappy 1.2-second delay to prevent the two push notifications from collapsing on the device
-                await new Promise(resolve => setTimeout(resolve, 1200));
-
-                // Second customer notification (🛍️ Order Placed Successfully!)
-                await sendNotification({
-                  userId: targetUserId,
-                  title: '🛍️ Order Placed Successfully!',
-                  body: `Your order ${finalOrderData.orderId} is being processed. View tracking details in My Orders.`,
-                  type: 'order',
-                  iconType: 'package',
-                  link: '/my-orders'
-                }, false);
-
-                console.log("Customer in-app notification logging and BOTH push notifications triggered successfully");
+                console.log("Customer in-app notification logging and push notification triggered successfully");
               } catch (notifErr: any) {
                 console.error("❌ [DIAGNOSTIC] Customer in-app notification logging failed! Detailed Error:", {
                   message: notifErr.message || notifErr,
@@ -884,7 +871,7 @@ export default function Checkout() {
           const sendAdminEmail = async () => {
             try {
               // Target developer testing email as well to guarantee they see admin order notifications
-              const adminEmailDestination = "mdsagaransari65670@gmail.com, " + (storeSettings?.supportEmail || "theruby.in@gmail.com");
+              const adminEmailDestination = "mdsagaransari65670@gmail.com, " + (storeSettings?.supportEmail || "support@therubyfashion.shop");
               const controller = new AbortController();
               const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 seconds snappy timeout
               const res = await fetch('/api/send-email', {

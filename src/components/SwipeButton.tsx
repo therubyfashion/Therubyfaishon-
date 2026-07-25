@@ -50,32 +50,23 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
   const checkScale = useTransform(x, [swipeRange * 0.8, swipeRange], [0, 1]);
 
   const handleDragEnd = () => {
+    if (isComplete || disabled || isLoading) return;
     const currentX = x.get();
-    if (currentX > swipeRange * 0.7) {
+    
+    // Require dragging at least 85% of the total track width to complete order
+    if (currentX >= swipeRange * 0.85) {
       // Complete swipe
       animate(x, swipeRange, { type: 'spring', stiffness: 450, damping: 24 });
       setIsComplete(true);
       
-      // Delay to let the completed animation sit satisfyingly for a moment before calling onConfirm
+      // Short delay before trigger
       setTimeout(() => {
         onConfirm();
       }, 150);
     } else {
-      // Snap back
+      // Released before 85% threshold -> spring back to start position
       animate(x, 0, { type: 'spring', stiffness: 350, damping: 22 });
     }
-  };
-
-  const handleHandleClick = () => {
-    if (isComplete || disabled || isLoading) return;
-    
-    // Play a gorgeous spring sliding animation to the right edge and complete!
-    animate(x, swipeRange, { type: 'spring', stiffness: 350, damping: 24 });
-    setIsComplete(true);
-    
-    setTimeout(() => {
-      onConfirm();
-    }, 200);
   };
 
   if (isLoading) {
@@ -95,8 +86,7 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
     <motion.div 
       ref={containerRef}
       style={{ backgroundColor: bgColor }}
-      onClick={handleHandleClick}
-      className={`relative w-full h-[72px] rounded-[24px] border-2 overflow-hidden select-none shadow-md cursor-pointer ${
+      className={`relative w-full h-[72px] rounded-[24px] border-2 overflow-hidden select-none shadow-md ${
         isComplete 
           ? 'border-ruby shadow-xl shadow-ruby/20' 
           : 'border-gray-200'
@@ -107,7 +97,7 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
         <motion.div 
           animate={{ opacity: [0.3, 0.6, 0.3], scale: [0.98, 1.02, 0.98] }}
           transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute inset-0 bg-gradient-to-r from-transparent via-ruby/5 to-transparent skew-x-12"
+          className="absolute inset-0 bg-gradient-to-r from-transparent via-ruby/5 to-transparent skew-x-12 pointer-events-none"
         />
       )}
 
@@ -136,19 +126,17 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
           drag="x"
           dragConstraints={{ left: 0, right: swipeRange }}
           dragElastic={0.05}
+          dragMomentum={false}
           onDragEnd={handleDragEnd}
           style={{ x }}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={(e) => {
-            e.stopPropagation(); // Prevent duplicate trigger from parent container click
-            handleHandleClick();
-          }}
-          className="absolute left-2 top-2 w-[56px] h-[56px] bg-ruby rounded-[18px] shadow-lg shadow-ruby/20 flex items-center justify-center z-10 cursor-grab active:cursor-grabbing"
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          className="absolute left-2 top-2 w-[56px] h-[56px] bg-ruby rounded-[18px] shadow-lg shadow-ruby/20 flex items-center justify-center z-10 cursor-grab active:cursor-grabbing touch-none"
         >
           <motion.div
             animate={{ x: [0, 4, 0] }}
             transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+            className="pointer-events-none flex items-center justify-center"
           >
             <ChevronRight className="text-white" size={24} strokeWidth={3} />
           </motion.div>
@@ -158,7 +146,7 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
       {/* Success Indicator */}
       <motion.div 
         style={{ scale: checkScale, opacity: isComplete ? 1 : 0 }}
-        className="absolute right-6 top-1/2 -translate-y-1/2 text-white"
+        className="absolute right-6 top-1/2 -translate-y-1/2 text-white pointer-events-none"
       >
         <Check size={28} strokeWidth={4} />
       </motion.div>

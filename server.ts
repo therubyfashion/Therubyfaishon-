@@ -861,7 +861,7 @@ function hasInvalidIdsError(responseData: any): boolean {
   if (Array.isArray(errors)) {
     return errors.some((err: any) => {
       const s = String(err).toLowerCase();
-      return s.includes('invalid_player_ids') || s.includes('invalid_external_user_ids') || s.includes('invalid_player_id') || s.includes('invalid_external_user_id');
+      return s.includes('invalid_player_ids') || s.includes('invalid_external_user_ids') || s.includes('invalid_player_id') || s.includes('invalid_external_user_id') || s.includes('invalid_subscription_ids') || s.includes('invalid_aliases');
     });
   } else if (typeof errors === 'object') {
     if (errors.invalid_player_ids && errors.invalid_player_ids.length > 0) {
@@ -870,8 +870,11 @@ function hasInvalidIdsError(responseData: any): boolean {
     if (errors.invalid_external_user_ids && errors.invalid_external_user_ids.length > 0) {
       return true;
     }
+    if (errors.invalid_aliases && Object.keys(errors.invalid_aliases).length > 0) {
+      return true;
+    }
     const errStr = JSON.stringify(errors).toLowerCase();
-    return errStr.includes('invalid_player_ids') || errStr.includes('invalid_external_user_ids') || errStr.includes('invalid_player_id') || errStr.includes('invalid_external_user_id');
+    return errStr.includes('invalid_player_ids') || errStr.includes('invalid_external_user_ids') || errStr.includes('invalid_player_id') || errStr.includes('invalid_external_user_id') || errStr.includes('invalid_subscription_ids') || errStr.includes('invalid_aliases');
   }
   return false;
 }
@@ -1364,6 +1367,33 @@ export const NotificationService = {
       }
 
       await this.log(title, body, "admin", resultStatus, msgId, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
+
+      // Save in-app notification entries specifically for admin user IDs
+      try {
+        const textCheck = `${title} ${body}`.toLowerCase();
+        const isOtp = textCheck.includes('otp') || textCheck.includes('verification code') || textCheck.includes('passcode');
+        if (!isOtp) {
+          const supabase = getSupabaseAdmin();
+          const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin');
+          if (admins && admins.length > 0) {
+            for (const adminUser of admins) {
+              await supabase.from('notifications').insert({
+                user_id: adminUser.id,
+                title,
+                body,
+                type: 'alert',
+                icon_type: 'shield',
+                link: url || '/admin?tab=orders',
+                is_read: false,
+                created_at: new Date().toISOString()
+              });
+            }
+          }
+        }
+      } catch (inAppErr: any) {
+        console.warn("⚠️ [NotificationService] In-app admin notification insert warning:", inAppErr.message);
+      }
+
       return { success: true, status: resultStatus, notificationId: msgId };
     } catch (err: any) {
       console.error("❌ [NotificationService] sendAdmin failed:", err.message);
@@ -1483,9 +1513,9 @@ export const NotificationService = {
          notification.buttons = buttons;
        }
  
-       // EXCLUSIVE TARGETING STRATEGY TO PREVENT DUPLICATES:
-       // If we have the exact subscription ID, use it directly.
-       // Remove external ID aliases and include_external_user_ids to prevent OneSignal from sending twice.
+       // DIRECT SUBSCRIPTION TARGETING STRATEGY:
+       // Target purely by subscription ID saved in profiles.onesignal_id.
+       // Never use include_aliases or external_id since client-side OneSignal.login is not registered.
        if (onesignalId) {
          if (String(onesignalId).startsWith('simulated_push_')) {
            console.log(`[NotificationService] Simulating push to simulated device: ${onesignalId}`);
@@ -1494,11 +1524,9 @@ export const NotificationService = {
          }
          notification.include_subscription_ids = [onesignalId];
        } else {
-         // Fallback: target strictly by external user ID alias if subscription ID isn't linked
-         notification.include_external_user_ids = [String(userId)];
-         notification.include_aliases = {
-           external_id: [String(userId)]
-         };
+         console.warn(`[NotificationService] User ${userId} has no onesignal_id in profiles. Skipping push dispatch.`);
+         await this.log(title, body, userEmail || userId, "skipped_no_subscription", null, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
+         return { success: true, status: "skipped_no_subscription", message: "User not subscribed to push notifications (no onesignal_id in profiles)." };
        }
  
        const response = await this.send(notification);
@@ -1515,8 +1543,45 @@ export const NotificationService = {
          }
        }
  
-       await this.log(title, body, userEmail || userId, resultStatus, msgId, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
-       return { success: true, status: resultStatus, notificationId: msgId };
+        await this.log(title, body, userEmail || userId, resultStatus, msgId, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
+
+        // Save in-app notification entry for customer in Supabase
+        try {
+          const textCheck = `${title} ${body}`.toLowerCase();
+          const isOtp = textCheck.includes('otp') || textCheck.includes('verification code') || textCheck.includes('passcode');
+          const isAdmin = textCheck.includes('new order received') || textCheck.includes('low stock') || textCheck.includes('admin alert');
+
+          if (!isOtp && !isAdmin && userId && userId !== 'admin') {
+            const supabase = getSupabaseAdmin();
+            const oneMinuteAgo = new Date(Date.now() - 60000).toISOString();
+            
+            // Deduplication check
+            const { data: existing } = await supabase
+              .from('notifications')
+              .select('id')
+              .eq('user_id', String(userId))
+              .eq('title', title)
+              .gte('created_at', oneMinuteAgo)
+              .limit(1);
+
+            if (!existing || existing.length === 0) {
+              await supabase.from('notifications').insert({
+                user_id: String(userId),
+                title,
+                body,
+                type: 'order',
+                icon_type: 'package',
+                link: url || '/notifications',
+                is_read: false,
+                created_at: new Date().toISOString()
+              });
+            }
+          }
+        } catch (inAppErr: any) {
+          console.warn("⚠️ [NotificationService] Customer in-app notification insert warning:", inAppErr.message);
+        }
+
+        return { success: true, status: resultStatus, notificationId: msgId };
      } catch (err: any) {
        console.error(`❌ [NotificationService] sendCustomer failed:`, err.message);
        const errLower = String(err.message || '').toLowerCase();
@@ -2175,7 +2240,7 @@ async function sendEmailDirect({ to, subject, html, fromName, baseHost }: { to: 
   } else if (apiKey) {
     const dynamicResend = new Resend(apiKey);
     let rawFromEmail = effectiveSettings.fromEmail || DEFAULT_FROM_EMAIL;
-    if (rawFromEmail.includes('rubyfashion.shop') && !rawFromEmail.includes(VERIFIED_DOMAIN)) {
+    if (!rawFromEmail || rawFromEmail.includes('@gmail.com') || rawFromEmail.includes('resend.dev') || !rawFromEmail.toLowerCase().endsWith(`@${VERIFIED_DOMAIN}`)) {
       rawFromEmail = DEFAULT_FROM_EMAIL;
     }
     const formattedFrom = `"${finalFromName}" <${rawFromEmail}>`;
@@ -3878,17 +3943,11 @@ async function startServer() {
 
       let fromName = providedFromName || effectiveSettings.storeName || 'The Ruby';
       
-      // Determine base from email - EXPLICITLY REJECT rubyfashion.shop (missing 'the')
+      // Determine base from email - Default to verified support@therubyfashion.shop for Resend
       let rawFromEmail = from || effectiveSettings.fromEmail || DEFAULT_FROM_EMAIL;
       
-      if (rawFromEmail.includes('rubyfashion.shop') && !rawFromEmail.includes(VERIFIED_DOMAIN)) {
-        console.warn(`🛑 DETECTED TYPO DOMAIN: ${rawFromEmail}. Correcting to ${DEFAULT_FROM_EMAIL}`);
-        rawFromEmail = DEFAULT_FROM_EMAIL;
-      }
-
-      // Mandatory Domain Protection for Resend
-      if (!smtpUser && rawFromEmail.includes('resend.dev')) {
-        console.warn("Blocking unverified 'resend.dev' domain for Resend. Defaulting to verified store domain.");
+      if (!smtpUser && (!rawFromEmail || rawFromEmail.includes('@gmail.com') || rawFromEmail.includes('resend.dev') || !rawFromEmail.toLowerCase().endsWith(`@${VERIFIED_DOMAIN}`))) {
+        console.warn(`🛑 Unverified 'from' email (${rawFromEmail}) for Resend. Defaulting to verified store domain ${DEFAULT_FROM_EMAIL}`);
         rawFromEmail = DEFAULT_FROM_EMAIL;
       }
 
@@ -4278,11 +4337,12 @@ async function startServer() {
         }
         notification.include_subscription_ids = [onesignalId];
       } else {
-        // Only target by external_id alias if no specific onesignal subscription ID is found
-        notification.include_aliases = {
-          external_id: [String(userId)]
-        };
-        notification.target_channel = "push";
+        console.warn(`OneSignal: User ${userId} has no onesignal_id in profiles. Skipping push.`);
+        return res.json({ 
+          success: true, 
+          warning: "User not yet subscribed to push notifications (no onesignal_id found in profiles).", 
+          id: null 
+        });
       }
 
       const response = await sendOneSignalNotification(notification);
