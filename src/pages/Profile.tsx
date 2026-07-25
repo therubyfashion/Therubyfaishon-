@@ -1,9 +1,7 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
-import { db, auth, storage } from '../firebase';
-import { signOut, updateProfile } from 'firebase/auth';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { supabase } from '../supabase';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { compressImage } from '../utils/imageUtils';
@@ -28,7 +26,6 @@ import {
   MapPin,
   Tag
 } from 'lucide-react';
-import { collection, doc, updateDoc } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 
 // AnimatePresence is imported from motion/react above
@@ -93,7 +90,8 @@ export default function Profile() {
 
         // Associate current user credentials with push subscription tag
         if (user) {
-          await OneSignalWeb.login(user.uid);
+          const targetUserId = user.id || user.uid;
+          await OneSignalWeb.login(targetUserId);
           const tags = {
             "role": isAdmin ? 'admin' : 'customer',
             "email": user.email || '',
@@ -105,7 +103,7 @@ export default function Profile() {
              await OneSignalWeb.sendTags(tags);
           }
 
-          // Directly fetch and synchronize the subscription ID (subId) in Firestore database
+          // Directly fetch and synchronize the subscription ID (subId) in Supabase profiles database
           let subId = null;
           if (OneSignalWeb.User?.pushSubscription?.id) {
             subId = OneSignalWeb.User.pushSubscription.id;
@@ -117,10 +115,35 @@ export default function Profile() {
             subId = await OneSignalWeb.getUserId();
           }
 
+          // If not instantly available after permission request, poll briefly
+          if (!subId) {
+            for (let i = 0; i < 6; i++) {
+              await new Promise(r => setTimeout(r, 500));
+              subId = OneSignalWeb.User?.pushSubscription?.id || 
+                      OneSignalWeb.User?.PushSubscription?.id || 
+                      OneSignalWeb.User?.pushSubscriptionId || 
+                      (typeof OneSignalWeb.getUserId === 'function' ? await OneSignalWeb.getUserId() : null);
+              if (subId) break;
+            }
+          }
+
           if (subId) {
-            const userRef = doc(db, 'users', user.uid);
-            await updateDoc(userRef, { onesignalId: subId });
-            console.log("📝 Synced OneSignal subId directly from requestNotificationPermission:", subId);
+            try {
+              const { data, error } = await supabase
+                .from('profiles')
+                .update({ onesignal_id: subId })
+                .eq('id', targetUserId)
+                .select();
+              if (error) {
+                console.error("❌ [Profile.tsx] Failed to update onesignal_id in Supabase profiles:", error.message);
+              } else {
+                console.log("📝 [Profile.tsx] Synced OneSignal subId directly to Supabase profiles:", subId, "Result:", data);
+              }
+            } catch (err: any) {
+              console.warn("Skipped syncing onesignal_id:", err.message);
+            }
+          } else {
+            console.warn("⚠️ [Profile.tsx] No OneSignal subId found after permission request.");
           }
         }
         
@@ -227,56 +250,20 @@ export default function Profile() {
           updatePayload.photoURL = finalPhotoURL;
         }
 
-        const isOfflineUser = user.uid.startsWith('offline_');
-        
-        if (isOfflineUser) {
-          // Robust Sandbox Mode Bypass
-          const localUserRaw = localStorage.getItem('ruby_local_user');
-          if (localUserRaw) {
-            try {
-              const parsed = JSON.parse(localUserRaw);
-              parsed.displayName = capturedDisplayName;
-              parsed.photoURL = finalPhotoURL;
-              parsed.phoneNumber = capturedPhoneNumber;
-              localStorage.setItem('ruby_local_user', JSON.stringify(parsed));
-            } catch (err) {
-              console.error("Failed to update sandbox file:", err);
-            }
-          }
+        // Standard full-stack account sync
+        try {
+          const { error } = await supabase
+            .from('profiles')
+            .update({
+              display_name: capturedDisplayName,
+              phone_number: capturedPhoneNumber || '',
+              photo_url: finalPhotoURL || ''
+            })
+            .eq('id', user.uid);
           
-          try {
-            await updateDoc(doc(db, 'users', user.uid), updatePayload);
-          } catch (fErr) {
-            console.warn("Bypassed Firestore profile sync in sandbox:", fErr);
-          }
-        } else {
-          // Standard full-stack account sync
-          try {
-            await user.reload();
-          } catch (reErr) {
-            console.warn("Auth user object reload bypassed:", reErr);
-          }
-
-          const syncPromises: Promise<any>[] = [];
-          
-          try {
-            syncPromises.push(updateProfile(user, {
-              displayName: capturedDisplayName,
-              photoURL: finalPhotoURL || ''
-            }));
-          } catch (upErr) {
-            console.warn("updateProfile failed:", upErr);
-          }
-
-          try {
-            syncPromises.push(updateDoc(doc(db, 'users', user.uid), updatePayload));
-          } catch (upDocErr) {
-            console.warn("Firestore updateDoc failed:", upDocErr);
-          }
-
-          await Promise.all(syncPromises).catch((err) => {
-            console.warn("Graceful background update skipped standard auth fields:", err);
-          });
+          if (error) throw error;
+        } catch (upErr: any) {
+          console.warn("Supabase profiles update failed:", upErr);
         }
 
         console.log("Background sync completed successfully");
@@ -334,71 +321,45 @@ export default function Profile() {
         
         let downloadURL = "";
         try {
-          // Send to our super resilient, server-side bypass endpoint!
-          const response = await fetch('/api/user/upload-profile-image', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              uid: user.uid,
-              photo: compressed
-            })
-          });
-          
-          if (!response.ok) {
-            throw new Error(`Server profile upload returned status ${response.status}`);
+          // Convert compressed base64 data URL to a Blob
+          const res = await fetch(compressed);
+          const blob = await res.blob();
+
+          // Upload to Supabase Storage avatars bucket
+          const userId = user.id || user.uid;
+          const filePath = `${userId}.jpg`;
+          const { error: uploadError } = await supabase.storage
+            .from('avatars')
+            .upload(filePath, blob, {
+              contentType: 'image/jpeg',
+              upsert: true
+            });
+
+          if (uploadError) {
+            throw uploadError;
           }
-          
-          const result = await response.json();
-          if (result.success && result.photoURL) {
-            downloadURL = result.photoURL;
-          } else {
-            throw new Error("Invalid response from server profile upload");
-          }
-        } catch (serverErr: any) {
-          console.warn("⚠️ Server-side image upload failed, falling back to local-only compressed Base64:", serverErr.message);
+
+          // Get the public URL of the uploaded image
+          const { data: publicUrlData } = supabase.storage
+            .from('avatars')
+            .getPublicUrl(filePath);
+
+          downloadURL = publicUrlData.publicUrl;
+        } catch (storageErr: any) {
+          console.warn("⚠️ Supabase avatar bucket upload failed, falling back to local-only compressed Base64:", storageErr.message);
           downloadURL = compressed;
         }
 
         localStorage.setItem(`user_photo_${user.uid}`, downloadURL);
         
-        const isOfflineUser = user.uid.startsWith('offline_');
-        if (isOfflineUser) {
-          const localUserRaw = localStorage.getItem('ruby_local_user');
-          if (localUserRaw) {
-            try {
-              const parsed = JSON.parse(localUserRaw);
-              parsed.photoURL = downloadURL;
-              localStorage.setItem('ruby_local_user', JSON.stringify(parsed));
-            } catch (err) {}
-          }
-          
-          try {
-            await updateDoc(doc(db, 'users', user.uid), { 
-              photoURL: downloadURL,
-              updatedAt: new Date().toISOString()
-            });
-          } catch (fErr) {}
-        } else {
-          try {
-            await user.reload();
-          } catch (e) {}
-
-          const promises: Promise<any>[] = [];
-          try {
-            promises.push(updateProfile(user, { photoURL: downloadURL }));
-          } catch (e) {}
-          try {
-            promises.push(updateDoc(doc(db, 'users', user.uid), { 
-              photoURL: downloadURL,
-              updatedAt: new Date().toISOString()
-            }));
-          } catch (e) {}
-
-          await Promise.all(promises).catch((err) => {
-            console.warn("Bypassed standard remote cloud user storage:", err);
-          });
+        try {
+          const { error } = await supabase
+            .from('profiles')
+            .update({ photo_url: downloadURL })
+            .eq('id', user.uid);
+          if (error) throw error;
+        } catch (err) {
+          console.warn("Bypassed standard remote cloud user storage:", err);
         }
 
         setEditForm(prev => ({ ...prev, photoURL: downloadURL }));
@@ -426,7 +387,7 @@ export default function Profile() {
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
+      await supabase.auth.signOut();
       localStorage.removeItem('phone_user');
       toast.success("Logged out successfully!");
       navigate('/');
@@ -523,16 +484,22 @@ export default function Profile() {
             <p className="text-sm text-gray-400 font-medium">{user.email}</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 w-full pt-4">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4 w-full pt-4">
             <div className="bg-gray-50 p-4 rounded-2xl space-y-1">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Member Since</p>
+              <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-gray-400">Member Since</p>
               <p className="text-xs font-bold text-[#1A2C54]">
                 {profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'Recently'}
               </p>
             </div>
             <div className="bg-gray-50 p-4 rounded-2xl space-y-1">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Account Type</p>
-              <p className="text-xs font-bold text-ruby uppercase tracking-widest">{profile?.role || 'User'}</p>
+              <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-gray-400">Loyalty Points</p>
+              <p className="text-xs font-bold text-ruby">
+                {profile?.loyaltyPoints || 0} pts
+              </p>
+            </div>
+            <div className="bg-gray-50 p-4 rounded-2xl space-y-1">
+              <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-gray-400">Account Type</p>
+              <p className="text-xs font-bold text-[#1A2C54] uppercase tracking-widest">{profile?.role || 'User'}</p>
             </div>
           </div>
         </motion.div>

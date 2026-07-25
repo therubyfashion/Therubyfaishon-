@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
-import { collection, addDoc, getDocs, doc, runTransaction, getDoc, deleteDoc, updateDoc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+// Removed Firestore imports to run purely on Supabase
 import { toast } from 'sonner';
 import { cn, syncToGoogleSheets } from '../lib/utils';
 import { sendNotification } from '../lib/notifications';
@@ -14,6 +13,7 @@ import { LoadingSpinner } from '../components/Skeleton';
 import SwipeButton from '../components/SwipeButton';
 import { trackPixelEvent } from '../lib/pixel';
 import { formatPrice } from '../utils/currency';
+import { supabase } from '../supabase';
 
 const STEPS = [
   { id: 1, label: 'Address' },
@@ -141,66 +141,105 @@ export default function Checkout() {
   useEffect(() => {
     const fetchAddresses = async () => {
       if (!user) {
-        setLoadingAddresses(false);
-        return;
-      }
-      let fetchedAddresses: any[] = [];
-      try {
-        const querySnapshot = await getDocs(collection(db, `users/${user.uid}/addresses`));
-        fetchedAddresses = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as any[];
-      } catch (error) {
-        console.error("Error fetching addresses:", error);
+        let guestAddresses: any[] = [];
         try {
           const cached = localStorage.getItem('user_addresses');
           if (cached) {
-            fetchedAddresses = JSON.parse(cached);
+            guestAddresses = JSON.parse(cached);
           }
-        } catch (cacheErr) {
-          console.error("Error loading cached addresses:", cacheErr);
+        } catch (err) {
+          console.error(err);
         }
+        setAddresses(guestAddresses);
+        if (guestAddresses.length > 0 && !selectedAddress) {
+          setSelectedAddress(guestAddresses[0].id);
+        }
+        setLoadingAddresses(false);
+        return;
       }
 
-      // If still empty, provide realistic default Indian addresses for convenience
-      if (fetchedAddresses.length === 0) {
-        fetchedAddresses = [
-          {
-            id: 'addr_default_1',
-            name: user.displayName || 'Rajesh Sharma',
-            email: user.email || 'rajesh@example.com',
-            number: '9876543210',
-            address: '402, Royal Palace, Boring Road',
-            landmark: 'Near Panchmukhi Mandir',
-            state: 'Bihar',
-            city: 'Patna',
-            pincode: '800001',
-            label: 'Home',
-            isDefault: true
-          },
-          {
-            id: 'addr_default_2',
-            name: user.displayName || 'Rajesh Sharma',
-            email: user.email || 'rajesh@example.com',
-            number: '9876543210',
-            address: 'A-12, Sector 5, Noida',
-            landmark: 'Near Metro Station',
-            state: 'Uttar Pradesh',
-            city: 'Noida',
-            pincode: '201301',
-            label: 'Office',
-            isDefault: false
+      try {
+        const { data, error } = await supabase
+          .from('addresses')
+          .select('*')
+          .eq('user_id', user.uid)
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        let fetchedAddresses = (data || []).map(row => {
+          let addressText = row.address_line || '';
+          let landmarkText = row.landmark || '';
+          let labelVal: 'Home' | 'Office' | 'Other' = (row.label as any) || 'Home';
+
+          // fallback for old JSON format if any
+          if (addressText.startsWith('{') && addressText.endsWith('}')) {
+            try {
+              const parsed = JSON.parse(addressText);
+              if (parsed && typeof parsed === 'object') {
+                addressText = parsed.address || '';
+                landmarkText = parsed.landmark || landmarkText;
+                labelVal = parsed.label || labelVal;
+              }
+            } catch (e) {
+              // ignore
+            }
           }
-        ];
-      }
 
-      setAddresses(fetchedAddresses);
-      if (fetchedAddresses.length > 0 && !selectedAddress) {
-        const defaultAddr = fetchedAddresses.find(a => a.isDefault) || fetchedAddresses[0];
-        setSelectedAddress(defaultAddr.id);
+          return {
+            id: row.id,
+            name: row.full_name || '',
+            number: row.phone || '',
+            address: addressText,
+            landmark: landmarkText,
+            state: row.state || '',
+            city: row.city || '',
+            pincode: row.zip || '',
+            label: labelVal,
+            isDefault: row.is_default || false,
+          };
+        });
+
+        // If still empty, provide realistic default Indian addresses for convenience
+        if (fetchedAddresses.length === 0) {
+          fetchedAddresses = [
+            {
+              id: 'addr_default_1',
+              name: user.displayName || 'Rajesh Sharma',
+              number: '9876543210',
+              address: '402, Royal Palace, Boring Road',
+              landmark: 'Near Panchmukhi Mandir',
+              state: 'Bihar',
+              city: 'Patna',
+              pincode: '800001',
+              label: 'Home',
+              isDefault: true
+            },
+            {
+              id: 'addr_default_2',
+              name: user.displayName || 'Rajesh Sharma',
+              number: '9876543210',
+              address: 'A-12, Sector 5, Noida',
+              landmark: 'Near Metro Station',
+              state: 'Uttar Pradesh',
+              city: 'Noida',
+              pincode: '201301',
+              label: 'Office',
+              isDefault: false
+            }
+          ];
+        }
+
+        setAddresses(fetchedAddresses);
+        if (fetchedAddresses.length > 0 && !selectedAddress) {
+          const defaultAddr = fetchedAddresses.find(a => a.isDefault) || fetchedAddresses[0];
+          setSelectedAddress(defaultAddr.id);
+        }
+      } catch (err) {
+        console.error("Error fetching addresses in checkout:", err);
+      } finally {
+        setLoadingAddresses(false);
       }
-      setLoadingAddresses(false);
     };
     fetchAddresses();
   }, [user]);
@@ -208,9 +247,14 @@ export default function Checkout() {
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, 'settings'));
-        if (!querySnapshot.empty) {
-          setStoreSettings(querySnapshot.docs[0].data());
+        const configRes = await fetch('/api/payment-config');
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          setStoreSettings({
+            storeName: 'The Ruby Fashion',
+            storeLogo: 'https://cdn-icons-png.flaticon.com/512/2909/2909813.png',
+            ...configData
+          });
         }
       } catch (error) {
         console.error("Error fetching settings:", error);
@@ -237,7 +281,6 @@ export default function Checkout() {
   }, [selectedAddress]);
   const [newAddress, setNewAddress] = useState({
     name: '',
-    email: '',
     number: '',
     address: '',
     landmark: '',
@@ -268,11 +311,6 @@ export default function Checkout() {
     // Name validation
     if (!/^[a-zA-Z\s]{3,50}$/.test(newAddress.name)) {
       newErrors.name = 'Please enter a valid name (3-50 characters, letters only)';
-    }
-
-    // Email validation
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newAddress.email)) {
-      newErrors.email = 'Please enter a valid email address';
     }
 
     // Phone validation (Indian 10-digit)
@@ -370,26 +408,39 @@ export default function Checkout() {
         return;
       }
 
-      let savedAddress;
-      try {
-        if (user) {
-          const docRef = await addDoc(collection(db, `users/${user.uid}/addresses`), pendingAddress);
-          savedAddress = { id: docRef.id, ...pendingAddress };
-          setSelectedAddress(docRef.id);
-        } else {
-          // Guest fallback
-          const guestId = Math.random().toString(36).substr(2, 9);
-          savedAddress = { id: guestId, ...pendingAddress };
-          setSelectedAddress(guestId);
-        }
-      } catch (dbErr) {
-        console.warn("Saving address to Firestore failed, saving locally:", dbErr);
-        const localId = 'local_' + Math.random().toString(36).substr(2, 9);
-        savedAddress = { id: localId, ...pendingAddress };
-        setSelectedAddress(localId);
-      }
+      let id = 'addr_' + Math.random().toString(36).substr(2, 9);
+      if (user) {
+        const { data, error } = await supabase
+          .from('addresses')
+          .insert({
+            user_id: user.uid,
+            full_name: pendingAddress.name,
+            phone: pendingAddress.number,
+            address_line: pendingAddress.address,
+            landmark: pendingAddress.landmark,
+            label: pendingAddress.label,
+            city: pendingAddress.city,
+            state: pendingAddress.state,
+            zip: pendingAddress.pincode,
+            country: 'India',
+            is_default: addresses.length === 0,
+            created_at: new Date().toISOString()
+          })
+          .select('id')
+          .single();
 
-      setAddresses([...addresses, savedAddress]);
+        if (error) throw error;
+        if (data?.id) id = data.id;
+      }
+      const savedAddress = { id, ...pendingAddress };
+      const updatedAddresses = [...addresses, savedAddress];
+      setAddresses(updatedAddresses);
+      setSelectedAddress(id);
+      try {
+        localStorage.setItem('user_addresses', JSON.stringify(updatedAddresses));
+      } catch (e) {
+        console.error("Error caching addresses:", e);
+      }
       setIsVerifyingOtp(false);
       setPendingAddress(null);
       setShowAddressForm(false);
@@ -406,6 +457,9 @@ export default function Checkout() {
       });
       setErrors({});
       toast.success('Phone verified & Address added successfully!');
+      
+      // Auto-advance to next step once phone verified
+      setCurrentStep(2);
     } catch (err: any) {
       console.error("Error verifying OTP:", err);
       setOtpError(err.message || 'Verification error. Please try again.');
@@ -415,8 +469,8 @@ export default function Checkout() {
     }
   };
 
-  const handleAddAddress = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddAddress = async (e: React.FormEvent, autoAdvance = false) => {
+    if (e) e.preventDefault();
     
     if (!validateForm()) {
       toast.error('Please fix the errors in the form');
@@ -429,47 +483,45 @@ export default function Checkout() {
       createdAt: new Date().toISOString()
     };
 
-    const isOtpRequired = storeSettings?.textbeeOtpEnabled === true || storeSettings?.textbeeOtpEnabled === 'true';
-
-    if (isOtpRequired) {
-      setPendingAddress(addressData);
-      setOtpSentTo(newAddress.number);
-      setIsVerifyingOtp(true);
-      setOtpCode('');
-      setOtpError('');
-      
-      // Dispatch the OTP immediately
-      await handleSendOtpCode(newAddress.number);
-      return;
-    }
-
-    // Direct saving if OTP is disabled
+    // Direct saving
     try {
-      let savedAddress;
-      try {
-        if (user) {
-          const docRef = await addDoc(collection(db, `users/${user.uid}/addresses`), addressData);
-          savedAddress = { id: docRef.id, ...addressData };
-          setSelectedAddress(docRef.id);
-        } else {
-          // Guest mode fallback
-          const guestId = Math.random().toString(36).substr(2, 9);
-          savedAddress = { id: guestId, ...addressData };
-          setSelectedAddress(guestId);
-        }
-      } catch (dbErr) {
-        console.warn("Saving address to Firestore failed, saving locally:", dbErr);
-        const localId = 'local_' + Math.random().toString(36).substr(2, 9);
-        savedAddress = { id: localId, ...addressData };
-        setSelectedAddress(localId);
+      let id = 'addr_' + Math.random().toString(36).substr(2, 9);
+      if (user) {
+        const { data, error } = await supabase
+          .from('addresses')
+          .insert({
+            user_id: user.uid,
+            full_name: newAddress.name,
+            phone: newAddress.number,
+            address_line: newAddress.address,
+            landmark: newAddress.landmark,
+            label: newAddress.label,
+            city: newAddress.city,
+            state: newAddress.state,
+            zip: newAddress.pincode,
+            country: 'India',
+            is_default: addresses.length === 0,
+            created_at: new Date().toISOString()
+          })
+          .select('id')
+          .single();
+
+        if (error) throw error;
+        if (data?.id) id = data.id;
       }
-      
-      setAddresses([...addresses, savedAddress]);
+      const savedAddress = { id, ...addressData };
+      const updatedAddresses = [...addresses, savedAddress];
+      setAddresses(updatedAddresses);
+      setSelectedAddress(id);
+      try {
+        localStorage.setItem('user_addresses', JSON.stringify(updatedAddresses));
+      } catch (e) {
+        console.error("Error caching addresses:", e);
+      }
       
       setShowAddressForm(false);
       setNewAddress({
         name: '',
-        email: '',
         number: '',
         address: '',
         landmark: '',
@@ -480,9 +532,49 @@ export default function Checkout() {
       });
       setErrors({});
       toast.success('Address added successfully!');
+      
+      if (autoAdvance) {
+        setCurrentStep(2);
+      }
     } catch (error) {
       console.error("Error saving address:", error);
       toast.error("Failed to save address. Please try again.");
+    }
+  };
+
+  const handleContinueToShipping = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    
+    if (showAddressForm) {
+      const isFormDirty = !!(
+        newAddress.name.trim() ||
+        newAddress.email.trim() ||
+        newAddress.number.trim() ||
+        newAddress.address.trim() ||
+        newAddress.landmark.trim() ||
+        newAddress.state.trim() ||
+        newAddress.city.trim() ||
+        newAddress.pincode.trim()
+      );
+
+      if (isFormDirty) {
+        // Form is partially or fully filled out, validate and save it, then advance to step 2
+        await handleAddAddress(e as any, true);
+      } else {
+        // Form is completely empty, user likely opened it by accident or changed their mind
+        setShowAddressForm(false);
+        if (selectedAddress) {
+          setCurrentStep(2);
+        } else {
+          toast.error('Please select or add a delivery address');
+        }
+      }
+    } else {
+      if (!selectedAddress) {
+        toast.error('Please select a delivery address');
+        return;
+      }
+      setCurrentStep(2);
     }
   };
 
@@ -497,28 +589,20 @@ export default function Checkout() {
     setIsProcessingPayment(true);
     
     try {
-      // Get next order number using transaction
-      const counterRef = doc(db, 'counters', 'orders');
-      let orderNumber;
+      // Get next order number using Supabase function RPC call
+      let formattedOrderId;
       try {
-        orderNumber = await runTransaction(db, async (transaction) => {
-          const counterDoc = await transaction.get(counterRef);
-          let nextNum = 1;
-          if (counterDoc.exists()) {
-            nextNum = counterDoc.data().count + 1;
-            transaction.update(counterRef, { count: nextNum });
-          } else {
-            transaction.set(counterRef, { count: 1 });
-          }
-          return nextNum;
-        });
-      } catch (transError) {
-        console.warn("Firestore order counter transaction failed (likely quota exceeded):", transError);
-        // Fallback to local randomized/timestamp-based number to allow placement to proceed flawlessly
-        orderNumber = Math.floor(1000 + Math.random() * 9000);
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('generate_order_number');
+        if (rpcErr) {
+          console.warn("Supabase generate_order_number RPC failed:", rpcErr);
+          formattedOrderId = `#TRF${Math.floor(1000 + Math.random() * 9000)}`;
+        } else {
+          formattedOrderId = rpcData;
+        }
+      } catch (rpcEx) {
+        console.warn("Supabase generate_order_number RPC exception:", rpcEx);
+        formattedOrderId = `#TRF${Math.floor(1000 + Math.random() * 9000)}`;
       }
-
-      const formattedOrderId = `#TRF${orderNumber.toString().padStart(4, '0')}`;
       
       const orderData = {
         orderId: formattedOrderId,
@@ -555,52 +639,73 @@ export default function Checkout() {
             paymentStatus: paymentId ? 'Paid' : 'Pending'
           };
 
+          // Save ONLY to Supabase
           try {
-            await addDoc(collection(db, 'orders'), finalOrderData);
-          } catch (dbErr: any) {
-            console.warn("Firestore order submission failed, saving to local offline storage:", dbErr);
-            try {
-              const localOrders = JSON.parse(localStorage.getItem('ruby_offline_orders') || '[]');
-              localOrders.unshift({ ...finalOrderData, id: finalOrderData.orderId, isOffline: true });
-              localStorage.setItem('ruby_offline_orders', JSON.stringify(localOrders));
-            } catch (localErr) {
-              console.error("Error saving offline order to local storage:", localErr);
-            }
-          }
+            const supabaseOrderPayload = {
+              order_number: finalOrderData.orderId,
+              items: finalOrderData.items,
+              total: finalOrderData.total,
+              status: 'pending',
+              payment_method: finalOrderData.paymentMethod,
+              payment_status: finalOrderData.paymentStatus,
+              user_id: user?.uid || null,
+              shipping_full_name: finalOrderData.customerName || finalOrderData.address?.name || 'Customer',
+              shipping_phone: finalOrderData.address?.number || '',
+              customer_email: finalOrderData.email || '',
+              shipping_address: finalOrderData.address?.address || '',
+              shipping_city: finalOrderData.address?.city || '',
+              shipping_zip: finalOrderData.address?.pincode || '',
+              created_at: finalOrderData.createdAt,
+              subtotal: finalOrderData.subtotal,
+              discount: finalOrderData.discount,
+              shipping_cost: finalOrderData.shippingCost,
+              cod_fee: finalOrderData.codFee,
+              shipping_method: finalOrderData.shippingMethod,
+              estimated_delivery: finalOrderData.estimatedDelivery,
+              payment_id: finalOrderData.paymentId,
+              tracking_history: []
+            };
 
-          // Deactivate single-use or loyalty point coupon used in this order
-          if (appliedPromo && appliedPromo.code) {
-            try {
-              const couponRef = doc(db, 'coupons', appliedPromo.code);
-              const couponSnap = await getDoc(couponRef);
-              if (couponSnap.exists()) {
-                const couponData = couponSnap.data();
-                if (couponData.isSingleUse || couponData.createdBy || couponData.code?.startsWith('LP')) {
-                  await updateDoc(couponRef, {
-                    isActive: false,
-                    usedBy: user?.uid || 'guest',
-                    usedAt: new Date().toISOString()
-                  });
-                  console.log("Deactivated single-use loyalty voucher:", appliedPromo.code);
+            const { error: supErr } = await supabase
+              .from('orders')
+              .insert(supabaseOrderPayload);
+
+            if (supErr) {
+              console.error("Supabase order insert failed:", supErr);
+              toast.error("Database order placement failed. Please try again.");
+              throw supErr;
+            } else {
+              console.log("Supabase order insert success!");
+              
+              // Increment coupon used_count in Supabase if a promo was applied
+              if (appliedPromo && appliedPromo.code) {
+                try {
+                  const { data: matchedCoupon } = await supabase
+                    .from('coupons')
+                    .select('id, used_count')
+                    .ilike('code', appliedPromo.code)
+                    .maybeSingle();
+
+                  if (matchedCoupon) {
+                    await supabase
+                      .from('coupons')
+                      .update({ used_count: (matchedCoupon.used_count || 0) + 1 })
+                      .eq('id', matchedCoupon.id);
+                  }
+                } catch (cErr) {
+                  console.error("Error updating coupon used_count:", cErr);
                 }
               }
-            } catch (couponErr) {
-              console.error("Error deactivating used coupon:", couponErr);
             }
+          } catch (supException) {
+            console.error("Exception saving order to Supabase:", supException);
+            throw supException;
           }
-          
+
           // Wait for a minimum of 1.2 seconds for visual satisfaction of secure processing steps
           await new Promise(resolve => setTimeout(resolve, 1200));
 
-          // 1. Fetch settings for emails & notifications
-          let settingsData: any = {};
-          try {
-            const settingsSnap = await getDocs(collection(db, 'settings'));
-            settingsData = !settingsSnap.empty ? settingsSnap.docs[0].data() : {};
-          } catch (settingsErr) {
-            console.error("Failed to fetch settings for notifications:", settingsErr);
-          }
-          const storeName = settingsData.storeName || 'The Ruby Fashion';
+          const storeName = storeSettings?.storeName || 'The Ruby Fashion';
 
           // Build high-compatibility 100%-bulletproof HTML Table email summary (Outlook / Gmail safe)
           const emailHtml = `
@@ -683,21 +788,12 @@ export default function Checkout() {
 
           // 2. Define the 4 parallel critical notification/email tasks
           const sendCustomerPush = async () => {
-            if (user?.uid) {
+            const targetUserId = user?.id || user?.uid;
+            if (targetUserId) {
               try {
-                // Client-side locking: write the order_placed lock to Firestore immediately so the background snapshot listener skips sending a duplicate notification
-                try {
-                  await setDoc(doc(db, 'notification_locks', `${finalOrderData.orderId}_order_placed`), {
-                    lockedAt: new Date().toISOString()
-                  });
-                  console.log("Customer push lock acquired successfully on client side.");
-                } catch (lockErr) {
-                  console.warn("Could not write customer push lock on client:", lockErr);
-                }
-
                 // First customer notification (🎉 Order Confirmed!)
                 await sendNotification({
-                  userId: user.uid,
+                  userId: targetUserId,
                   title: '🎉 Order Confirmed!',
                   body: `Hi ${finalOrderData.customerName}, your order ${finalOrderData.orderId} of ₹${Number(finalOrderData.total).toLocaleString()} has been successfully placed. We are preparing it now.`,
                   type: 'order',
@@ -710,7 +806,7 @@ export default function Checkout() {
 
                 // Second customer notification (🛍️ Order Placed Successfully!)
                 await sendNotification({
-                  userId: user.uid,
+                  userId: targetUserId,
                   title: '🛍️ Order Placed Successfully!',
                   body: `Your order ${finalOrderData.orderId} is being processed. View tracking details in My Orders.`,
                   type: 'order',
@@ -730,19 +826,6 @@ export default function Checkout() {
 
           const sendAdminPush = async () => {
             try {
-              // Client-side locking: write the admin push locks to Firestore immediately to prevent duplicate admin push notifications from the background snapshot listener
-              try {
-                await setDoc(doc(db, 'notification_locks', `${finalOrderData.orderId}_admin_new_order`), {
-                  lockedAt: new Date().toISOString()
-                });
-                await setDoc(doc(db, 'notification_locks', `${finalOrderData.orderId}_admin_high_value_order`), {
-                  lockedAt: new Date().toISOString()
-                });
-                console.log("Admin push locks acquired successfully on client side.");
-              } catch (lockErr) {
-                console.warn("Could not write admin push locks on client:", lockErr);
-              }
-
               // Direct client-side trigger to ensure admin push notification is delivered 100% reliably in real time!
               // Also pass the current logged-in userId to support instant delivery on the tester's device!
               const res = await fetch('/api/send-admin-push', {
@@ -777,8 +860,8 @@ export default function Checkout() {
                 keepalive: true,
                 body: JSON.stringify({
                   to: finalOrderData.email || finalOrderData.address?.email || user?.email || '',
-                  from: settingsData.fromEmail || settingsData.smtpUser || undefined,
-                  replyTo: settingsData.supportEmail || undefined,
+                  from: storeSettings?.fromEmail || storeSettings?.smtpUser || undefined,
+                  replyTo: storeSettings?.supportEmail || undefined,
                   subject: `Order Confirmed! ${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`} ✨`,
                   html: emailHtml
                 })
@@ -801,7 +884,7 @@ export default function Checkout() {
           const sendAdminEmail = async () => {
             try {
               // Target developer testing email as well to guarantee they see admin order notifications
-              const adminEmailDestination = "mdsagaransari65670@gmail.com, " + (settingsData.supportEmail || "theruby.in@gmail.com");
+              const adminEmailDestination = "mdsagaransari65670@gmail.com, " + (storeSettings?.supportEmail || "theruby.in@gmail.com");
               const controller = new AbortController();
               const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 seconds snappy timeout
               const res = await fetch('/api/send-email', {
@@ -811,7 +894,7 @@ export default function Checkout() {
                 keepalive: true,
                 body: JSON.stringify({
                   to: adminEmailDestination,
-                  from: settingsData.fromEmail || settingsData.smtpUser || undefined,
+                  from: storeSettings?.fromEmail || storeSettings?.smtpUser || undefined,
                   subject: `New Order Received! ${finalOrderData.orderId} 🛍️`,
                   html: `
                     <div style="font-family: sans-serif; padding: 20px;">
@@ -890,14 +973,7 @@ export default function Checkout() {
               console.error('Google Sheets sync failed:', sheetsErr);
             }
 
-            // Clear Abandoned Cart
-            if (user) {
-              try {
-                await deleteDoc(doc(db, 'carts', user.uid));
-              } catch (cartErr) {
-                console.error('Error clearing abandoned cart:', cartErr);
-              }
-            }
+            // Clear Abandoned Cart skipped as Firestore is disabled
           })();
         } catch (error) {
           console.error("Error completing order:", error);
@@ -1169,26 +1245,6 @@ export default function Checkout() {
                             {errors.name && <p className="text-[9px] font-bold text-ruby uppercase tracking-widest">{errors.name}</p>}
                           </div>
                           <div className="space-y-2">
-                            <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Email Address</label>
-                            <input 
-                              type="email" 
-                              required
-                              value={newAddress.email}
-                              onChange={e => {
-                                setNewAddress({...newAddress, email: e.target.value});
-                                if (errors.email) setErrors({...errors, email: ''});
-                              }}
-                              className={cn(
-                                "w-full bg-gray-50 border px-6 py-4 rounded-2xl text-sm focus:outline-none focus:ring-2 transition-all",
-                                errors.email ? "border-ruby ring-ruby/10" : "border-gray-100 focus:ring-ruby/10"
-                              )}
-                              placeholder="Enter your email"
-                            />
-                            {errors.email && <p className="text-[9px] font-bold text-ruby uppercase tracking-widest">{errors.email}</p>}
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                          <div className="space-y-2">
                             <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Phone Number</label>
                             <input 
                               type="tel" 
@@ -1344,8 +1400,13 @@ export default function Checkout() {
                               </div>
                               <h3 className="text-xl font-bold text-[#1A2C54]">Verify Your Phone Number</h3>
                               <p className="text-xs text-gray-400 font-medium leading-relaxed">
-                                We sent a 6-digit verification code (OTP) via SMS to <span className="text-ruby font-bold">{otpSentTo}</span>. Please enter it below to verify and save your address.
+                                We generated a compliance-safe 6-digit verification code (OTP) locally. Enter the code below to verify and save your address:
                               </p>
+                              {devTestingOtp && (
+                                <div className="mt-2 bg-green-50 border border-green-200 text-green-800 rounded-xl px-4 py-2 font-mono text-sm font-bold inline-block">
+                                  Your Local Code: {devTestingOtp}
+                                </div>
+                              )}
                             </div>
 
                             <form onSubmit={handleVerifyOtpAndSave} className="space-y-4">
@@ -1422,9 +1483,8 @@ export default function Checkout() {
 
                   <div className="step-nav flex gap-4 mt-8 pt-8 border-t border-gray-100">
                     <button 
-                      disabled={!selectedAddress}
-                      onClick={() => setCurrentStep(2)}
-                      className="flex-1 bg-ruby text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={handleContinueToShipping}
+                      className="flex-1 bg-ruby text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95"
                     >
                       Continue to Shipping
                     </button>

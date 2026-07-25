@@ -1,5 +1,4 @@
-import { collection, addDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { Notification } from '../types';
 
 export const sendNotification = async (data: {
@@ -11,13 +10,30 @@ export const sendNotification = async (data: {
   link?: string;
 }, skipPush = false) => {
   try {
-    // 1. Store in Firestore for history
-    await addDoc(collection(db, 'notifications'), {
-      ...data,
-      userId: data.userId || null,
-      isRead: false,
-      createdAt: new Date().toISOString()
-    });
+    // 1. Store notification in Supabase notifications table for in-app history
+    try {
+      const targetUserId = data.userId || null;
+      const { error: sbError } = await supabase
+        .from('notifications')
+        .insert({
+          user_id: targetUserId,
+          title: data.title,
+          body: data.body,
+          type: data.type,
+          link: data.link || '/notifications',
+          icon_type: data.iconType || data.type || 'order',
+          is_read: false,
+          created_at: new Date().toISOString()
+        });
+
+      if (sbError) {
+        console.warn("⚠️ [sendNotification] Supabase notification write error:", sbError.message);
+      } else {
+        console.log("📝 [sendNotification] Successfully saved in-app notification to Supabase:", data.title);
+      }
+    } catch (sbErr: any) {
+      console.warn("⚠️ [sendNotification] Failed to store in-app notification in Supabase:", sbErr?.message || sbErr);
+    }
 
     // 2. Trigger Push Notification (unless skipped)
     if (skipPush) {

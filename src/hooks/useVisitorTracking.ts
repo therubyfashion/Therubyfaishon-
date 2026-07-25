@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useLocation } from 'react-router-dom';
-import { auth, db } from '../firebase';
+import { db } from '../firebase';
 import { doc, setDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { useAuth } from '../contexts/AuthContext';
 
 export const useVisitorTracking = () => {
   const location = useLocation();
   const socketRef = useRef<Socket | null>(null);
+  const { user } = useAuth();
 
   useEffect(() => {
     // Connect to Socket.io (Keep for socket-based events if needed)
@@ -84,8 +86,8 @@ export const useVisitorTracking = () => {
         const trackingData = {
           id: sessionId,
           sessionId,
-          userId: auth.currentUser?.uid || null,
-          userEmail: auth.currentUser?.email || null,
+          userId: user?.uid || null,
+          userEmail: user?.email || null,
           path: location.pathname,
           lastSeen: serverTimestamp(),
           startTime: sessionStorage.getItem('session_start_time') || new Date().toISOString(),
@@ -128,7 +130,7 @@ export const useVisitorTracking = () => {
       clearInterval(heartbeat);
       socketRef.current?.off('connect', track);
     };
-  }, [location.pathname, auth.currentUser]);
+  }, [location.pathname, user]);
 
   // Clean up session on tab close (optional, but good for accuracy)
   useEffect(() => {

@@ -4,12 +4,12 @@ import { ShoppingBag, Heart, Star } from 'lucide-react';
 import { Product } from '../types';
 import { useCart } from '../contexts/CartContext';
 import { useWishlist } from '../contexts/WishlistContext';
+import { useAuth } from '../contexts/AuthContext';
 import { trackPixelEvent } from '../lib/pixel';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
 import { formatPrice } from '../utils/currency';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 
 interface ProductCardProps {
   product: Product;
@@ -19,6 +19,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const navigate = useNavigate();
   const { addToCart } = useCart();
   const { toggleWishlist, isInWishlist } = useWishlist();
+  const { user } = useAuth();
   const [reviewStats, setReviewStats] = useState({ average: 0, count: 0 });
 
   useEffect(() => {
@@ -26,10 +27,15 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     if (!product || !product.id) return;
     const fetchStats = async () => {
       try {
-        const q = query(collection(db, 'reviews'), where('productId', '==', product.id));
-        const snap = await getDocs(q);
+        const { data, error } = await supabase
+          .from('reviews')
+          .select('rating')
+          .eq('product_id', product.id);
+
+        if (error) throw error;
         if (!active) return;
-        const ratings = snap.docs.map(doc => Number(doc.data().rating || 0));
+
+        const ratings = (data || []).map(row => Number(row.rating || 0));
         const count = ratings.length;
         const average = count > 0 ? ratings.reduce((sum, r) => sum + r, 0) / count : 0;
         setReviewStats({ average, count });
@@ -76,6 +82,11 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const handleWishlist = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    if (!user) {
+      toast.error("Please login to add items to your wishlist");
+      return;
+    }
     
     const isCurrentlyInWishlist = isInWishlist(product.id);
     toggleWishlist(product);

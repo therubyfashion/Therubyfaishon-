@@ -17,8 +17,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { Html5Qrcode } from 'html5-qrcode';
-import { db } from '../firebase';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { supabase } from '../supabase';
 
 const steps = [
   { key: 'confirmed', label: 'Confirmed', icon: ShoppingBag },
@@ -47,19 +46,49 @@ export default function TrackOrder() {
       const cleanOid = oid.trim();
       const cleanEmail = emailStr.trim().toLowerCase();
       
-      console.log("🔍 Fetching order details via secure server proxy...");
-      const response = await fetch('/api/track-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId: cleanOid, email: cleanEmail })
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || "Order not found. Please verify that the Order ID and Email are correct.");
+      console.log("🔍 Fetching order details from Supabase...");
+      
+      let query = supabase.from('orders').select('*');
+      
+      if (cleanOid.length > 20) {
+        query = query.eq('id', cleanOid);
+      } else {
+        const variants = [
+          cleanOid,
+          `#${cleanOid}`,
+          cleanOid.toUpperCase(),
+          `#${cleanOid.toUpperCase()}`
+        ];
+        query = query.in('order_number', variants);
+      }
+      
+      const { data: orders, error: dbErr } = await query.eq('customer_email', cleanEmail);
+      
+      if (dbErr) throw dbErr;
+      if (!orders || orders.length === 0) {
+        throw new Error("Order not found. Please verify that the Order ID and Email are correct.");
       }
 
-      const foundOrder = await response.json();
+      const o = orders[0];
+      const foundOrder = {
+        id: o.id,
+        orderId: o.order_number,
+        email: o.customer_email || '',
+        items: o.items || [],
+        total: o.total,
+        status: o.status,
+        createdAt: o.created_at,
+        updatedAt: o.updated_at,
+        address: {
+          name: o.shipping_full_name || 'Customer',
+          number: o.shipping_phone || '',
+          city: o.shipping_city || '',
+          pincode: o.shipping_zip || '',
+          address_line: o.shipping_address || ''
+        },
+        trackingNumber: o.tracking_number || 'AUTO_E_HUB',
+        trackingHistory: o.tracking_history || []
+      };
 
       setOrder(foundOrder);
       setShowSearch(false);

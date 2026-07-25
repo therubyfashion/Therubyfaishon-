@@ -1,30 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { 
-  signInWithPopup, 
-  signInWithRedirect,
-  getRedirectResult,
-  GoogleAuthProvider, 
-  createUserWithEmailAndPassword, 
-  updateProfile, 
-  signOut,
-  setPersistence,
-  browserLocalPersistence,
-  signInWithCredential
-} from 'firebase/auth';
-import { auth, db } from '../firebase';
-import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
+import { supabase } from '../supabase';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { Mail, Lock, User, ArrowRight, Phone, CheckCircle2, Smartphone } from 'lucide-react';
-import { Capacitor } from '@capacitor/core';
-import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 
 export default function Signup() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [storeSettings, setStoreSettings] = useState<any>(null);
-  // Phone login removed
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -37,134 +21,37 @@ export default function Signup() {
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, 'settings'));
-        if (!querySnapshot.empty) {
-          setStoreSettings(querySnapshot.docs[0].data());
+        const configRes = await fetch('/api/payment-config');
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          setStoreSettings({
+            storeName: 'The Ruby Fashion',
+            storeLogo: 'https://cdn-icons-png.flaticon.com/512/2909/2909813.png',
+            ...configData
+          });
         }
       } catch (error) {
         console.error("Error fetching settings:", error);
       }
     };
     fetchSettings();
-
-    const checkRedirect = async () => {
-      try {
-        const result = await getRedirectResult(auth);
-        if (result?.user) {
-          const user = result.user;
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (!userDoc.exists()) {
-            await setDoc(doc(db, 'users', user.uid), {
-              uid: user.uid,
-              email: user.email,
-              displayName: user.displayName,
-              photoURL: user.photoURL || '',
-              role: 'user',
-              isVerified: true,
-              createdAt: new Date().toISOString()
-            });
-          }
-          toast.success("Account created successfully! 🎉");
-          navigate('/');
-        }
-      } catch (error: any) {
-        console.error("Redirect error:", error);
-      }
-    };
-    checkRedirect();
   }, [navigate]);
 
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
-      if (Capacitor.isNativePlatform()) {
-        try {
-          console.log("Starting Native Google Signup...");
-          const userNative = await GoogleAuth.signIn();
-          console.log("Native Google User:", userNative);
-
-          if (!userNative.authentication || !userNative.authentication.idToken) {
-            throw new Error("No ID Token received from Google Auth");
-          }
-
-          const credential = GoogleAuthProvider.credential(userNative.authentication.idToken);
-          const { user } = await signInWithCredential(auth, credential);
-          
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (!userDoc.exists()) {
-            await setDoc(doc(db, 'users', user.uid), {
-              uid: user.uid,
-              email: user.email,
-              displayName: user.displayName,
-              photoURL: user.photoURL || '',
-              role: 'user',
-              isVerified: true,
-              createdAt: new Date().toISOString()
-            });
-          }
-          toast.success("Signup Successful! 🎉");
-          navigate('/');
-        } catch (nativeError: any) {
-          console.error("Native Google Signup error details:", nativeError);
-          const errorMessage = nativeError.message || nativeError.error || JSON.stringify(nativeError);
-          
-          if (errorMessage !== 'USER_CANCELLED') {
-             toast.error(`Native Signup failed: ${errorMessage}. Please check SHA-1 fingerprint in Firebase.`);
-             console.log("Native signup failed. Fallback to web is disabled on mobile to avoid 403 error.");
-          } else {
-             console.log("User cancelled signup.");
-          }
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin
         }
-      } else {
-        await webGoogleLogin();
-      }
-    } catch (error: any) {
-      console.error("Signup error:", error);
-      
-      let errorMessage = "Signup failed. Please try again.";
-      if (error.code === 'auth/network-request-failed') {
-        errorMessage = "Network error! Please check your internet connection or check if your browser is blocking authentication scripts.";
-      } else if (error.code === 'auth/popup-closed-by-user') {
-        return; // Don't show toast for user cancellation
-      }
-
-      toast.error(errorMessage, {
-        action: error.code === 'auth/network-request-failed' ? {
-          label: "Retry",
-          onClick: () => window.location.reload()
-        } : undefined
       });
+      if (error) throw error;
+    } catch (error: any) {
+      console.error("Google Auth Error:", error);
+      toast.error(error.message || "Failed to sign up with Google.");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const webGoogleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
-    
-    try {
-      const { user } = await signInWithPopup(auth, provider);
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      if (!userDoc.exists()) {
-        await setDoc(doc(db, 'users', user.uid), {
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName,
-          photoURL: user.photoURL || '',
-          role: 'user',
-          isVerified: true,
-          createdAt: new Date().toISOString()
-        });
-      }
-      toast.success("Signup Successful! 🎉");
-      navigate('/');
-    } catch (popupError: any) {
-      if (popupError.code === 'auth/popup-blocked' || popupError.code === 'auth/operation-not-supported-in-this-environment') {
-        await signInWithRedirect(auth, provider);
-      } else {
-        throw popupError;
-      }
     }
   };
 
@@ -176,73 +63,48 @@ export default function Signup() {
     }
     setLoading(true);
     try {
-      // Parallelize settings fetch and user creation
+      // Fetch settings
       const settingsPromise = storeSettings ? Promise.resolve(storeSettings) : 
-        getDocs(collection(db, 'settings')).then(snap => snap.empty ? null : snap.docs[0].data());
+        fetch('/api/payment-config').then(res => res.ok ? res.json() : null);
       
-      let user;
-      let currentSettings;
-      try {
-        const [resolvedSettings, authCredential] = await Promise.all([
-          settingsPromise,
-          createUserWithEmailAndPassword(auth, formData.email, formData.password)
-        ]);
-        currentSettings = resolvedSettings;
-        user = authCredential.user;
-      } catch (authError: any) {
-        console.warn("⚠️ Firebase Auth Sign-up failed, establishing resilient offline sandbox user...", authError.message);
-        const isIdentityToolkitDisabled = authError.message?.includes('identitytoolkit.googleapis.com') || 
-                                          authError.message?.includes('Identity Toolkit') || 
-                                          authError.message?.includes('SERVICE_DISABLED') ||
-                                          authError.message?.includes('API_KEY_NOT_VALID') ||
-                                          authError.code?.includes('operation-not-supported') ||
-                                          authError.code?.includes('api-key-not-valid') ||
-                                          authError.code?.includes('requests-from-referrers-blocked');
-                                          
-        if (isIdentityToolkitDisabled) {
-          const mockUid = `offline_${Buffer.from(formData.email).toString('hex').slice(0, 16)}`;
-          const mockUser = {
-            uid: mockUid,
-            email: formData.email,
-            displayName: `${formData.firstName} ${formData.lastName}`,
-            firstName: formData.firstName,
-            lastName: formData.lastName,
-            role: (formData.email === 'admin@theruby.com' || formData.email === 'mdsagaransari65670@gmail.com') ? 'admin' : 'user',
-            isVerified: true
-          };
-          
-          localStorage.setItem('ruby_local_user', JSON.stringify(mockUser));
-          toast.success("✨ Welcome to The Ruby (Sandbox Account Created)!");
-          
-          setTimeout(() => {
-            window.location.href = '/';
-          }, 800);
-          return;
-        } else {
-          throw authError;
-        }
-      }
-      
-      const fullName = `${formData.firstName} ${formData.lastName}`;
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const currentSettings = await settingsPromise;
 
-      // Parallelize profile updates
-      await Promise.all([
-        updateProfile(user, { displayName: fullName }),
-        setDoc(doc(db, 'users', user.uid), {
-          uid: user.uid,
-          email: formData.email,
-          displayName: fullName,
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          phoneNumber: formData.phone,
-          role: 'user',
-          isVerified: false,
-          phoneVerified: true,
-          emailOtp: otp,
-          createdAt: new Date().toISOString()
-        })
-      ]);
+      // Sign up with Supabase
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+        options: {
+          data: {
+            full_name: `${formData.firstName} ${formData.lastName}`.trim(),
+            first_name: formData.firstName,
+            last_name: formData.lastName,
+            phone: formData.phone
+          }
+        }
+      });
+
+      if (authError) {
+        throw authError;
+      }
+
+      const sUser = authData.user;
+      if (!sUser) {
+        throw new Error("Failed to create user in Supabase Auth.");
+      }
+
+      // Securely generate and store OTP via backend (uses service role key to bypass RLS)
+      const otpRes = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: formData.email })
+      });
+
+      if (!otpRes.ok) {
+        const errData = await otpRes.json();
+        throw new Error(errData.error || "Failed to generate verification code securely.");
+      }
+
+      const { otp } = await otpRes.json();
 
       // Notify Admin about new user registration
       try {
@@ -346,26 +208,10 @@ export default function Signup() {
       }
 
       localStorage.removeItem('phone_user');
-      // Keep user signed in so they have permissions to update their profile during verification
-      navigate(`/verify-prompt?email=${encodeURIComponent(formData.email)}&uid=${user.uid}`);
+      navigate(`/verify-prompt?email=${encodeURIComponent(formData.email)}&uid=${sUser.id}`);
     } catch (error: any) {
       console.error("Signup error:", error);
-      if (error.code === 'auth/email-already-in-use') {
-        toast.error("Email already in use. Please sign in.");
-      } else if (error.code === 'auth/network-request-failed') {
-        toast.error("Network error! Please check your internet connection or check if your browser is blocking authentication scripts.", {
-          action: {
-            label: "Retry",
-            onClick: () => window.location.reload()
-          }
-        });
-      } else if (error.code === 'not-found' || error.message?.includes('5 NOT_FOUND')) {
-        toast.error("The database is being provisioned (Google Provisioning). Please try again in 2-3 minutes! 💎", { duration: 6000 });
-      } else if (error.message) {
-        toast.error(error.message);
-      } else {
-        toast.error("Failed to create account. Please try again.");
-      }
+      toast.error(error.message || "Failed to create account. Please try again.");
     } finally {
       setLoading(false);
     }

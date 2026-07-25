@@ -11,6 +11,7 @@ import { LoadingSpinner } from '../components/Skeleton';
 
 import { useWishlist } from '../contexts/WishlistContext';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../supabase';
 
 export default function Cart() {
   const { user } = useAuth();
@@ -37,22 +38,24 @@ export default function Cart() {
   useEffect(() => {
     const fetchCoupons = async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, 'coupons'));
-        const couponsData = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        // Only show public coupons or coupons created by this logged-in user
-        const filtered = couponsData.filter((c: any) => !c.createdBy || (user && c.createdBy === user.uid));
-        setCoupons(filtered);
+        const { data, error } = await supabase
+          .from('coupons')
+          .select('*')
+          .eq('active', true);
+        if (error) throw error;
+        setCoupons(data || []);
       } catch (error) {
-        console.error("Error fetching coupons:", error);
+        console.error("Error fetching coupons from Supabase:", error);
       }
     };
     fetchCoupons();
-  }, [user]);
+  }, []);
 
   const handleMoveToWishlist = (item: any) => {
+    if (!user) {
+      toast.error("Please login to add items to your wishlist");
+      return;
+    }
     if (!isInWishlist(item.id)) {
       toggleWishlist(item);
     }
@@ -61,40 +64,78 @@ export default function Cart() {
   };
 
   const handleApplyPromo = async () => {
-    if (!promoCode) return;
+    if (!promoCode.trim()) return;
     
     setIsApplyingPromo(true);
-    // Simulate a small delay for better UX
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await new Promise(resolve => setTimeout(resolve, 400));
 
-    const coupon = coupons.find(c => c && c.code && typeof c.code === 'string' && c.code.toUpperCase() === promoCode.toUpperCase());
+    const codeToMatch = promoCode.trim().toUpperCase();
+    let coupon = coupons.find(c => c && c.code && c.code.toUpperCase() === codeToMatch);
     
-    if (coupon) {
-      // Safety validation: Ensure private loyalty vouchers belong to the current user
-      if (coupon.createdBy && (!user || coupon.createdBy !== user.uid)) {
-        toast.error('This is a private coupon belonging to another account');
+    if (!coupon) {
+      try {
+        const { data } = await supabase
+          .from('coupons')
+          .select('*')
+          .ilike('code', codeToMatch)
+          .eq('active', true)
+          .maybeSingle();
+        if (data) coupon = data;
+      } catch (e) {
+        console.error("Error checking coupon:", e);
+      }
+    }
+
+    if (coupon && (coupon.active ?? true)) {
+      if (coupon.start_date && new Date(coupon.start_date) > new Date()) {
+        toast.error('This coupon is not active yet');
         setIsApplyingPromo(false);
         return;
       }
 
-      // Check expiry
-      if (coupon.expiryDate && new Date(coupon.expiryDate) < new Date()) {
+      const expiry = coupon.end_date || coupon.expiryDate;
+      if (expiry && new Date(expiry) < new Date()) {
         toast.error('This coupon has expired');
         setIsApplyingPromo(false);
         return;
       }
 
+      const limit = coupon.usage_limit ?? coupon.usageLimit;
+      const count = coupon.used_count ?? coupon.usedCount ?? 0;
+      if (limit !== null && limit !== undefined && count >= Number(limit)) {
+        toast.error('This coupon has reached its maximum usage limit');
+        setIsApplyingPromo(false);
+        return;
+      }
+
+      const minCart = Number(coupon.min_cart_value ?? coupon.minCartValue ?? 0);
+      if (minCart > 0 && subtotal < minCart) {
+        toast.error(`Minimum cart subtotal of ₹${minCart} required for this coupon`);
+        setIsApplyingPromo(false);
+        return;
+      }
+
       let discountAmount = 0;
-      if (coupon.discountType === 'percentage') {
-        discountAmount = total * (Number(coupon.value) / 100);
+      const cType = coupon.type || coupon.discountType || 'percentage';
+      const cVal = Number(coupon.value ?? coupon.discount ?? 0);
+
+      if (cType === 'percentage') {
+        discountAmount = subtotal * (cVal / 100);
+        const maxDisc = Number(coupon.max_discount || 0);
+        if (maxDisc > 0 && discountAmount > maxDisc) {
+          discountAmount = maxDisc;
+        }
+      } else if (cType === 'free_shipping') {
+        const shippingFee = Number(settings?.shippingFee || 99);
+        discountAmount = shippingFee;
       } else {
-        discountAmount = Number(coupon.value);
+        discountAmount = cVal;
       }
 
       setAppliedPromo({ code: coupon.code, discount: discountAmount });
       toast.success('Promo code applied successfully!');
     } else {
-      toast.error('Invalid promo code');
+      toast.error('Invalid or inactive promo code');
     }
     setIsApplyingPromo(false);
   };

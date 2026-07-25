@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { auth, db } from '../firebase';
-import { doc, getDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
+import { supabase } from '../supabase';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { Mail, ArrowRight, ArrowLeft, RefreshCw, LogOut, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
@@ -29,29 +28,41 @@ export default function VerifyPrompt() {
 
     const fetchSettings = async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, 'settings'));
-        if (!querySnapshot.empty) {
-          setStoreSettings(querySnapshot.docs[0].data());
+        const configRes = await fetch('/api/payment-config');
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          setStoreSettings({
+            storeName: 'The Ruby Fashion',
+            storeLogo: 'https://cdn-icons-png.flaticon.com/512/2909/2909813.png',
+            ...configData
+          });
         }
       } catch (error: any) {
-        if (error.code === 'resource-exhausted') {
-          console.warn("VerifyPrompt: Firestore quota exceeded.");
-        } else {
-          console.error("Error fetching settings:", error);
-        }
+        console.error("Error fetching settings:", error);
       }
     };
     fetchSettings();
 
-    // Check if user is authenticated
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (!user && uidParam) {
-        toast.error("Please sign in to verify your email.");
-        navigate('/login');
+    // Check if user is already verified and has active session
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('is_verified')
+          .eq('id', session.user.id)
+          .maybeSingle();
+        
+        if (profileData?.is_verified) {
+          navigate('/');
+        }
+      } else {
+        if (!emailParam && !uidParam) {
+          navigate('/signup');
+        }
       }
     });
 
-    return () => unsubscribe();
+    return () => subscription.unsubscribe();
   }, [location, navigate]);
 
   const handleOtpChange = (index: number, value: string) => {
@@ -85,27 +96,48 @@ export default function VerifyPrompt() {
 
     setVerifying(true);
     try {
-      // Parallelize settings fetch and user doc fetch
-      const settingsPromise = storeSettings ? Promise.resolve(storeSettings) : 
-        getDocs(collection(db, 'settings')).then(snap => snap.empty ? null : snap.docs[0].data());
-      
-      const userDocRef = doc(db, 'users', uid);
-      const userDocPromise = getDoc(userDocRef);
-      
-      const [currentSettings, userDoc] = await Promise.all([settingsPromise, userDocPromise]);
-      
-      if (!userDoc.exists()) {
-        toast.error("User not found.");
+      const currentSettings = storeSettings || await fetch('/api/payment-config').then(res => res.ok ? res.json() : null);
+
+      const verifyRes = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otp: otpValue })
+      });
+
+      if (!verifyRes.ok) {
+        const errData = await verifyRes.json();
+        toast.error(errData.error || "Verification code not found or invalid. Please try resending.");
         setVerifying(false);
         return;
       }
 
-      const userData = userDoc.data();
-      if (userData.emailOtp === otpValue) {
-        await updateDoc(userDocRef, {
-          isVerified: true,
-          emailOtp: null
-        });
+      let activeUid = uid;
+      let firstName = 'Gorgeous';
+      let userEmail = email;
+
+      const profileQuery = uid 
+        ? supabase.from('profiles').select('id, display_name, email').eq('id', uid).maybeSingle()
+        : supabase.from('profiles').select('id, display_name, email').eq('email', email.toLowerCase().trim()).maybeSingle();
+
+      const { data: profileData } = await profileQuery;
+      
+      if (profileData) {
+        activeUid = profileData.id;
+        firstName = profileData.display_name?.split(' ')[0] || 'Gorgeous';
+        userEmail = profileData.email || email;
+      }
+
+      // Sync with Supabase profiles table
+      try {
+        if (activeUid) {
+          await supabase
+            .from('profiles')
+            .update({ is_verified: true })
+            .eq('id', activeUid);
+        }
+      } catch (supabaseErr) {
+        console.error("Failed to update Supabase verification state:", supabaseErr);
+      }
 
         // Send Welcome Email
         const welcomeHtml = `
@@ -136,7 +168,7 @@ export default function VerifyPrompt() {
                     <tr>
                       <td style="padding: 20px 60px 40px 60px; text-align: center;">
                         <div style="font-size: 50px; margin-bottom: 20px;">🎉</div>
-                        <h2 style="margin: 0 0 16px 0; color: #1A2C54; font-size: 28px; font-weight: 700; line-height: 1.2;">You're In, ${userData.firstName || 'Gorgeous'}!</h2>
+                        <h2 style="margin: 0 0 16px 0; color: #1A2C54; font-size: 28px; font-weight: 700; line-height: 1.2;">You're In, ${firstName}!</h2>
                         <p style="margin: 0; color: #64748B; font-size: 16px; line-height: 1.6;">Your account is now verified. Get ready to explore the most curated fashion collections designed just for you.</p>
                       </td>
                     </tr>
@@ -167,9 +199,9 @@ export default function VerifyPrompt() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            to: userData.email,
+            to: userEmail,
             fromName: currentSettings?.storeName || 'The Ruby',
-            subject: `Welcome to the Family, ${userData.firstName || ''}! ✨`,
+            subject: `Welcome to the Family, ${firstName}! ✨`,
             html: welcomeHtml
           })
         });
@@ -183,9 +215,9 @@ export default function VerifyPrompt() {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                userId: uid,
+                userId: activeUid,
                 title: `Welcome to the Family! ✨`,
-                body: `Hi ${userData.firstName || 'Gorgeous'}, we're so glad you're here!`,
+                body: `Hi ${firstName}, we're so glad you're here!`,
                 url: '/'
               })
             });
@@ -194,17 +226,16 @@ export default function VerifyPrompt() {
           }
         }, 3000); // 3-second delay
 
-        navigate('/');
-      } else {
-        toast.error("Invalid verification code. Please try again.");
-      }
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        if (currentSession) {
+          navigate('/');
+        } else {
+          toast.success("Account verified successfully! Please sign in to explore. ✨", { position: 'bottom-center', duration: 5000 });
+          navigate('/login');
+        }
     } catch (error: any) {
       console.error("Verification error:", error);
-      if (error.code === 'not-found' || error.message?.includes('5 NOT_FOUND')) {
-        toast.error("The database is initializing. Please try again in 2-3 minutes! 💎", { duration: 6000 });
-      } else {
-        toast.error("Failed to verify code.");
-      }
+      toast.error("Failed to verify code.");
     } finally {
       setVerifying(false);
     }
@@ -218,24 +249,21 @@ export default function VerifyPrompt() {
 
     setLoading(true);
     try {
-      // Parallelize settings fetch and user doc fetch
-      const settingsPromise = storeSettings ? Promise.resolve(storeSettings) : 
-        getDocs(collection(db, 'settings')).then(snap => snap.empty ? null : snap.docs[0].data());
-      
-      const userDocPromise = getDoc(doc(db, 'users', uid));
-      
-      const [currentSettings, userDoc] = await Promise.all([settingsPromise, userDocPromise]);
-      
-      if (!userDoc.exists()) {
-        toast.error("User not found.");
-        setLoading(false);
-        return;
+      const currentSettings = storeSettings || await fetch('/api/payment-config').then(res => res.ok ? res.json() : null);
+
+      // Securely generate and store OTP via backend (uses service role key to bypass RLS)
+      const otpRes = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email })
+      });
+
+      if (!otpRes.ok) {
+        const errData = await otpRes.json();
+        throw new Error(errData.error || "Failed to generate verification code securely.");
       }
 
-      const userData = userDoc.data();
-      const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
-      
-      await updateDoc(doc(db, 'users', uid), { emailOtp: newOtp });
+      const { otp: newOtp } = await otpRes.json();
 
       const emailHtml = `
         <!DOCTYPE html>
@@ -335,7 +363,7 @@ export default function VerifyPrompt() {
 
   const handleSignOut = async () => {
     try {
-      await auth.signOut();
+      await supabase.auth.signOut();
       navigate('/login');
     } catch (error) {
       console.error("Logout error:", error);

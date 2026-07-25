@@ -1,18 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  doc, 
-  updateDoc, 
-  addDoc, 
-  orderBy, 
-  writeBatch,
-  getDocs,
-  Timestamp
-} from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { useAuth } from './AuthContext';
 import { Notification } from '../types';
 
@@ -23,6 +10,7 @@ interface NotificationContextType {
   markAsRead: (notificationId: string) => Promise<void>;
   markAllAsRead: () => Promise<void>;
   createNotification: (data: Omit<Notification, 'id' | 'createdAt' | 'isRead'>) => Promise<void>;
+  refetchNotifications: () => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextType>({
@@ -32,6 +20,7 @@ const NotificationContext = createContext<NotificationContextType>({
   markAsRead: async () => {},
   markAllAsRead: async () => {},
   createNotification: async () => {},
+  refetchNotifications: async () => {},
 });
 
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -39,73 +28,82 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchNotifications = useCallback(async () => {
     if (!user) {
       setNotifications([]);
       setLoading(false);
       return;
     }
 
-    setLoading(true);
+    const targetUserId = user.id || user.uid;
 
-    // Query for user-specific notifications AND global ones (userId = null)
-    // Firestore doesn't support easy OR across fields in simple queries without composite indexes
-    // So we'll just listen to user-specific ones for now, or combine client-side if needed.
-    // Given the request, user specific is most important (order shipped etc)
-    // Query for user-specific notifications
-    const qUser = query(
-      collection(db, 'notifications'),
-      where('userId', '==', user.uid),
-      orderBy('createdAt', 'desc')
-    );
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .or(`user_id.eq.${targetUserId},user_id.is.null`)
+        .order('created_at', { ascending: false });
 
-    // Query for global notifications
-    const qGlobal = query(
-      collection(db, 'notifications'),
-      where('userId', '==', null),
-      orderBy('createdAt', 'desc')
-    );
-
-    let userData: Notification[] = [];
-    let globalData: Notification[] = [];
-
-    const updateCombined = () => {
-      const getTimestamp = (val: any) => {
-        if (val && typeof val === 'object' && 'toDate' in val) {
-          return val.toDate().getTime();
-        }
-        return new Date(val).getTime();
-      };
-
-      const combined = [...userData, ...globalData].sort((a, b) => 
-        getTimestamp(b.createdAt) - getTimestamp(a.createdAt)
-      );
-      setNotifications(combined);
+      if (error) {
+        console.error("Error fetching notifications from Supabase:", error.message);
+      } else if (data) {
+        const mapped: Notification[] = data.map(row => ({
+          id: String(row.id),
+          userId: row.user_id || row.userId || undefined,
+          title: row.title || '',
+          body: row.body || row.message || '',
+          type: row.type || 'order',
+          iconType: row.icon_type || row.iconType || row.type || 'order',
+          isRead: Boolean(row.is_read ?? row.isRead ?? false),
+          createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+          link: row.link || '/notifications'
+        }));
+        setNotifications(mapped);
+      }
+    } catch (err: any) {
+      console.error("Failed to load notifications from Supabase:", err);
+    } finally {
       setLoading(false);
-    };
+    }
+  }, [user]);
 
-    const unsubscribeUser = onSnapshot(qUser, (snapshot) => {
-      userData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Notification[];
-      updateCombined();
-    });
+  useEffect(() => {
+    fetchNotifications();
 
-    const unsubscribeGlobal = onSnapshot(qGlobal, (snapshot) => {
-      globalData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Notification[];
-      updateCombined();
-    });
+    if (!user) return;
+
+    // Real-time listener for notifications
+    const channel = supabase
+      .channel('public:notifications')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications' },
+        () => {
+          fetchNotifications();
+        }
+      )
+      .subscribe();
+
+    // Fallback polling every 8 seconds
+    const interval = setInterval(() => {
+      fetchNotifications();
+    }, 8000);
 
     return () => {
-      unsubscribeUser();
-      unsubscribeGlobal();
+      supabase.removeChannel(channel);
+      clearInterval(interval);
     };
-  }, [user]);
+  }, [user, fetchNotifications]);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   const markAsRead = useCallback(async (notificationId: string) => {
+    setNotifications(prev => prev.map(n => n.id === notificationId ? { ...n, isRead: true } : n));
     try {
-      const ref = doc(db, 'notifications', notificationId);
-      await updateDoc(ref, { isRead: true });
+      await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('id', notificationId);
     } catch (error) {
       console.error("Error marking notification as read:", error);
     }
@@ -113,32 +111,36 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const markAllAsRead = useCallback(async () => {
     if (!user) return;
+    const targetUserId = user.id || user.uid;
+    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
     try {
-      const unreadNotifications = notifications.filter(n => !n.isRead && (n.userId === user.uid || !n.userId));
-      if (unreadNotifications.length === 0) return;
-
-      const batch = writeBatch(db);
-      unreadNotifications.forEach(n => {
-        const ref = doc(db, 'notifications', n.id);
-        batch.update(ref, { isRead: true });
-      });
-      await batch.commit();
+      await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .or(`user_id.eq.${targetUserId},user_id.is.null`);
     } catch (error) {
       console.error("Error marking all as read:", error);
     }
-  }, [user, notifications]);
+  }, [user]);
 
   const createNotification = useCallback(async (data: Omit<Notification, 'id' | 'createdAt' | 'isRead'>) => {
     try {
-      await addDoc(collection(db, 'notifications'), {
-        ...data,
-        isRead: false,
-        createdAt: new Date().toISOString()
+      const targetUserId = data.userId || null;
+      await supabase.from('notifications').insert({
+        user_id: targetUserId,
+        title: data.title,
+        body: data.body,
+        type: data.type,
+        icon_type: data.iconType || data.type || 'order',
+        link: data.link || '/notifications',
+        is_read: false,
+        created_at: new Date().toISOString()
       });
+      fetchNotifications();
     } catch (error) {
       console.error("Error creating notification:", error);
     }
-  }, []);
+  }, [fetchNotifications]);
 
   return (
     <NotificationContext.Provider value={{ 
@@ -147,7 +149,8 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       loading, 
       markAsRead, 
       markAllAsRead,
-      createNotification
+      createNotification,
+      refetchNotifications: fetchNotifications
     }}>
       {children}
     </NotificationContext.Provider>

@@ -6,7 +6,7 @@ import { useCart } from '../contexts/CartContext';
 import { useWishlist } from '../contexts/WishlistContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useSettings } from '../contexts/SettingsContext';
-import { auth, db } from '../firebase';
+import { db } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'framer-motion';
 

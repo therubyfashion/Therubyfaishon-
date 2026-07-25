@@ -1,8 +1,8 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { db, auth } from '../firebase';
-import { signOut, updatePassword, updateEmail, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
+import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { doc, updateDoc, collection, query, getDocs, where, setDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -58,14 +58,14 @@ export default function Settings() {
   React.useEffect(() => {
     const fetchCoupons = async () => {
       try {
-        const q = query(collection(db, 'coupons'), where('isActive', '==', true));
-        const snap = await getDocs(q);
-        const allCoupons = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        // Only show public coupons, or coupons created by this logged in user
-        const filtered = allCoupons.filter((c: any) => !c.createdBy || (user && c.createdBy === user.uid));
-        setCoupons(filtered);
+        const { data, error } = await supabase
+          .from('coupons')
+          .select('*')
+          .eq('active', true);
+        if (error) throw error;
+        setCoupons(data || []);
       } catch (e) {
-        console.error("Error fetching coupons:", e);
+        console.error("Error fetching coupons from Supabase:", e);
       }
     };
     fetchCoupons();
@@ -186,17 +186,10 @@ export default function Settings() {
     if (passForm.new !== passForm.confirm) return toast.error("Passwords don't match");
     setLoading(true);
     try {
-      const isOfflineUser = user.uid.startsWith('offline_');
-      if (isOfflineUser) {
-        localStorage.setItem(`ruby_sandbox_pass_${user.uid}`, passForm.new);
-        toast.success("Security Vault updated: Sandboxed credentials saved! 🔒");
-      } else {
-        if (!user.email) throw new Error("No email linked to authentication profile.");
-        const credential = EmailAuthProvider.credential(user.email, passForm.current);
-        await reauthenticateWithCredential(user, credential);
-        await updatePassword(user, passForm.new);
-        toast.success("Master password updated successfully! 🔒");
-      }
+      if (!user.email) throw new Error("No email linked to authentication profile.");
+      const { error: updateErr } = await supabase.auth.updateUser({ password: passForm.new });
+      if (updateErr) throw updateErr;
+      toast.success("Master password updated successfully! 🔒");
       setPassForm({ current: '', new: '', confirm: '' });
       setActiveView('main');
     } catch (err: any) {
@@ -225,36 +218,25 @@ export default function Settings() {
       const randomId = Math.random().toString(36).substring(2, 6).toUpperCase();
       const couponCode = `LP${option.value}-${randomId}`;
 
-      const couponRef = doc(db, 'coupons', couponCode);
       const expiry = new Date();
       expiry.setDate(expiry.getDate() + 30); // 30 days valid
 
-      await setDoc(couponRef, {
+      await supabase.from('coupons').insert([{
         code: couponCode,
-        discountType: 'fixed',
-        discountValue: option.value,
+        type: 'flat',
         value: option.value,
-        isActive: true,
-        expiryDate: expiry.toISOString(),
-        createdBy: user.uid,
-        createdAt: new Date().toISOString(),
-        isSingleUse: true
-      });
+        active: true,
+        usage_limit: 1,
+        used_count: 0,
+        start_date: new Date().toISOString(),
+        end_date: expiry.toISOString()
+      }]);
 
       const userRef = doc(db, 'users', user.uid);
       const nextPoints = currentPoints - option.cost;
       await updateDoc(userRef, {
         loyaltyPoints: nextPoints
       });
-
-      const localUserRaw = localStorage.getItem('ruby_local_user');
-      if (localUserRaw) {
-        try {
-          const parsed = JSON.parse(localUserRaw);
-          parsed.loyaltyPoints = nextPoints;
-          localStorage.setItem('ruby_local_user', JSON.stringify(parsed));
-        } catch (err) {}
-      }
 
       toast.success(`${option.name} unlocked successfully! Code: ${couponCode} 🎉`, { id: toastId });
       setRefreshCoupons(prev => prev + 1);
@@ -509,7 +491,7 @@ export default function Settings() {
 
               <button 
                 onClick={async () => {
-                  await signOut(auth);
+                  await supabase.auth.signOut();
                   navigate('/login');
                 }}
                 className="w-full py-4 bg-[#1A2C54] text-white rounded-2xl text-xs font-black uppercase tracking-[0.2em] hover:bg-red-600 transition-all shadow-xl shadow-gray-200 active:scale-95"

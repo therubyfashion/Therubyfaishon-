@@ -16,6 +16,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../supabase';
 import { format, isToday, isYesterday, parseISO } from 'date-fns';
 
 const iconMap: Record<string, React.ReactNode> = {
@@ -82,6 +83,41 @@ const Notifications: React.FC = () => {
         await OS.Notifications.requestPermission();
         const granted = OS.Notifications.permission === true || OS.Notifications.permission === 'granted';
         setPermissionGranted(granted);
+
+        if (granted && user) {
+          const targetUserId = user.id || user.uid;
+          if (typeof OS.login === 'function') await OS.login(targetUserId).catch(() => {});
+          
+          let subId = OS.User?.pushSubscription?.id || 
+                      OS.User?.PushSubscription?.id || 
+                      OS.User?.pushSubscriptionId || 
+                      (typeof OS.getUserId === 'function' ? await OS.getUserId() : null);
+
+          if (!subId) {
+            for (let i = 0; i < 6; i++) {
+              await new Promise(r => setTimeout(r, 500));
+              subId = OS.User?.pushSubscription?.id || 
+                      OS.User?.PushSubscription?.id || 
+                      OS.User?.pushSubscriptionId || 
+                      (typeof OS.getUserId === 'function' ? await OS.getUserId() : null);
+              if (subId) break;
+            }
+          }
+
+          if (subId) {
+            console.log("📝 [Notifications.tsx] Attempting Supabase profiles sync for subId:", subId, "user:", targetUserId);
+            const { data, error } = await supabase
+              .from('profiles')
+              .update({ onesignal_id: subId })
+              .eq('id', targetUserId)
+              .select();
+            if (error) {
+              console.error("❌ [Notifications.tsx] Failed to update onesignal_id in Supabase:", error.message);
+            } else {
+              console.log("✅ [Notifications.tsx] Successfully updated onesignal_id in Supabase:", subId, "Data:", data);
+            }
+          }
+        }
       } else if ('Notification' in window) {
         const res = await Notification.requestPermission();
         setPermissionGranted(res === 'granted');

@@ -51,6 +51,7 @@ export interface UserProfile {
   isVerified: boolean;
   verificationToken?: string | null;
   loyaltyPoints?: number;
+  onesignalId?: string | null;
   createdAt: string;
   updatedAt?: string;
 }

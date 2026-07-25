@@ -8,7 +8,8 @@ import {
   Plus, ThumbsUp, ThumbsDown, X, Camera, Image as ImageIcon
 } from 'lucide-react';
 import { collection, getDocs, query, where, limit, orderBy, addDoc, doc, updateDoc, increment, serverTimestamp, onSnapshot } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { Product, Category } from '../types';
 import ProductCard from '../components/ProductCard';
 import { ProductCardSkeleton } from '../components/Skeleton';
@@ -20,20 +21,15 @@ import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
 import { useNotifications } from '../contexts/NotificationContext';
 import { checkProductHealth, logProductDiagnostics } from '../utils/productHealthCheck';
-import { autoSeedDatabase } from '../utils/dbSeeder';
-import { 
-  fallbackCategories, fallbackBanners, fallbackProducts, 
-  fallbackReviews, fallbackPromoConfig 
-} from '../utils/fallbackData';
 
 export default function Home() {
   const { user, profile } = useAuth();
   const { unreadCount } = useNotifications();
-  const [trendingProducts, setTrendingProducts] = useState<Product[]>(() => fallbackProducts.filter(p => p.isTrending));
-  const [popularProducts, setPopularProducts] = useState<Product[]>(() => fallbackProducts.filter(p => p.isPopular));
-  const [promoConfig, setPromoConfig] = useState<any>(fallbackPromoConfig);
-  const [categories, setCategories] = useState<any[]>(fallbackCategories);
-  const [banners, setBanners] = useState<any[]>(fallbackBanners);
+  const [trendingProducts, setTrendingProducts] = useState<Product[]>([]);
+  const [popularProducts, setPopularProducts] = useState<Product[]>([]);
+  const [promoConfig, setPromoConfig] = useState<any>({ promoEnabled: false, promoMessage: "Welcome to The Ruby Ethnic Wear Store! 🎉" });
+  const [categories, setCategories] = useState<any[]>([]);
+  const [banners, setBanners] = useState<any[]>([]);
   
   const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [productsLoaded, setProductsLoaded] = useState(false);
@@ -55,7 +51,7 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, []);
 
-  const hasRealData = categories.length > 0 && banners.length > 0 && trendingProducts.length > 0;
+  const hasRealData = categories.length > 0 && trendingProducts.length > 0;
   const loading = minLoadingActive || (!hasRealData && safetyTimeoutActive);
   const [activeFilter, setActiveFilter] = useState('All');
   const [currentReview, setCurrentReview] = useState(0);
@@ -63,14 +59,9 @@ export default function Home() {
   const [email, setEmail] = useState('');
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [newReview, setNewReview] = useState({ rating: 5, text: '', tag: 'Fabric', image: '' as string | null });
-  const [reviews, setReviews] = useState<any[]>(fallbackReviews);
+  const [reviews, setReviews] = useState<any[]>([]);
   const [reviewLoading, setReviewLoading] = useState(false);
   const navigate = useNavigate();
-
-  // Run database auto-seeding on mount to guarantee real products, categories and banners exist
-  useEffect(() => {
-    autoSeedDatabase();
-  }, []);
 
   // Load initial cached values to avoid showing skeleton loading and render instantly
   useEffect(() => {
@@ -79,20 +70,16 @@ export default function Home() {
       if (cached) {
         const parsed = JSON.parse(cached);
         // Clean cache of old fallback items to prevent flash of dummy data
-        const hasDummy = (parsed.trendingProducts && parsed.trendingProducts.some((p: any) => !p.id || String(p.id).length < 10 || String(p.id).startsWith('fp'))) ||
-                         (parsed.popularProducts && parsed.popularProducts.some((p: any) => !p.id || String(p.id).length < 10 || String(p.id).startsWith('fp'))) ||
-                         (parsed.categories && parsed.categories.some((c: any) => !c.id || String(c.id).length < 10 || String(c.id).startsWith('kurti')));
+        const hasDummy = (parsed.trendingProducts && parsed.trendingProducts.some((p: any) => !p.id || String(p.id).length < 10 || String(p.id).startsWith('fp') || String(p.id).startsWith('fb_'))) ||
+                         (parsed.popularProducts && parsed.popularProducts.some((p: any) => !p.id || String(p.id).length < 10 || String(p.id).startsWith('fp') || String(p.id).startsWith('fb_'))) ||
+                         (parsed.categories && parsed.categories.some((c: any) => !c.id || String(c.id).length < 10 || String(c.id).startsWith('fb_')));
         if (hasDummy) {
           localStorage.removeItem('ruby_home_cache_v2');
         } else {
           if (parsed.trendingProducts && parsed.trendingProducts.length > 0) setTrendingProducts(parsed.trendingProducts);
           if (parsed.popularProducts && parsed.popularProducts.length > 0) setPopularProducts(parsed.popularProducts);
           if (parsed.categories && parsed.categories.length > 0) {
-            const filtered = parsed.categories.filter((c: any) => {
-              const nameLower = String(c.name || '').toLowerCase();
-              return nameLower !== 'kurti' && nameLower !== 'sarees' && nameLower !== 'saree' && nameLower !== 'kurtis';
-            });
-            if (filtered.length > 0) setCategories(filtered);
+            setCategories(parsed.categories);
           }
           if (parsed.banners && parsed.banners.length > 0) setBanners(parsed.banners);
           if (parsed.reviews && parsed.reviews.length > 0) setReviews(parsed.reviews);
@@ -101,11 +88,6 @@ export default function Home() {
           setProductsLoaded(true);
           setBannersLoaded(true);
         }
-      } else {
-        // No cache, we have fallback data populated so mark loaded to prevent showing raw empty state
-        setCategoriesLoaded(true);
-        setProductsLoaded(true);
-        setBannersLoaded(true);
       }
     } catch (e) {
       console.warn("Failed to load home cache:", e);
@@ -118,10 +100,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    let trendingData: Product[] = [];
-    let popularData: Product[] = [];
-    let sortedCats: any[] = [];
-    let activeBanners: any[] = [];
     let finalReviews: any[] = [];
     let promoConfigData: any = null;
 
@@ -137,50 +115,133 @@ export default function Home() {
       }
     };
 
-    // 1. Real-time Categories listener
-    const unsubscribeCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      docs.sort((a, b) => {
-        const orderA = a.sortOrder !== undefined ? Number(a.sortOrder) : 1000;
-        const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
-        return orderA - orderB;
-      });
-      // Filter out 'Kurti' and 'Sarees' dummy categories
-      const filteredDocs = docs.filter(c => {
-        const nameLower = String(c.name || '').toLowerCase();
-        return nameLower !== 'kurti' && nameLower !== 'sarees' && nameLower !== 'saree' && nameLower !== 'kurtis';
-      });
-      if (filteredDocs.length > 0) {
-        sortedCats = filteredDocs;
-        setCategories(filteredDocs);
-        cacheAndSave('categories', filteredDocs);
-      } else {
-        setCategories(fallbackCategories);
-      }
-      setCategoriesLoaded(true);
-    }, (error) => {
-      console.warn("Categories real-time snapshot error:", error);
-      setCategories(prev => prev.length > 0 ? prev : fallbackCategories);
-      setCategoriesLoaded(true);
-    });
+    const fetchHomeSupabaseData = async () => {
+      try {
+        // 1. Fetch Categories
+        const { data: catData, error: catErr } = await supabase
+          .from('categories')
+          .select('*')
+          .order('sort_order', { ascending: true });
 
-    // 2. Real-time Banners listener
-    const unsubscribeBanners = onSnapshot(collection(db, 'banners'), (snapshot) => {
-      const bannerData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      activeBanners = bannerData.filter(b => b.active !== false && b.active !== 'false');
-      if (activeBanners.length > 0) {
+        if (catErr) {
+          console.warn("Home categories fetch error:", catErr);
+        }
+
+        const categoryMap: Record<string, string> = {};
+        const mappedCats = (catData || []).map(c => {
+          categoryMap[c.id] = c.name;
+          return {
+            id: c.id,
+            name: c.name,
+            slug: c.slug,
+            image: c.image || null,
+            sortOrder: c.sort_order ?? 1000,
+          };
+        });
+        setCategories(mappedCats);
+        cacheAndSave('categories', mappedCats);
+        setCategoriesLoaded(true);
+
+        // 2. Fetch Banners
+        const { data: bannerData, error: bannerErr } = await supabase
+          .from('banners')
+          .select('*');
+
+        if (bannerErr) {
+          console.warn("Home banners fetch error:", bannerErr);
+        }
+
+        const mappedBanners = (bannerData || []).map(b => ({
+          id: b.id,
+          image: b.image || '',
+          title: b.title || '',
+          subtitle: b.subtitle || '',
+          link: b.link || '',
+          active: b.active ?? true,
+          createdAt: b.created_at || new Date().toISOString()
+        }));
+
+        const activeBanners = mappedBanners.filter(b => b.active !== false);
         setBanners(activeBanners);
         cacheAndSave('banners', activeBanners);
-      } else {
-        setBanners(fallbackBanners);
-      }
-      setBannersLoaded(true);
-    }, (error) => {
-      console.warn("Banners real-time snapshot error:", error);
-      setBanners(prev => prev.length > 0 ? prev : fallbackBanners);
-      setBannersLoaded(true);
-    });
+        setBannersLoaded(true);
 
+        // 3. Fetch Products
+        const { data: prodData, error: prodErr } = await supabase
+          .from('products')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (prodErr) {
+          console.warn("Home products fetch error:", prodErr);
+        }
+
+        const allProds: Product[] = (prodData || []).map(p => ({
+          id: p.id,
+          name: p.name || '',
+          description: p.description || '',
+          price: Number(p.price || 0),
+          comparePrice: p.compare_price ? Number(p.compare_price) : undefined,
+          category: (p.category_ids || []).map((id: string) => categoryMap[id]).filter(Boolean),
+          sizes: Array.isArray(p.sizes) ? p.sizes : [],
+          images: Array.isArray(p.images) ? p.images : [],
+          stock: Number(p.stock ?? 0),
+          stockStatus: p.stock_status || undefined,
+          createdAt: p.created_at || new Date().toISOString(),
+          isTrending: p.is_trending ?? false,
+          isPopular: p.is_popular ?? false,
+          sku: p.sku || undefined,
+          barcode: p.barcode || undefined,
+          weight: p.weight || undefined,
+          dimensions: p.dimensions || undefined,
+          seoTitle: p.seo_title || undefined,
+          seoDescription: p.seo_description || undefined,
+          variants: p.variants || [],
+          viewCount: p.view_count ?? 0,
+          wishlistCount: p.wishlist_count ?? 0,
+        }));
+
+        console.log(`[Product Diagnostic - Query Result Count] Total products fetched for Home: ${allProds.length}`);
+
+        // Run health checks & log diagnostics
+        allProds.forEach(p => {
+          const health = checkProductHealth(p);
+          if (!health.isValid) {
+            console.warn(`[Product Diagnostic - Health Check Warning] Product "${p.name}" (${p.id}) has health issues:`, health.errors, health.warnings);
+          }
+          logProductDiagnostics('Rendered', p);
+        });
+
+        const trending = allProds.filter(p => p.isTrending);
+        const popular = allProds.filter(p => p.isPopular);
+
+        const trendingData = trending.length > 0 ? trending : (allProds.length > 0 ? allProds.slice(0, 8) : []);
+        const popularData = popular.length > 0 ? popular : (allProds.length > 0 ? allProds.slice(0, 8) : []);
+
+        setTrendingProducts(trendingData);
+        setPopularProducts(popularData);
+        setProductsLoaded(true);
+        cacheAndSave('trendingProducts', trendingData);
+        cacheAndSave('popularProducts', popularData);
+      } catch (error) {
+        console.warn("Error loading home data from Supabase:", error);
+        setCategoriesLoaded(true);
+        setBannersLoaded(true);
+        setProductsLoaded(true);
+      }
+    };
+
+    fetchHomeSupabaseData();
+
+    // Set up real-time postgres changes channel for Home
+    const homeChannel = supabase
+      .channel('home-db-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => { fetchHomeSupabaseData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'banners' }, () => { fetchHomeSupabaseData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => { fetchHomeSupabaseData(); })
+      .subscribe();
+
+    // Keep settings and reviews on Firestore as per Phase 1 instructions (leaving other components intact)
     // 3. Real-time Reviews listener
     const unsubscribeReviews = onSnapshot(collection(db, 'fabric_reviews'), (snapshot) => {
       const firestoreReviews = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
@@ -189,16 +250,11 @@ export default function Home() {
         const dateB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt)) : new Date(0);
         return dateB.getTime() - dateA.getTime();
       });
-      if (firestoreReviews.length > 0) {
-        finalReviews = firestoreReviews;
-        setReviews(firestoreReviews);
-        cacheAndSave('reviews', firestoreReviews);
-      } else {
-        setReviews(fallbackReviews);
-      }
+      finalReviews = firestoreReviews;
+      setReviews(firestoreReviews);
+      cacheAndSave('reviews', firestoreReviews);
     }, (error) => {
       console.warn("Reviews real-time snapshot error:", error);
-      setReviews(prev => prev.length > 0 ? prev : fallbackReviews);
     });
 
     // 4. Real-time Settings listener (Promo Config)
@@ -217,69 +273,16 @@ export default function Home() {
         setPromoConfig(promoConfigData);
         cacheAndSave('promoConfig', promoConfigData);
       } else {
-        setPromoConfig(fallbackPromoConfig);
+        setPromoConfig({ promoEnabled: false, promoMessage: "Welcome to The Ruby Ethnic Wear Store! 🎉" });
       }
     }, (error) => {
       console.warn("Settings real-time snapshot error:", error);
-      setPromoConfig(prev => prev || fallbackPromoConfig);
-    });
-
-    // 5. Real-time Products listener (Limit 100 and orderBy createdAt desc to get the newest real products)
-    const productsQuery = query(collection(db, 'products'), orderBy('createdAt', 'desc'), limit(100));
-    const unsubscribeProducts = onSnapshot(productsQuery, (snapshot) => {
-      let allProds = snapshot.docs.map(doc => {
-        const prod = { id: doc.id, ...doc.data() } as Product;
-        logProductDiagnostics('Fetched', prod);
-        return prod;
-      });
-
-      // Sort in-memory to ensure order desc even if missing fields
-      allProds.sort((a, b) => {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return dateB - dateA;
-      });
-      
-      console.log(`[Product Diagnostic - Query Result Count] Total products fetched for Home screen: ${allProds.length}`);
-
-      if (allProds.length === 0) {
-        allProds = fallbackProducts;
-      }
-
-      // Run health checks & log diagnostics
-      allProds.forEach(p => {
-        const health = checkProductHealth(p);
-        if (!health.isValid) {
-          console.warn(`[Product Diagnostic - Health Check Warning] Product "${p.name}" (${p.id}) has health issues:`, health.errors, health.warnings);
-        }
-        logProductDiagnostics('Rendered', p);
-      });
-
-      const trending = allProds.filter(p => p.isTrending);
-      const popular = allProds.filter(p => p.isPopular);
-      
-      // If there are absolutely zero trending/popular tags on products, fallback cleanly to slicing the active ones
-      trendingData = trending.length > 0 ? trending : (allProds.length > 0 ? allProds.slice(0, 8) : []);
-      popularData = popular.length > 0 ? popular : (allProds.length > 0 ? allProds.slice(0, 8) : []);
-      
-      setTrendingProducts(trendingData);
-      setPopularProducts(popularData);
-      setProductsLoaded(true);
-      cacheAndSave('trendingProducts', trendingData);
-      cacheAndSave('popularProducts', popularData);
-    }, (error) => {
-      console.warn("Products real-time snapshot error:", error);
-      setTrendingProducts(prev => prev.length > 0 ? prev : fallbackProducts.filter(p => p.isTrending));
-      setPopularProducts(prev => prev.length > 0 ? prev : fallbackProducts.filter(p => p.isPopular));
-      setProductsLoaded(true);
     });
 
     return () => {
-      unsubscribeCategories();
-      unsubscribeBanners();
+      supabase.removeChannel(homeChannel);
       unsubscribeReviews();
       unsubscribeSettings();
-      unsubscribeProducts();
     };
   }, []);
 

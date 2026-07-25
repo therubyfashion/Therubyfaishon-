@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, ShieldCheck, X, ArrowRight, RefreshCw, CheckCircle2, ArrowLeft } from 'lucide-react';
-import { doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -33,14 +32,20 @@ export default function EmailVerification({ onSuccess, onClose, email, userId }:
   const handleSendOtp = async () => {
     setLoading(true);
     try {
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      setGeneratedOtp(code);
-
-      // Save OTP to user's doc (transiently)
-      await updateDoc(doc(db, 'users', userId), {
-        addressConfirmOtp: code,
-        addressConfirmOtpCreatedAt: new Date().toISOString()
+      // Securely generate and store OTP via backend (uses service role key to bypass RLS)
+      const otpRes = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email })
       });
+
+      if (!otpRes.ok) {
+        const errData = await otpRes.json();
+        throw new Error(errData.error || "Failed to generate verification code securely.");
+      }
+
+      const { otp: code } = await otpRes.json();
+      setGeneratedOtp(code);
 
       // Send Email
       const emailHtml = `
@@ -109,23 +114,27 @@ export default function EmailVerification({ onSuccess, onClose, email, userId }:
 
     setLoading(true);
     try {
-      const userSnap = await getDoc(doc(db, 'users', userId));
-      const userData = userSnap.data();
+      const verifyRes = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otp: enteredOtp })
+      });
 
-      if (userData?.addressConfirmOtp === enteredOtp) {
-        // Mark as verified for this session/action
-        await updateDoc(doc(db, 'users', userId), {
-          phoneVerified: true, // Re-using this flag as requested or setting a custom one
-          addressConfirmedAt: new Date().toISOString(),
-          addressConfirmOtp: null // Clear after use
-        });
-
-        toast.success("Address confirmed successfully! 🎉");
-        if (onSuccess) onSuccess();
-        if (onClose) onClose();
-      } else {
-        toast.error("Invalid verification code.");
+      if (!verifyRes.ok) {
+        const errData = await verifyRes.json();
+        toast.error(errData.error || "Verification code not found or expired.");
+        setLoading(false);
+        return;
       }
+
+      // Mark as verified/completed for this user profile in Supabase
+      await supabase.from('profiles').update({
+        is_verified: true
+      }).eq('id', userId);
+
+      toast.success("Address confirmed successfully! 🎉");
+      if (onSuccess) onSuccess();
+      if (onClose) onClose();
     } catch (error) {
       console.error("Verification error:", error);
       toast.error("Failed to verify code.");

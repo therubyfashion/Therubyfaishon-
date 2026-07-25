@@ -16,6 +16,7 @@ import PageLoader from './components/PageLoader';
 import { AnimatePresence } from 'framer-motion';
 import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
+import { supabase } from './supabase';
 
 import { useVisitorTracking } from './hooks/useVisitorTracking';
 import { trackPixelEvent } from './lib/pixel';
@@ -86,6 +87,21 @@ function AppContent() {
   const isAdminPath = location.pathname.startsWith('/admin');
   const [showSplash, setShowSplash] = useState(true);
   const [quotaExceeded, setQuotaExceeded] = useState(false);
+
+  // Clear old stale caches to ensure fresh data from Supabase
+  useEffect(() => {
+    try {
+      const keys = Object.keys(localStorage);
+      keys.forEach(key => {
+        if (key.startsWith('ruby_shop_cache_') || key.startsWith('ruby_product_cache_')) {
+          localStorage.removeItem(key);
+        }
+      });
+      console.log("[Cache Cleaner] Cleared stale product and shop caches.");
+    } catch (e) {
+      console.warn("Failed to clear stale caches:", e);
+    }
+  }, []);
   
   // Track live visitors
   useVisitorTracking();
@@ -127,17 +143,22 @@ function AppContent() {
   useEffect(() => {
     if (settingsLoading) return;
     
-    const syncOneSignalIdToFirestore = async (userId: string, subId: string) => {
+    const syncOneSignalIdToSupabase = async (userId: string, subId: string) => {
       if (!userId || !subId) return;
-      if (profile && profile.onesignalId === subId) {
-        return;
-      }
+      console.log(`📝 [OneSignal Sync] Attempting Supabase profiles sync -> userId: ${userId}, subId: ${subId}`);
       try {
-        const userRef = doc(db, 'users', userId);
-        await updateDoc(userRef, { onesignalId: subId });
-        console.log("📝 Synced OneSignal ID to user profile in DB:", subId);
+        const { data, error } = await supabase
+          .from('profiles')
+          .update({ onesignal_id: subId })
+          .eq('id', userId)
+          .select();
+        if (error) {
+          console.error("❌ Failed to sync OneSignal ID to Supabase profiles:", error.message);
+        } else {
+          console.log("✅ Successfully synced OneSignal ID to Supabase profiles:", subId, "Result:", data);
+        }
       } catch (err: any) {
-        console.error("❌ Failed to sync OneSignal ID to Firestore:", err.message);
+        console.error("❌ Failed to sync OneSignal ID to Supabase:", err.message);
       }
     };
     
@@ -227,9 +248,10 @@ function AppContent() {
           // User login & sync (Runs reliably when auth state changes)
           if (user) {
             try {
-              console.log("🚀 OneSignal: Syncing User ID:", user.uid);
-              if (OS.setExternalUserId) OS.setExternalUserId(user.uid);
-              else if (OS.login) OS.login(user.uid);
+              const targetUserId = user.id || user.uid;
+              console.log("🚀 OneSignal: Syncing User ID:", targetUserId);
+              if (OS.setExternalUserId) OS.setExternalUserId(targetUserId);
+              else if (OS.login) OS.login(targetUserId);
 
               const tags = {
                 "role": isAdmin ? 'admin' : 'customer',
@@ -245,15 +267,15 @@ function AppContent() {
                 OS.getDeviceState((state: any) => {
                   const subId = state?.userId;
                   if (subId) {
-                    syncOneSignalIdToFirestore(user.uid, subId);
+                    syncOneSignalIdToSupabase(targetUserId, subId);
                   }
                 });
               } else if (OS.User?.pushSubscription?.id) {
                 const subId = OS.User.pushSubscription.id;
-                syncOneSignalIdToFirestore(user.uid, subId);
+                syncOneSignalIdToSupabase(targetUserId, subId);
               } else if (OS.User?.PushSubscription?.id) {
                 const subId = OS.User.PushSubscription.id;
-                syncOneSignalIdToFirestore(user.uid, subId);
+                syncOneSignalIdToSupabase(targetUserId, subId);
               }
             } catch (e) {
               console.error("❌ OneSignal: Native User Sync Error:", e);
@@ -271,22 +293,17 @@ function AppContent() {
                 isOneSignalWebInitialized = true;
                 console.log("✅ OneSignal: Web SDK Initialized Successfully");
               } catch (initErr: any) {
-                const errMsg = String(initErr.message || initErr || "").toLowerCase();
-                if (errMsg.includes("already initialized") || errMsg.includes("already-exists")) {
-                  isOneSignalWebInitialized = true;
-                } else if (errMsg.includes("can only be used on") || errMsg.includes("unsupported")) {
-                  console.info(`ℹ️ OneSignal: Web SDK skipped in development env (expected domain constraint).`);
-                } else {
-                  console.warn("OneSignal Web SDK Init skipped or restricted (expected in local/dev previews):", initErr.message || initErr);
-                }
+                isOneSignalWebInitialized = true;
+                console.warn("OneSignal Web SDK Init note:", initErr.message || initErr);
               }
             }
             
-            if (isOneSignalWebInitialized && user) {
+            if (user) {
               try {
+                const targetUserId = user.id || user.uid;
                 if (typeof OneSignalWeb.login === 'function') {
-                  await OneSignalWeb.login(user.uid);
-                  console.log("✅ OneSignal Web sync login success:", user.uid);
+                  await OneSignalWeb.login(targetUserId);
+                  console.log("✅ OneSignal Web sync login success:", targetUserId);
                 }
                 // Set tags for web
                 const tags = {
@@ -299,47 +316,61 @@ function AppContent() {
                 } else if (OneSignalWeb.sendTags) {
                    await OneSignalWeb.sendTags(tags);
                 }
-                console.log("✅ OneSignal Web sync tags success:", tags);
 
-                // Fetch web subscription ID
-                let subId = null;
-                if (OneSignalWeb.User?.pushSubscription?.id) {
-                  subId = OneSignalWeb.User.pushSubscription.id;
-                } else if (OneSignalWeb.User?.PushSubscription?.id) {
-                  subId = OneSignalWeb.User.PushSubscription.id;
-                } else if (OneSignalWeb.User?.pushSubscriptionId) {
-                  subId = OneSignalWeb.User.pushSubscriptionId;
-                } else if (typeof OneSignalWeb.getUserId === 'function') {
-                  subId = await OneSignalWeb.getUserId();
-                }
-                
-                if (subId) {
-                  console.log("====================================================");
-                  console.log("🔔 [OneSignal Device Audit] Browser/Device is Subscribed!");
-                  console.log(`   - Subscription ID: ${subId}`);
-                  console.log("====================================================");
-                  await syncOneSignalIdToFirestore(user.uid, subId);
-                } else {
-                  console.log("====================================================");
-                  console.log("⚠️ [OneSignal Device Audit] Browser/Device is NOT subscribed yet, or permission is pending/denied.");
-                  console.log("====================================================");
+                // Helper to query and sync subscription ID
+                const checkAndSyncSubId = async () => {
+                  let subId = null;
+                  if (OneSignalWeb.User?.pushSubscription?.id) {
+                    subId = OneSignalWeb.User.pushSubscription.id;
+                  } else if (OneSignalWeb.User?.PushSubscription?.id) {
+                    subId = OneSignalWeb.User.PushSubscription.id;
+                  } else if (OneSignalWeb.User?.pushSubscriptionId) {
+                    subId = OneSignalWeb.User.pushSubscriptionId;
+                  } else if (typeof OneSignalWeb.getUserId === 'function') {
+                    subId = await OneSignalWeb.getUserId();
+                  }
+
+                  if (subId) {
+                    console.log("====================================================");
+                    console.log("🔔 [OneSignal Device Audit] Subscribed! Subscription ID:", subId);
+                    console.log("====================================================");
+                    await syncOneSignalIdToSupabase(targetUserId, subId);
+                    return true;
+                  } else {
+                    console.log("⚠️ [OneSignal Device Audit] No subscription ID found yet (pending permission/registration).");
+                    return false;
+                  }
+                };
+
+                // Immediate check
+                await checkAndSyncSubId();
+
+                // Add permissionChange listener
+                if (OneSignalWeb.Notifications?.addEventListener) {
+                  OneSignalWeb.Notifications.addEventListener("permissionChange", async (permission: any) => {
+                    console.log("🔔 [OneSignal] Permission status change detected:", permission);
+                    if (permission === true || permission === 'granted' || permission?.to === 'granted') {
+                      setTimeout(checkAndSyncSubId, 1000);
+                      setTimeout(checkAndSyncSubId, 3000);
+                    }
+                  });
                 }
 
                 // Add real-time event listener for subscription changes
                 if (OneSignalWeb.User?.pushSubscription?.addEventListener) {
                   OneSignalWeb.User.pushSubscription.addEventListener("change", async (event: any) => {
                     const newSubId = event.current?.id || event.current?.token;
+                    console.log("🔔 [OneSignal Listener] Subscription change event fired, newSubId:", newSubId);
                     if (newSubId) {
-                      console.log("🔔 [OneSignal Listener] Subscription changed! New subId:", newSubId);
-                      await syncOneSignalIdToFirestore(user.uid, newSubId);
+                      await syncOneSignalIdToSupabase(targetUserId, newSubId);
                     }
                   });
                 } else if (OneSignalWeb.User?.PushSubscription?.addEventListener) {
                   OneSignalWeb.User.PushSubscription.addEventListener("change", async (event: any) => {
                     const newSubId = event.current?.id || event.current?.token;
+                    console.log("🔔 [OneSignal Listener] Subscription change event fired, newSubId:", newSubId);
                     if (newSubId) {
-                      console.log("🔔 [OneSignal Listener] Subscription changed! New subId:", newSubId);
-                      await syncOneSignalIdToFirestore(user.uid, newSubId);
+                      await syncOneSignalIdToSupabase(targetUserId, newSubId);
                     }
                   });
                 }

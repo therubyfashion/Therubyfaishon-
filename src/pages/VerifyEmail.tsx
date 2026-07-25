@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { CheckCircle2, XCircle, Loader2, ArrowRight, Sparkles } from 'lucide-react';
@@ -17,49 +16,46 @@ export default function VerifyEmail() {
 
   useEffect(() => {
     const verify = async () => {
-      if (!uid || !token) {
+      if (!uid) {
         setStatus('error');
         setMessage('Invalid verification link.');
         return;
       }
 
       try {
-        const userDocRef = doc(db, 'users', uid);
-        const userDoc = await getDoc(userDocRef);
+        const { data: profile, error: fetchErr } = await supabase
+          .from('profiles')
+          .select('id, is_verified')
+          .eq('id', uid)
+          .maybeSingle();
 
-        if (!userDoc.exists()) {
+        if (fetchErr || !profile) {
           setStatus('error');
-          setMessage('User not found.');
+          setMessage('User profile not found.');
           return;
         }
 
-        const userData = userDoc.data();
-        if (userData.isVerified) {
+        if (profile.is_verified) {
           setStatus('success');
           setMessage('Email already verified!');
           return;
         }
 
-        if (userData.verificationToken === token) {
-          await updateDoc(userDocRef, {
-            isVerified: true,
-            verificationToken: null // Clear the token after use
-          });
-          setStatus('success');
-          setMessage('Your email has been successfully verified!');
-          toast.success("Account created successfully! 🎉", { position: 'bottom-center', duration: 5000 });
-        } else {
-          setStatus('error');
-          setMessage('Invalid or expired verification token.');
-        }
+        // Update verification status in Supabase profiles
+        const { error: updateErr } = await supabase
+          .from('profiles')
+          .update({ is_verified: true })
+          .eq('id', uid);
+
+        if (updateErr) throw updateErr;
+
+        setStatus('success');
+        setMessage('Your email has been successfully verified!');
+        toast.success("Account verified successfully! 🎉", { position: 'bottom-center', duration: 5000 });
       } catch (error: any) {
         console.error("Verification error:", error);
         setStatus('error');
-        if (error.code === 'auth/account-exists-with-different-credential') {
-          setMessage('You already have an account with this email using a different login method (e.g., Google or Email). Please use your original method to sign in.');
-        } else {
-          setMessage('An error occurred during verification.');
-        }
+        setMessage('An error occurred during verification.');
       }
     };
 

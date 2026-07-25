@@ -8,11 +8,11 @@ import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 
 import { useAuth } from '../contexts/AuthContext';
-import { auth, db } from '../firebase';
-import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { db } from '../firebase';
 import { doc, setDoc, addDoc, collection, query, where, getDocs, updateDoc } from 'firebase/firestore';
 import { generateInvoice } from '../utils/invoiceGenerator';
 import { io } from 'socket.io-client';
+import { supabase } from '../supabase';
 
 export default function OrderSuccess() {
   const location = useLocation();
@@ -131,90 +131,29 @@ export default function OrderSuccess() {
     setIsRegistering(true);
     try {
       let registeredUser;
-      try {
-        const userCredential = await createUserWithEmailAndPassword(auth, orderData.email, password);
-        registeredUser = userCredential.user;
-      } catch (authError: any) {
-        console.warn("⚠️ Firebase Auth guest conversion failed, establishing resilient offline sandbox user...", authError.message);
-        const isIdentityToolkitDisabled = authError.message?.includes('identitytoolkit.googleapis.com') || 
-                                          authError.message?.includes('Identity Toolkit') || 
-                                          authError.message?.includes('SERVICE_DISABLED') ||
-                                          authError.message?.includes('API_KEY_NOT_VALID') ||
-                                          authError.code?.includes('operation-not-supported') ||
-                                          authError.code?.includes('api-key-not-valid') ||
-                                          authError.code?.includes('requests-from-referrers-blocked');
-                                          
-        if (isIdentityToolkitDisabled) {
-          const mockUid = `offline_${Buffer.from(orderData.email).toString('hex').slice(0, 16)}`;
-          const mockUser = {
-            uid: mockUid,
-            email: orderData.email,
-            displayName: orderData.address.name,
-            firstName: orderData.address.name.split(' ')[0] || 'Customer',
-            lastName: orderData.address.name.split(' ').slice(1).join(' ') || 'User',
-            role: 'user',
-            isVerified: true
-          };
-          
-          localStorage.setItem('ruby_local_user', JSON.stringify(mockUser));
-          toast.success("✨ Account created successfully in Sandbox mode!");
-          setTimeout(() => {
-            window.location.reload();
-          }, 1000);
-          return;
-        } else {
-          throw authError;
+      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+        email: orderData.email,
+        password: password,
+        options: {
+          data: {
+            full_name: orderData.address.name,
+            phone_number: orderData.address.number || ''
+          }
         }
-      }
+      });
+      if (signUpErr) throw signUpErr;
+      registeredUser = signUpData.user;
 
       if (registeredUser) {
         const fullName = orderData.address.name;
         const firstName = fullName.split(' ')[0] || 'Customer';
         const lastName = fullName.split(' ').slice(1).join(' ') || 'User';
 
-        // 1. Update Profile & Create User doc in Firestore
-        await Promise.all([
-          updateProfile(registeredUser, { displayName: fullName }),
-          setDoc(doc(db, 'users', registeredUser.uid), {
-            uid: registeredUser.uid,
-            email: orderData.email.toLowerCase(),
-            displayName: fullName,
-            firstName,
-            lastName,
-            phoneNumber: orderData.address.number || '',
-            role: 'user',
-            isVerified: true,
-            phoneVerified: true,
-            createdAt: new Date().toISOString()
-          })
-        ]);
-
-        // 2. Save address to user subcollection
-        if (stateData.address) {
-          try {
-            await addDoc(collection(db, `users/${registeredUser.uid}/addresses`), {
-              ...stateData.address,
-              isDefault: true,
-              createdAt: new Date().toISOString()
-            });
-          } catch (addrErr) {
-            console.error("Failed to save address to new user profile:", addrErr);
-          }
-        }
-
-        // 3. Link this order (and maybe any other guest orders with this email) to this user
-        try {
-          const q = query(collection(db, 'orders'), where('orderId', '==', orderData.orderId));
-          const querySnapshot = await getDocs(q);
-          if (!querySnapshot.empty) {
-            const orderDoc = querySnapshot.docs[0];
-            await updateDoc(doc(db, 'orders', orderDoc.id), {
-              userId: registeredUser.uid
-            });
-          }
-        } catch (orderErr) {
-          console.error("Failed to link order to new user ID:", orderErr);
-        }
+        // 1. Update Profile in Supabase
+        await supabase.from('profiles').update({
+          is_verified: true,
+          phone_number: orderData.address.number || ''
+        }).eq('id', registeredUser.id);
 
         toast.success("✨ Account created successfully! Your order is now linked.");
       }

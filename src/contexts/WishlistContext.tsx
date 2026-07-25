@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Product } from '../types';
-import { doc, updateDoc, increment } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
+import { useAuth } from './AuthContext';
 
 interface WishlistContextType {
   items: Product[];
@@ -12,43 +12,113 @@ interface WishlistContextType {
 const WishlistContext = createContext<WishlistContextType | undefined>(undefined);
 
 export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [items, setItems] = useState<Product[]>(() => {
-    try {
-      const saved = localStorage.getItem('ruby_wishlist');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed.filter(Boolean);
-      }
-      return [];
-    } catch (e) {
-      console.warn("Failed to parse ruby_wishlist:", e);
-      return [];
-    }
-  });
+  const [items, setItems] = useState<Product[]>([]);
+  const { user, loading: authLoading } = useAuth();
+  const lastFetchedUserId = useRef<string | null>(null);
 
   useEffect(() => {
-    if (Array.isArray(items)) {
-      localStorage.setItem('ruby_wishlist', JSON.stringify(items.filter(Boolean)));
+    if (authLoading) return;
+
+    if (!user) {
+      setItems([]);
+      lastFetchedUserId.current = null;
+      return;
     }
-  }, [items]);
+
+    if (lastFetchedUserId.current === user.uid) {
+      return;
+    }
+
+    const fetchWishlist = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('wishlist_items')
+          .select('*, products(*)')
+          .eq('user_id', user.uid);
+
+        if (error) {
+          console.error("Error fetching wishlist items from Supabase:", error);
+          return;
+        }
+
+        const dbItems: Product[] = (data || []).map(row => {
+          const p = Array.isArray(row.products) ? row.products[0] : row.products;
+          if (!p) return null;
+          
+          return {
+            ...p,
+            id: p.id,
+            name: p.name || '',
+            description: p.description || '',
+            price: Number(p.price || 0),
+            comparePrice: p.compare_price ? Number(p.compare_price) : undefined,
+            sizes: Array.isArray(p.sizes) ? p.sizes : [],
+            images: Array.isArray(p.images) ? p.images : [],
+            stock: Number(p.stock ?? 0),
+            stockStatus: p.stock_status || undefined,
+            createdAt: p.created_at || new Date().toISOString(),
+            isTrending: p.is_trending ?? false,
+            isPopular: p.is_popular ?? false,
+            sku: p.sku || undefined,
+            barcode: p.barcode || undefined,
+            weight: p.weight || undefined,
+            dimensions: p.dimensions || undefined,
+            seoTitle: p.seo_title || undefined,
+            seoDescription: p.seo_description || undefined,
+            variants: p.variants || [],
+            viewCount: p.view_count ?? 0,
+            category: p.category_ids || [],
+          } as Product;
+        }).filter(Boolean) as Product[];
+
+        setItems(dbItems);
+        lastFetchedUserId.current = user.uid;
+        
+        // Clean up legacy guest wishlist
+        localStorage.removeItem('ruby_wishlist');
+      } catch (err) {
+        console.error("Error in fetchWishlist:", err);
+      }
+    };
+
+    fetchWishlist();
+  }, [user, authLoading]);
 
   const toggleWishlist = async (product: Product) => {
-    if (!product || !product.id) return;
+    if (!product || !product.id || !user) return;
     
-    setItems(prev => {
-      const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
-      const exists = safePrev.find(i => i.id === product.id);
-      if (exists) {
-        return safePrev.filter(i => i.id !== product.id);
-      } else {
-        return [...safePrev, product];
+    const isCurrentlyInWishlist = items.some(i => i.id === product.id);
+    
+    if (isCurrentlyInWishlist) {
+      setItems(prev => prev.filter(i => i.id !== product.id));
+      try {
+        await supabase
+          .from('wishlist_items')
+          .delete()
+          .eq('user_id', user.uid)
+          .eq('product_id', product.id);
+      } catch (err) {
+        console.error("Error deleting from wishlist_items:", err);
       }
-    });
+    } else {
+      setItems(prev => [...prev, product]);
+      try {
+        await supabase
+          .from('wishlist_items')
+          .insert({
+            user_id: user.uid,
+            product_id: product.id,
+            created_at: new Date().toISOString()
+          });
+      } catch (err) {
+        console.error("Error inserting into wishlist_items:", err);
+      }
+    }
   };
 
   const isInWishlist = (productId: string) => {
     if (!productId || !Array.isArray(items)) return false;
-    return items.filter(Boolean).some(i => i.id === productId);
+    return items.some(i => i && i.id === productId);
   };
 
   return (

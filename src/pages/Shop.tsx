@@ -1,45 +1,56 @@
 import React, { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { collection, query, where, getDocs, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
-import { Product, Category } from '../types';
+import { supabase } from '../supabase';
+import { Product } from '../types';
 
 import ProductCard from '../components/ProductCard';
 import { ProductCardSkeleton } from '../components/Skeleton';
 import { Filter, ChevronDown, SlidersHorizontal, Truck, RefreshCw, ShieldCheck } from 'lucide-react';
 import { checkProductHealth, logProductDiagnostics } from '../utils/productHealthCheck';
-import { fallbackCategories, fallbackProducts } from '../utils/fallbackData';
+
+const mapSupabaseProduct = (p: any, categoryMap: Record<string, string>): Product => {
+  const mappedCategory = (p.category_ids || [])
+    .map((id: string) => categoryMap[id])
+    .filter(Boolean);
+
+  return {
+    id: p.id,
+    name: p.name || '',
+    description: p.description || '',
+    price: Number(p.price || 0),
+    comparePrice: p.compare_price ? Number(p.compare_price) : undefined,
+    category: mappedCategory,
+    sizes: Array.isArray(p.sizes) ? p.sizes : [],
+    images: Array.isArray(p.images) ? p.images : [],
+    stock: Number(p.stock ?? 0),
+    stockStatus: p.stock_status || undefined,
+    createdAt: p.created_at || new Date().toISOString(),
+    isTrending: p.is_trending ?? false,
+    isPopular: p.is_popular ?? false,
+    sku: p.sku || undefined,
+    barcode: p.barcode || undefined,
+    weight: p.weight || undefined,
+    dimensions: p.dimensions || undefined,
+    seoTitle: p.seo_title || undefined,
+    seoDescription: p.seo_description || undefined,
+    variants: p.variants || [],
+    viewCount: p.view_count ?? 0,
+    wishlistCount: p.wishlist_count ?? 0,
+  };
+};
 
 export default function Shop() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [products, setProducts] = useState<Product[]>(() => {
-    try {
-      const activeCategory = searchParams.get('category') || 'All';
-      const cacheKey = `ruby_shop_cache_${activeCategory}_newest`;
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed.products && parsed.products.length > 0) return parsed.products;
-      }
-    } catch (e) {}
-    return fallbackProducts;
-  });
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [categories, setCategories] = useState<string[]>(() => {
+  const [categories, setCategories] = useState<string[]>(['All']);
+  const [activeCategory, setActiveCategory] = useState<string>(() => {
     try {
-      const activeCategory = searchParams.get('category') || 'All';
-      const cacheKey = `ruby_shop_cache_${activeCategory}_newest`;
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed.categories && parsed.categories.length > 0) return parsed.categories;
-      }
-    } catch (e) {}
-    return ['All', ...fallbackCategories.map(c => c.name)];
+      const params = new URLSearchParams(window.location.search);
+      return params.get('category') || 'All';
+    } catch (e) {
+      return 'All';
+    }
   });
-  const [activeCategory, setActiveCategory] = useState<string>(
-    searchParams.get('category') || 'All'
-  );
   const [sortBy, setSortBy] = useState<'newest' | 'price-low' | 'price-high'>('newest');
   const [showSortMenu, setShowSortMenu] = useState(false);
 
@@ -57,19 +68,13 @@ export default function Shop() {
       if (cached) {
         const parsed = JSON.parse(cached);
         // Clean cache of old fallback items to prevent flash of dummy data
-        const hasDummy = (parsed.products && parsed.products.some((p: any) => p.id && p.id.startsWith('fp'))) ||
-                         (parsed.categories && parsed.categories.some((c: any) => c !== 'All' && !c.match(/^[A-Z]/)));
+        const hasDummy = (parsed.products && parsed.products.some((p: any) => !p.id || p.id.startsWith('fp') || p.id.startsWith('fb_'))) ||
+                         (parsed.categories && parsed.categories.some((c: any) => c !== 'All' && c.startsWith('fb_')));
         if (hasDummy) {
           localStorage.removeItem(cacheKey);
         } else {
           if (parsed.products) setProducts(parsed.products);
-          if (parsed.categories) {
-            const filtered = parsed.categories.filter((c: any) => {
-              const nameLower = String(c || '').toLowerCase();
-              return nameLower !== 'kurti' && nameLower !== 'sarees' && nameLower !== 'saree' && nameLower !== 'kurtis';
-            });
-            setCategories(filtered);
-          }
+          if (parsed.categories) setCategories(parsed.categories);
           setLoading(false);
         }
       }
@@ -78,15 +83,13 @@ export default function Shop() {
     }
   }, [activeCategory, sortBy]);
 
+  // Main data fetch and subscription
   useEffect(() => {
     const cacheKey = `ruby_shop_cache_${activeCategory}_${sortBy}`;
     const hasCache = localStorage.getItem(cacheKey) !== null;
     if (!hasCache && products.length === 0) {
       setLoading(true);
     }
-
-    let finalCategories: string[] = ['All'];
-    let fetchedProducts: Product[] = [];
 
     const saveToCache = (key: 'products' | 'categories', data: any) => {
       try {
@@ -100,58 +103,87 @@ export default function Shop() {
       }
     };
 
-    // 1. Categories real-time sync
-    const unsubscribeCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
-      let sortedCategoryDocs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      if (sortedCategoryDocs.length === 0) {
-        sortedCategoryDocs = fallbackCategories;
+    const fetchAllData = async () => {
+      try {
+        // 1. Fetch categories
+        const { data: catData, error: catErr } = await supabase
+          .from('categories')
+          .select('*')
+          .order('sort_order', { ascending: true });
+
+        if (catErr) {
+          console.warn("Shop categories error:", catErr);
+        }
+
+        const categoryMap: Record<string, string> = {};
+        const catNames: string[] = [];
+        (catData || []).forEach(c => {
+          if (c.id && c.name) {
+            categoryMap[c.id] = c.name;
+            catNames.push(c.name);
+          }
+        });
+
+        const finalCategories = ['All', ...catNames];
+        setCategories(finalCategories);
+        saveToCache('categories', finalCategories);
+
+        // 2. Fetch products
+        const { data: prodData, error: prodErr } = await supabase
+          .from('products')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (prodErr) {
+          console.warn("Shop products error:", prodErr);
+        }
+
+        const rawProds = (prodData || []).map(p => mapSupabaseProduct(p, categoryMap));
+        console.log(`[Product Diagnostic - Query Result Count] Total products fetched from Supabase: ${rawProds.length}`);
+
+        setAllProducts(rawProds);
+      } catch (err) {
+        console.warn("Error inside Supabase data fetch:", err);
+      } finally {
+        setLoading(false);
       }
-      sortedCategoryDocs.sort((a, b) => {
-        const orderA = a.sortOrder !== undefined ? Number(a.sortOrder) : 1000;
-        const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
-        return orderA - orderB;
-      });
-      // Filter out Kurti and Sarees from categories list
-      const filteredCategoryDocs = sortedCategoryDocs.filter(c => {
-        const nameLower = String(c.name || '').toLowerCase();
-        return nameLower !== 'kurti' && nameLower !== 'sarees' && nameLower !== 'saree' && nameLower !== 'kurtis';
-      });
-      const catNames = filteredCategoryDocs.map(c => c.name);
-      finalCategories = ['All', ...catNames];
-      setCategories(finalCategories);
-      saveToCache('categories', finalCategories);
-    }, (error) => {
-      console.warn("Shop categories real-time error:", error);
-      setCategories(['All', ...fallbackCategories.map(c => c.name)]);
-      unsubscribeCategories();
-    });
+    };
 
-    // 2. Products real-time sync - resilient querying & client filtering to avoid missing index crashes
-    const productsQuery = query(
-      collection(db, 'products'), 
-      orderBy('createdAt', 'desc'), 
-      limit(200)
-    );
+    fetchAllData();
 
-    const unsubscribeProducts = onSnapshot(productsQuery, (snapshot) => {
-      let rawProds = snapshot.docs.map(doc => {
-        const prod = {
-          id: doc.id,
-          ...(doc.data() as Omit<Product, 'id'>)
-        } as Product;
-        logProductDiagnostics('Fetched', prod);
-        return prod;
-      });
+    // Set up real-time postgres changes channel
+    const channel = supabase
+      .channel('shop-db-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'categories' },
+        () => {
+          fetchAllData();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'products' },
+        () => {
+          fetchAllData();
+        }
+      )
+      .subscribe();
 
-      console.log(`[Product Diagnostic - Query Result Count] Total products fetched from Firestore: ${rawProds.length}`);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
-      if (rawProds.length === 0) {
-        rawProds = fallbackProducts;
-      }
+  // Client-side filtering and sorting
+  useEffect(() => {
+    const cacheKey = `ruby_shop_cache_${activeCategory}_${sortBy}`;
+    
+    let prods = [...allProducts];
 
-      // Client-side category filtering with fallback resilience (supports both category as array or string)
-      let prods = rawProds.filter(p => {
-        if (activeCategory === 'All') return true;
+    // Filter by activeCategory
+    if (activeCategory !== 'All') {
+      prods = prods.filter(p => {
         const matches = Array.isArray(p.category)
           ? p.category.includes(activeCategory)
           : p.category === activeCategory;
@@ -161,59 +193,60 @@ export default function Shop() {
         }
         return matches;
       });
+    }
 
-      // Run health checks & diagnostics
-      prods.forEach(p => {
-        const health = checkProductHealth(p);
-        if (!health.isValid) {
-          console.warn(`[Product Diagnostic - Health Check Warning] Product "${p.name}" (${p.id}) has health issues:`, health.errors, health.warnings);
-        }
-        logProductDiagnostics('Rendered', p);
-      });
-
-      // Client-side sorting
-      prods.sort((a, b) => {
-        if (sortBy === 'newest') {
-          return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
-        }
-        if (sortBy === 'price-low') {
-          return a.price - b.price;
-        }
-        if (sortBy === 'price-high') {
-          return b.price - a.price;
-        }
-        return 0;
-      });
-
-      fetchedProducts = prods;
-      setProducts(prods);
-      setLoading(false);
-      saveToCache('products', prods);
-    }, (error) => {
-      console.warn("Shop products real-time error:", error);
-      const filteredFallbacks = fallbackProducts.filter(p => {
-        if (activeCategory === 'All') return true;
-        return Array.isArray(p.category) ? p.category.includes(activeCategory) : p.category === activeCategory;
-      });
-      setProducts(filteredFallbacks);
-      setLoading(false);
-      unsubscribeProducts();
+    // Run health checks & diagnostics
+    prods.forEach(p => {
+      const health = checkProductHealth(p);
+      if (!health.isValid) {
+        console.warn(`[Product Diagnostic - Health Check Warning] Product "${p.name}" (${p.id}) has health issues:`, health.errors, health.warnings);
+      }
+      logProductDiagnostics('Rendered', p);
     });
 
-    return () => {
-      unsubscribeCategories();
-      unsubscribeProducts();
-    };
-  }, [activeCategory, sortBy]);
+    // Sort products
+    prods.sort((a, b) => {
+      if (sortBy === 'newest') {
+        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      }
+      if (sortBy === 'price-low') {
+        return a.price - b.price;
+      }
+      if (sortBy === 'price-high') {
+        return b.price - a.price;
+      }
+      return 0;
+    });
+
+    setProducts(prods);
+
+    // Save to cache
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      const parsed = cached ? JSON.parse(cached) : {};
+      parsed.products = prods;
+      parsed.categories = categories;
+      parsed.savedAt = Date.now();
+      localStorage.setItem(cacheKey, JSON.stringify(parsed));
+    } catch (e) {}
+
+  }, [allProducts, activeCategory, sortBy, categories]);
 
   const handleCategoryChange = (cat: string) => {
     setActiveCategory(cat);
-    if (cat === 'All') {
-      searchParams.delete('category');
-    } else {
-      searchParams.set('category', cat);
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (cat === 'All') {
+        params.delete('category');
+      } else {
+        params.set('category', cat);
+      }
+      const newQuery = params.toString();
+      const newUrl = window.location.pathname + (newQuery ? '?' + newQuery : '');
+      window.history.pushState(null, '', newUrl);
+    } catch (e) {
+      console.warn("Failed to update URL search params natively:", e);
     }
-    setSearchParams(searchParams);
   };
 
   return (

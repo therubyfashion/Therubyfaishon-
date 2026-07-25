@@ -1,26 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { 
-  signInWithPopup, 
-  signInWithRedirect,
-  getRedirectResult,
-  GoogleAuthProvider, 
-  signInWithEmailAndPassword,
-  setPersistence,
-  browserLocalPersistence,
-  signInWithCredential,
-  sendPasswordResetEmail,
-  signInWithCustomToken,
-  updatePassword
-} from 'firebase/auth';
-import { auth, db } from '../firebase';
+import { supabase } from '../supabase';
+import { db } from '../firebase';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { sendNotification } from '../lib/notifications';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { Mail, Lock, ArrowRight, LogIn, Smartphone, ShieldCheck, Award, RotateCcw, Headphones, ArrowLeft } from 'lucide-react';
-import { Capacitor } from '@capacitor/core';
-import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
+
 
 export default function Login() {
   const navigate = useNavigate();
@@ -106,49 +93,19 @@ export default function Login() {
     }
     setResetLoading(true);
     try {
-      await sendPasswordResetEmail(auth, targetEmail.trim());
+      const { error } = await supabase.auth.resetPasswordForEmail(targetEmail.trim(), {
+        redirectTo: window.location.origin + '/login'
+      });
+      if (error) throw error;
       
-      if (explanation) {
-        toast.info(
-          <div className="flex flex-col gap-2 font-sans py-1 text-xs text-[#1C1917]">
-            <p className="font-bold text-[#1A2C54] flex items-center gap-1">🛡️ {explanation}</p>
-            <p className="text-gray-500 leading-relaxed text-[11px]">
-              Your Firebase project requires the <strong>Identity Toolkit API</strong> to perform server-side direct credential updates.
-            </p>
-            <a 
-              href="https://console.developers.google.com/apis/api/identitytoolkit.googleapis.com/overview?project=712804018377" 
-              target="_blank" 
-              rel="noopener noreferrer" 
-              className="px-3 py-1.5 self-start bg-rose-50 text-rose-600 rounded-lg text-[10px] font-bold tracking-wider uppercase border border-rose-100 hover:bg-rose-100 transition-all inline-flex items-center gap-1 active:scale-95"
-            >
-              Enable ID-Toolkit API ↗
-            </a>
-            <div className="h-[1px] bg-stone-100 my-1" />
-            <p className="text-gray-400 text-[10px]">
-              As a backup, we sent a secure Google password reset link directly to your inbox/spam folder at <strong>{targetEmail}</strong>. Please check your mail!
-            </p>
-          </div>,
-          { duration: 24000 }
-        );
-      } else {
-        toast.success("A standard Google password reset link has been dispatched to your email! 💎 Please check your inbox or spam folder.");
-      }
+      toast.success("A secure password reset link has been dispatched to your email! 💎 Please check your inbox or spam folder.");
       setShowResetModal(false);
       setResetStep('request');
     } catch (err: any) {
       console.error("Standard reset error:", err);
-      const isNetworkError = err.code?.includes('network-request-failed') || err.message?.includes('network-request-failed');
-      if (isNetworkError) {
-        setApiError({
-          message: "Standard Google password reset request failed because client-side network actions are restricted inside this sandboxed preview iframe. For password recovery to work instantly, you must enable the Identity Toolkit API on your Firebase Google Cloud Project.",
-          link: "https://console.developers.google.com/apis/api/identitytoolkit.googleapis.com/overview?project=712804018377"
-        });
-        toast.error("Network request blocked inside the sandboxed iframe. Please enable Identity Toolkit API.");
-      } else {
-        toast.error(err.message || "Failed to trigger standard reset email.");
-      }
+      toast.error(err.message || "Failed to trigger standard reset email.");
     } finally {
-      setResetLoading(false);
+      setResetLoading(true);
     }
   };
 
@@ -281,33 +238,12 @@ export default function Login() {
         throw new Error(data.error || "Reset failed.");
       }
 
-      // 100% resilient offline-first design:
-      // If we receive customToken back from our secure server, we sign them in instantly
-      // and perform the password update directly from the client side context!
-      let tokenSuccess = false;
-      if (data.customToken) {
-        try {
-          const userCredential = await signInWithCustomToken(auth, data.customToken);
-          if (userCredential.user) {
-            await updatePassword(userCredential.user, newPassword);
-            tokenSuccess = true;
-          }
-        } catch (clientAuthErr: any) {
-          console.warn("⚠️ Client-side token update skipped (proceeding in offline fallback mode):", clientAuthErr.message);
-        }
-      }
-
-      if (data.offlineBypass || !tokenSuccess) {
-        const mockUid = `offline_${Buffer.from(resetEmail).toString('hex').slice(0, 16)}`;
-        const mockUser = {
-          uid: mockUid,
-          email: resetEmail,
-          displayName: resetEmail.split('@')[0],
-          role: (resetEmail === 'admin@theruby.com' || resetEmail === 'mdsagaransari65670@gmail.com') ? 'admin' : 'user',
-          isVerified: true
-        };
-        localStorage.setItem('ruby_local_user', JSON.stringify(mockUser));
-      }
+      // Sign in instantly using Supabase Auth with the new credentials.
+      const { error: signInErr } = await supabase.auth.signInWithPassword({
+        email: resetEmail,
+        password: newPassword
+      });
+      if (signInErr) throw signInErr;
       
       toast.success("Password Updated Successfully! 💎 Welcome to The Ruby.");
       setPassword(newPassword);
@@ -345,144 +281,23 @@ export default function Login() {
       }
     };
     fetchSettings();
-
-    const checkRedirect = async () => {
-      try {
-        const result = await getRedirectResult(auth);
-        if (result?.user) {
-          const user = result.user;
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (!userDoc.exists()) {
-            await setDoc(doc(db, 'users', user.uid), {
-              uid: user.uid,
-              email: user.email,
-              displayName: user.displayName,
-              photoURL: user.photoURL || '',
-              role: 'user',
-              isVerified: true,
-              createdAt: new Date().toISOString()
-            });
-
-            await sendNotification({
-              userId: user.uid,
-              title: 'Welcome to The Ruby Fashion! ✨',
-              body: 'Thank you for joining us. Explore our latest collections and enjoy shopping!',
-              type: 'promotion',
-              iconType: 'stars',
-              link: '/shop'
-            });
-          }
-          toast.success("Welcome back!");
-          navigate('/');
-        }
-      } catch (error: any) {
-        console.error("Redirect error:", error);
-      }
-    };
-    checkRedirect();
   }, [navigate]);
 
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
-      if (Capacitor.isNativePlatform()) {
-        try {
-          console.log("Starting Native Google Login...");
-          const userNative = await GoogleAuth.signIn();
-          console.log("Native Google User:", userNative);
-          
-          if (!userNative.authentication || !userNative.authentication.idToken) {
-            throw new Error("No ID Token received from Google Auth");
-          }
-
-          const credential = GoogleAuthProvider.credential(userNative.authentication.idToken);
-          const { user } = await signInWithCredential(auth, credential);
-          
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (!userDoc.exists()) {
-            await setDoc(doc(db, 'users', user.uid), {
-              uid: user.uid,
-              email: user.email,
-              displayName: user.displayName,
-              photoURL: user.photoURL || '',
-              role: 'user',
-              isVerified: true,
-              createdAt: new Date().toISOString()
-            });
-
-            await sendNotification({
-              userId: user.uid,
-              title: 'Welcome to The Ruby! ✨',
-              body: 'Thank you for joining us. Explore our latest collections and enjoy shopping!',
-              type: 'promotion',
-              iconType: 'stars',
-              link: '/shop'
-            });
-          }
-          toast.success("Welcome back!");
-          navigate('/');
-        } catch (nativeError: any) {
-          console.error("Native Google Login error details:", nativeError);
-          // Show specifically why it failed to help debugging
-          const errorMessage = nativeError.message || nativeError.error || JSON.stringify(nativeError);
-          
-          if (errorMessage !== 'USER_CANCELLED') {
-             toast.error(`Native Login failed: ${errorMessage}. Please check SHA-1 fingerprint in Firebase.`);
-             console.log("Native login failed. Fallback to web is disabled on mobile to avoid 403 error.");
-          } else {
-             console.log("User cancelled login.");
-          }
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin
         }
-      } else {
-        await webGoogleLogin();
-      }
-    } catch (error: any) {
-      console.error("Login error:", error);
-      
-      let errorMessage = "Login failed. Please try again.";
-      if (error.code === 'auth/network-request-failed') {
-        errorMessage = "Network error! Please check your internet connection or check if your browser is blocking authentication scripts.";
-      } else if (error.code === 'auth/popup-closed-by-user') {
-        return; // Don't show toast for user cancellation
-      }
-
-      toast.error(errorMessage, {
-        action: error.code === 'auth/network-request-failed' ? {
-          label: "Retry",
-          onClick: () => window.location.reload()
-        } : undefined
       });
+      if (error) throw error;
+    } catch (error: any) {
+      console.error("Google Auth Error:", error);
+      toast.error(error.message || "Failed to sign in with Google.");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const webGoogleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
-    
-    try {
-      const { user } = await signInWithPopup(auth, provider);
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      if (!userDoc.exists()) {
-        await setDoc(doc(db, 'users', user.uid), {
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName,
-          photoURL: user.photoURL || '',
-          role: 'user',
-          isVerified: true,
-          createdAt: new Date().toISOString()
-        });
-      }
-      toast.success("Welcome back!");
-      navigate('/');
-    } catch (popupError: any) {
-      if (popupError.code === 'auth/popup-blocked' || popupError.code === 'auth/operation-not-supported-in-this-environment') {
-        await signInWithRedirect(auth, provider);
-      } else {
-        throw popupError;
-      }
     }
   };
 
@@ -490,110 +305,31 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     try {
-      let firebaseUser;
-      try {
-        const credential = await signInWithEmailAndPassword(auth, email, password);
-        firebaseUser = credential.user;
-      } catch (authError: any) {
-        console.warn("⚠️ Firebase Auth Sign-in failed, checking resilient offline sandbox mode...", authError.message);
-        const isIdentityToolkitDisabled = authError.message?.includes('identitytoolkit.googleapis.com') || 
-                                          authError.message?.includes('Identity Toolkit') || 
-                                          authError.message?.includes('SERVICE_DISABLED') ||
-                                          authError.message?.includes('API_KEY_NOT_VALID') ||
-                                          authError.code?.includes('operation-not-supported') ||
-                                          authError.code?.includes('api-key-not-valid') ||
-                                          authError.code?.includes('requests-from-referrers-blocked');
-        
-        if (isIdentityToolkitDisabled || email === 'admin@theruby.com' || email === 'mdsagaransari65670@gmail.com') {
-          // Bypassing due to deactivated/restricted Google APIs! Establish resilient Local-First profile!
-          const mockUid = `offline_${Buffer.from(email).toString('hex').slice(0, 16)}`;
-          const mockUser = {
-            uid: mockUid,
-            email: email,
-            displayName: email.split('@')[0],
-            role: (email === 'admin@theruby.com' || email === 'mdsagaransari65670@gmail.com') ? 'admin' : 'user',
-            isVerified: true
-          };
-          
-          localStorage.setItem('ruby_local_user', JSON.stringify(mockUser));
-          toast.success("🔐 Logged in via Resilient Offline Sandbox!");
-          
-          // Trigger reload to refresh context
-          setTimeout(() => {
-            navigate('/');
-            window.location.reload();
-          }, 800);
-          return;
-        } else {
-          throw authError;
-        }
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (authError) {
+        throw authError;
       }
 
-      const user = firebaseUser;
-      
-      let userDoc: any = null;
-      let userData: any = null;
-      let isQuotaError = false;
+      const sUser = authData.user;
+      if (!sUser) throw new Error("Failed to authenticate user.");
 
-      try {
-        const userDocPromise = getDoc(doc(db, 'users', user.uid));
-        userDoc = await userDocPromise;
-        userData = userDoc.exists() ? userDoc.data() : null;
-      } catch (dbErr: any) {
-        console.warn("⚠️ Profile database load failed (could be Firestore Quota exceeded):", dbErr);
-        const errStr = String(dbErr.message || dbErr).toLowerCase();
-        if (
-          errStr.includes("quota") || 
-          errStr.includes("limit") || 
-          errStr.includes("resource-exhausted") || 
-          errStr.includes("exhausted") ||
-          dbErr.code === "resource-exhausted" ||
-          dbErr.code === "permission-denied"
-        ) {
-          isQuotaError = true;
-          // Construct fallback user data so they can log in
-          userData = {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName || user.email?.split('@')[0] || "User",
-            role: (user.email === 'admin@theruby.com' || user.email === 'mdsagaransari65670@gmail.com' || user.email?.toLowerCase().includes('rubu') || user.email?.toLowerCase().includes('ruby')) ? 'admin' : 'user',
-            isVerified: true
-          };
-          
-          // Store locally
-          localStorage.setItem('ruby_local_user', JSON.stringify(userData));
-        } else {
-          throw dbErr;
-        }
-      }
+      // Fetch profile
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', sUser.id)
+        .maybeSingle();
 
-      // Ensure admin@theruby.com has admin privileges in Firestore
-      if (user.email === 'admin@theruby.com' && !isQuotaError) {
-        if (!userDoc || !userDoc.exists()) {
-          const newAdminData = {
-            uid: user.uid,
-            email: user.email,
-            displayName: 'System Admin',
-            photoURL: user.photoURL || '',
-            role: 'admin',
-            isVerified: true,
-            createdAt: new Date().toISOString()
-          };
-          await setDoc(doc(db, 'users', user.uid), newAdminData);
-          userData = newAdminData;
-        } else if (userData?.role !== 'admin') {
-          await setDoc(doc(db, 'users', user.uid), { role: 'admin', isVerified: true }, { merge: true });
-          userData = { ...userData, role: 'admin', isVerified: true };
-        }
-      }
+      const userRole = profileData?.role || 'user';
+      const isVerified = profileData ? profileData.is_verified : false;
 
-      if (userData && !userData.isVerified && user.email !== 'admin@theruby.com' && !isQuotaError) {
+      if (!isVerified && sUser.email !== 'admin@theruby.com') {
         toast.error("Please verify your email before logging in.");
-        const userEmail = user.email;
-        const userUid = user.uid;
-        localStorage.removeItem('phone_user');
-        // Keep user signed in for verification permissions
-        navigate(`/verify-prompt?email=${encodeURIComponent(userEmail || '')}&uid=${userUid}`);
+        navigate(`/verify-prompt?email=${encodeURIComponent(sUser.email || '')}&uid=${sUser.id}`);
         return;
       }
 
@@ -601,71 +337,37 @@ export default function Login() {
       
       // Trigger Welcome Push & Email
       try {
-        // Push (Delayed 3.5 seconds to allow OneSignal connection mapping to register fully)
-        setTimeout(() => {
-          try {
-            fetch('/api/send-user-push', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                userId: user.uid,
-                title: 'Welcome Back! ✨',
-                body: `Hi ${userData?.name || 'Gorgeous'}, we missed you! Ready to shop?`,
-                url: '/'
-              })
-            }).catch(e => console.warn("Welcome push deferred error:", e));
-          } catch (pushErr) {
-            console.error("Welcome push error:", pushErr);
-          }
-        }, 3500);
-
-        // Email
-        if (user.email) {
+        if (sUser.email) {
           fetch('/api/send-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              to: user.email,
+              to: sUser.email,
               subject: 'Welcome Back to The Ruby Fashion! ✨',
               html: `
                 <div style="font-family: sans-serif; padding: 20px; color: #1A2C54;">
-                  <h1 style="color: #E11D48;">Welcome Back, ${userData?.name || 'Gorgeous'}!</h1>
+                  <h1 style="color: #E11D48;">Welcome Back!</h1>
                   <p>We're so glad to see you again. Your wardrobe has been waiting for you!</p>
                   <p>Check out our latest arrivals and find something special today.</p>
                   <a href="${window.location.origin}" style="display: inline-block; background: #E11D48; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 20px;">Start Shopping</a>
                 </div>
               `
             })
-          });
+          }).catch(() => {});
         }
       } catch (e) {
         console.error("Welcome notification error:", e);
       }
 
-      navigate('/');
+      // Role-based routing
+      if (userRole === 'admin' || sUser.email === 'admin@theruby.com' || sUser.email === 'mdsagaransari65670@gmail.com') {
+        navigate('/admin');
+      } else {
+        navigate('/');
+      }
     } catch (error: any) {
       console.error("Login error:", error);
-      const isInvalidCred = error.code === 'auth/user-not-found' || 
-                            error.code === 'auth/wrong-password' || 
-                            error.code === 'auth/invalid-credential' ||
-                            error.code?.includes('invalid-credential') || 
-                            error.message?.includes('invalid-credential') ||
-                            error.code?.includes('wrong-password') ||
-                            error.message?.includes('wrong-password') ||
-                            error.message?.includes('auth/invalid-credential');
-
-      if (isInvalidCred) {
-        toast.error("Invalid email or password.");
-      } else if (error.code === 'auth/network-request-failed') {
-        toast.error("Network error! Please check your internet connection or check if your browser is blocking authentication scripts.", {
-          action: {
-            label: "Retry",
-            onClick: () => window.location.reload()
-          }
-        });
-      } else {
-        toast.error(error.message || "Failed to sign in. Please try again.");
-      }
+      toast.error(error.message || "Failed to sign in. Please try again.");
     } finally {
       setLoading(false);
     }

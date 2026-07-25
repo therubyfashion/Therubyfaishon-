@@ -3,8 +3,8 @@ import {
   collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy, limit, 
   onSnapshot, serverTimestamp, setDoc, arrayUnion, arrayRemove, runTransaction, getDoc, Timestamp, where, writeBatch
 } from 'firebase/firestore';
-import { updateProfile, updatePassword, updateEmail, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
-import { db, auth, messaging, storage } from '../firebase';
+import { db, messaging, storage } from '../firebase';
+import { supabase } from '../supabase';
 import { OperationType, handleFirestoreError } from '../lib/error-handler';
 import { sendNotification } from '../lib/notifications';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -21,7 +21,7 @@ import {
   TrendingDown, Shield, ShieldAlert, ShieldCheck, Volume2, Mail, Smartphone, Calendar, MessageCircle, Phone, Video, CheckCheck, Star, Info, History,
   Send, MessageSquare, User, CreditCard, Download, Eye, Check, ArrowRight,
   Cloud, RefreshCw, CheckCircle, Clock, MousePointer2, Zap, Save, Percent, Gift, Tag, Layers, MapPin,
-  Sparkles, Megaphone, Copy, Share2
+  Sparkles, Megaphone, Copy, Share2, RotateCcw, XCircle, CheckCircle2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -80,23 +80,75 @@ const ensureDate = (val: any) => {
   return isNaN(d.getTime()) ? new Date() : d;
 };
 
+export const getEffectiveOrderStatus = (order: any) => {
+  if (!order) return 'Pending';
+  const ret = order.returnStatus || order.return_status;
+  if (ret) {
+    const norm = ret.toLowerCase();
+    if (norm === 'requested' || norm === 'pending') return 'Return Requested';
+    if (norm === 'approved') return 'Return Approved';
+    if (norm === 'picked up' || norm === 'picked_up') return 'Picked Up';
+    if (norm === 'refunded') return 'Refunded';
+    if (norm === 'rejected') return 'Return Rejected';
+    return ret;
+  }
+  return order.status || 'Pending';
+};
+
 // ═══════════════════════════════════════════════
 // BADGE CONFIG
 // ═══════════════════════════════════════════════
 const BADGE_CFG: Record<string, any> = {
   Paid: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'PAID' },
   Confirmed: { bg: 'bg-ruby/5', text: 'text-ruby', dot: 'bg-ruby', label: 'CONFIRMED' },
+  Packed: { bg: 'bg-indigo-50', text: 'text-indigo-700', dot: 'bg-indigo-500', label: 'PACKED' },
   Shipped: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500', label: 'SHIPPED' },
+  'Out for Delivery': { bg: 'bg-sky-50', text: 'text-sky-700', dot: 'bg-sky-500', label: 'OUT FOR DELIVERY' },
+  'In Delivery': { bg: 'bg-sky-50', text: 'text-sky-700', dot: 'bg-sky-500', label: 'OUT FOR DELIVERY' },
   Delivered: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'DELIVERED' },
   Fulfilled: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'FULFILLED' },
   Unfulfilled: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500', label: 'UNFULFILLED' },
   Pending: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500', label: 'PENDING' },
   Processing: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500', label: 'PROCESSING' },
   Cancelled: { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-500', label: 'CANCELLED' },
-  'Refunded': { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-500', label: 'REFUNDED' },
+  'Refunded': { bg: 'bg-emerald-50', text: 'text-emerald-800', dot: 'bg-emerald-500', label: 'REFUND COMPLETED' },
   'On Hold': { bg: 'bg-gray-100', text: 'text-gray-500', dot: 'bg-gray-400', label: 'ON HOLD' },
   'Return Requested': { bg: 'bg-purple-50', text: 'text-purple-700', dot: 'bg-purple-500', label: 'RETURN REQUESTED' },
+  'Return Approved': { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500', label: 'RETURN APPROVED' },
+  'Picked Up': { bg: 'bg-indigo-50', text: 'text-indigo-700', dot: 'bg-indigo-500', label: 'PICKED UP' },
+  'Return Rejected': { bg: 'bg-red-50', text: 'text-red-700', dot: 'bg-red-500', label: 'RETURN REJECTED' },
   'Returned': { bg: 'bg-orange-50', text: 'text-orange-700', dot: 'bg-orange-500', label: 'RETURNED' },
+};
+
+const mapSupabaseProduct = (p: any, categoryMap: Record<string, string>): Product => {
+  const mappedCategory = (p.category_ids || [])
+    .map((id: string) => categoryMap[id])
+    .filter(Boolean);
+
+  return {
+    id: p.id,
+    name: p.name || '',
+    description: p.description || '',
+    price: Number(p.price || 0),
+    comparePrice: p.compare_price ? Number(p.compare_price) : undefined,
+    category: mappedCategory,
+    sizes: Array.isArray(p.sizes) ? p.sizes : [],
+    images: Array.isArray(p.images) ? p.images : [],
+    stock: Number(p.stock ?? 0),
+    stockStatus: p.stock_status || undefined,
+    createdAt: p.created_at || new Date().toISOString(),
+    isTrending: p.is_trending ?? false,
+    isPopular: p.is_popular ?? false,
+    sku: p.sku || undefined,
+    barcode: p.barcode || undefined,
+    weight: p.weight || undefined,
+    dimensions: p.dimensions || undefined,
+    seoTitle: p.seo_title || undefined,
+    seoDescription: p.seo_description || undefined,
+    variants: p.variants || [],
+    viewCount: p.view_count ?? 0,
+    wishlistCount: p.wishlist_count ?? 0,
+  };
 };
 
 const StatusBadge = ({ status, label, className }: { status: string, label?: string, className?: string }) => {
@@ -141,7 +193,7 @@ const chartDataSample = [];
 const recentOrdersSample = [];
 const topProductsSample = [];
 
-type Tab = 'home' | 'dashboard' | 'live' | 'products' | 'category' | 'orders' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights' | 'promotions' | 'maintenance' | 'notification_logs';
+type Tab = 'home' | 'dashboard' | 'live' | 'products' | 'category' | 'orders' | 'returns' | 'colour' | 'size' | 'coupon' | 'customer' | 'settings' | 'rocket' | 'stats' | 'notifications' | 'chats' | 'reviews' | 'abandoned' | 'insights' | 'promotions' | 'maintenance' | 'notification_logs';
 
 function Accordion({ title, icon: Icon, children }: { title: string, icon: any, children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -1023,6 +1075,7 @@ export default function AdminDashboard() {
     end: format(new Date(), 'yyyy-MM-dd')
   });
   const [loading, setLoading] = useState(true);
+  const [isRefreshingOrders, setIsRefreshingOrders] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isColorModalOpen, setIsColorModalOpen] = useState(false);
   const [isSizeModalOpen, setIsSizeModalOpen] = useState(false);
@@ -1035,10 +1088,22 @@ export default function AdminDashboard() {
   const [editingCategory, setEditingCategory] = useState<any>(null);
   const [colorForm, setColorForm] = useState({ name: '', hex: '#000000' });
   const [sizeForm, setSizeForm] = useState({ name: '' });
-  const [couponForm, setCouponForm] = useState({ code: '', discount: 0, expiryDate: '', type: 'percentage' as 'percentage' | 'fixed' });
+  const [couponForm, setCouponForm] = useState<any>({
+    code: '',
+    type: 'percentage',
+    value: 0,
+    discount: 0,
+    min_cart_value: 0,
+    usage_limit: '',
+    active: true,
+    start_date: '',
+    end_date: ''
+  });
+  const [editingCoupon, setEditingCoupon] = useState<any | null>(null);
   const [bannerForm, setBannerForm] = useState({ image: '', title: '', link: '', active: true });
   const [bannerLinkType, setBannerLinkType] = useState<'category' | 'product' | 'link'>('link');
   const [bannerLinkValue, setBannerLinkValue] = useState('');
+  const [editingBanner, setEditingBanner] = useState<any | null>(null);
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteCategoryModalOpen, setDeleteCategoryModalOpen] = useState(false);
@@ -1201,9 +1266,6 @@ export default function AdminDashboard() {
     fast2smsTestPhone: '',
     oneSignalAppId: '',
     oneSignalRestApiKey: '',
-    textbeeApiKey: '',
-    textbeeDeviceId: '',
-    textbeeOtpEnabled: false,
     footerSocials: {
       instagram: '',
       x: '',
@@ -1273,23 +1335,20 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     // Live subscriber for brand new orders that plays custom selected sound
-    const q = query(
-      collection(db, 'orders'),
-      orderBy('createdAt', 'desc'),
-      limit(10)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (isInitialOrdersRef.current) {
-        isInitialOrdersRef.current = false;
-        return;
-      }
-
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added') {
-          const orderData = change.doc.data();
+    const channel = supabase
+      .channel('orders-realtime-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'orders'
+        },
+        (payload) => {
+          const orderData = payload.new;
+          const createdAtVal = orderData.created_at || orderData.createdAt;
           // Verify with load time that it's a completely new active order
-          if (orderData.createdAt && new Date(orderData.createdAt) > new Date(dashboardLoadTime.current)) {
+          if (createdAtVal && new Date(createdAtVal) > new Date(dashboardLoadTime.current)) {
             // 1. Play selected premium alert sound from Settings!
             if (audioRef.current && settings.notificationSound) {
               audioRef.current.play().catch(playErr => {
@@ -1297,9 +1356,12 @@ export default function AdminDashboard() {
               });
             }
 
+            const orderIdStr = orderData.order_number || orderData.orderId || 'New Order';
+            const customerNameStr = orderData.shipping_full_name || orderData.customerName || 'Customer';
+
             // 2. Show beautiful Sonner Live Alert with Action to view/manage
-            toast.success(`🛒 Live Order Received: ${orderData.orderId || 'New Order'}`, {
-              description: `${orderData.customerName || 'Customer'} placed an order of ₹${Number(orderData.total || 0).toLocaleString()} via ${orderData.paymentMethod || 'COD'}`,
+            toast.success(`🛒 Live Order Received: ${orderIdStr}`, {
+              description: `${customerNameStr} placed an order of ₹${Number(orderData.total || 0).toLocaleString()} via ${orderData.payment_method || 'COD'}`,
               duration: 12000,
               action: {
                 label: "Manage",
@@ -1316,12 +1378,12 @@ export default function AdminDashboard() {
             fetchDashboardData();
           }
         }
-      });
-    }, (error) => {
-      console.error("Live order listener error:", error);
-    });
+      )
+      .subscribe();
 
-    return () => unsubscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [settings.notificationSound]);
 
   useEffect(() => {
@@ -1392,11 +1454,9 @@ export default function AdminDashboard() {
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser || !user) return;
+    if (!user) return;
     setIsUpdatingProfile(true);
     try {
-      await user.reload();
-      
       const updatePayload: any = {
         displayName: profileFormData.displayName,
         phoneNumber: profileFormData.phoneNumber,
@@ -1409,12 +1469,16 @@ export default function AdminDashboard() {
       }
 
       await Promise.all([
-        updateProfile(auth.currentUser, {
-          displayName: profileFormData.displayName,
-          photoURL: (profileFormData.photoURL && !profileFormData.photoURL.startsWith('blob:') && !profileFormData.photoURL.startsWith('data:'))
-            ? profileFormData.photoURL 
-            : (user.photoURL || '')
-        }),
+        supabase
+          .from('profiles')
+          .update({
+            display_name: profileFormData.displayName,
+            phone_number: profileFormData.phoneNumber,
+            photo_url: (profileFormData.photoURL && !profileFormData.photoURL.startsWith('blob:') && !profileFormData.photoURL.startsWith('data:'))
+              ? profileFormData.photoURL 
+              : (profile?.photoURL || '')
+          })
+          .eq('id', user.uid),
         updateDoc(doc(db, 'users', user.uid), updatePayload)
       ]);
       toast.success('Admin profile updated successfully! 💎');
@@ -1490,7 +1554,7 @@ export default function AdminDashboard() {
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser || !auth.currentUser.email) return;
+    if (!user || !user.email) return;
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
       toast.error('Passwords do not match');
       return;
@@ -1498,13 +1562,12 @@ export default function AdminDashboard() {
     
     setIsUpdatingProfile(true);
     try {
-      const credential = EmailAuthProvider.credential(auth.currentUser.email, passwordForm.currentPassword);
-      await reauthenticateWithCredential(auth.currentUser, credential);
-      await updatePassword(auth.currentUser, passwordForm.newPassword);
+      const { error: updateErr } = await supabase.auth.updateUser({ password: passwordForm.newPassword });
+      if (updateErr) throw updateErr;
       toast.success('Password changed safely! Remember it for next login.');
       setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
     } catch (error: any) {
-      toast.error(error.message || 'Security check failed. Check your current password.');
+      toast.error(error.message || 'Security check failed.');
     } finally {
       setIsUpdatingProfile(false);
     }
@@ -1524,21 +1587,27 @@ export default function AdminDashboard() {
   const fetchRegisteredDevices = async () => {
     setIsLoadingDevices(true);
     try {
-      const snapshot = await getDocs(collection(db, 'users'));
-      const devicesList: any[] = [];
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        if (data.onesignalId) {
-          devicesList.push({
-            id: doc.id,
-            name: data.displayName || data.name || 'Unnamed User',
-            email: data.email || 'No Email',
-            onesignalId: data.onesignalId,
-            role: data.role || 'customer'
-          });
-        }
-      });
-      setRegisteredDevices(devicesList);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*');
+
+      if (error) {
+        console.error("Error fetching registered devices from Supabase:", error.message);
+      } else if (data) {
+        const devicesList: any[] = [];
+        data.forEach(p => {
+          if (p.onesignal_id) {
+            devicesList.push({
+              id: p.id,
+              name: p.display_name || p.email?.split('@')[0] || 'Unnamed User',
+              email: p.email || 'No Email',
+              onesignalId: p.onesignal_id,
+              role: p.role || 'customer'
+            });
+          }
+        });
+        setRegisteredDevices(devicesList);
+      }
     } catch (error) {
       console.error("Error fetching registered devices:", error);
     } finally {
@@ -1664,7 +1733,7 @@ export default function AdminDashboard() {
       await addDoc(collection(db, 'notifications'), {
         ...pushNotification,
         createdAt: new Date().toISOString(),
-        sentBy: auth.currentUser?.email,
+        sentBy: user?.email,
         status: 'Sent'
       });
       
@@ -1767,15 +1836,17 @@ export default function AdminDashboard() {
           localStorage.setItem("onesignal_real_sub_id", subId);
         } else {
           // Fallback to local simulated if browser blocks notifications
-          const mockId = "simulated_push_2026_" + (user?.uid?.substring(0, 8) || "admin_dev");
+          const targetUserId = user?.id || user?.uid || "admin_dev";
+          const mockId = "simulated_push_2026_" + targetUserId.substring(0, 8);
           setOnesignalSubscriptionId(mockId);
           localStorage.setItem("onesignal_mock_sub_id", mockId);
           toast.info("Notification Prompt Skipped/Blocked. Subscribed using Simulated Connection for testing! 🚀");
         }
 
-        // Login & Tag
+        // Login & Tag & Sync to Supabase
         if (user) {
-          if (typeof OS.login === 'function') await OS.login(user.uid).catch(() => {});
+          const targetUserId = user.id || user.uid;
+          if (typeof OS.login === 'function') await OS.login(targetUserId).catch(() => {});
           const tags = {
             role: "admin",
             email: user.email || '',
@@ -1785,6 +1856,23 @@ export default function AdminDashboard() {
             await OS.User.addTags(tags).catch(() => {});
           } else if (OS.sendTags) {
             await OS.sendTags(tags).catch(() => {});
+          }
+
+          if (subId) {
+            try {
+              const { data, error } = await supabase
+                .from('profiles')
+                .update({ onesignal_id: subId })
+                .eq('id', targetUserId)
+                .select();
+              if (error) {
+                console.error("❌ Failed to sync admin onesignal_id to Supabase profiles:", error.message);
+              } else {
+                console.log("✅ Successfully synced admin onesignal_id to Supabase profiles:", subId, "Data:", data);
+              }
+            } catch (err: any) {
+              console.warn("Skipped syncing admin onesignal_id:", err.message);
+            }
           }
         }
 
@@ -1851,7 +1939,6 @@ export default function AdminDashboard() {
 
   const [isTestingOneSignal, setIsTestingOneSignal] = useState(false);
   const [isSendingTestPush, setIsSendingTestPush] = useState(false);
-  const [isSeeding, setIsSeeding] = useState(false);
 
   const handleTestOneSignal = async () => {
     setIsTestingOneSignal(true);
@@ -1969,14 +2056,18 @@ export default function AdminDashboard() {
     localStorage.setItem("onesignal_mock_sub_id", mockSubId);
     localStorage.setItem("onesignal_mock_user_id", mockUserId);
     
-    // Write it to firestore directly for the current admin user if authenticated
+    // Write it to Supabase profiles directly for the current admin user if authenticated
     if (user) {
       try {
-        await updateDoc(doc(db, 'users', user.uid), { onesignalId: mockSubId });
+        const targetUserId = user.id || user.uid;
+        await supabase
+          .from('profiles')
+          .update({ onesignal_id: mockSubId })
+          .eq('id', targetUserId);
         toast.success("Successfully registered Simulated Device in database! 🧪");
         fetchRegisteredDevices();
       } catch (err: any) {
-        console.error("Failed to sync mock ID to firebase:", err);
+        console.error("Failed to sync mock ID to Supabase:", err);
         toast.success("Generated Simulated Device token! 🔔");
       }
     } else {
@@ -1992,11 +2083,15 @@ export default function AdminDashboard() {
     setOnesignalUserId(null);
     if (user) {
       try {
-        await updateDoc(doc(db, 'users', user.uid), { onesignalId: null });
+        const targetUserId = user.id || user.uid;
+        await supabase
+          .from('profiles')
+          .update({ onesignal_id: null })
+          .eq('id', targetUserId);
         toast.success("Cleared Simulated Device registration!");
         fetchRegisteredDevices();
       } catch (err: any) {
-        console.error("Failed to clear device registration in firebase:", err);
+        console.error("Failed to clear device registration in Supabase:", err);
       }
     } else {
       toast.success("Cleared Simulated Device registration!");
@@ -2020,7 +2115,7 @@ export default function AdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           password: resetPassword,
-          adminUid: auth.currentUser?.uid
+          adminUid: user?.uid
         })
       });
 
@@ -2103,10 +2198,7 @@ export default function AdminDashboard() {
           oneSignalAppId: finalizedSettings.oneSignalAppId,
           oneSignalRestApiKey: finalizedSettings.oneSignalRestApiKey,
           smtpUser: finalizedSettings.smtpUser,
-          smtpPass: finalizedSettings.smtpPass,
-          textbeeApiKey: finalizedSettings.textbeeApiKey,
-          textbeeDeviceId: finalizedSettings.textbeeDeviceId,
-          textbeeOtpEnabled: finalizedSettings.textbeeOtpEnabled
+          smtpPass: finalizedSettings.smtpPass
         })
       });
       
@@ -2199,10 +2291,6 @@ export default function AdminDashboard() {
   const [testPhone, setTestPhone] = useState('');
   const [isTestingSms, setIsTestingSms] = useState(false);
   const handleSendTestSms = async () => {
-    if (!settings.textbeeApiKey || !settings.textbeeDeviceId) {
-      toast.error('Please enter both Textbee API Key and Device ID first.');
-      return;
-    }
     if (!testPhone) {
       toast.error('Please enter a test phone number.');
       return;
@@ -2220,12 +2308,9 @@ export default function AdminDashboard() {
 
       const data = await response.json();
       if (response.ok) {
-        toast.success(`Test SMS OTP dispatched successfully to ${testPhone}!`);
+        toast.success(`Compliance-safe local OTP generated successfully! Code: ${data.testingOtp}`);
       } else {
-        toast.error(data.message || data.error || 'Failed to dispatch test SMS OTP');
-        if (data.testingOtp) {
-          toast.info(`[DEV FALLBACK] OTP is logged: ${data.testingOtp}`, { duration: 8000 });
-        }
+        toast.error(data.message || data.error || 'Failed to generate test OTP');
       }
     } catch (error: any) {
       console.error('Error testing SMS:', error);
@@ -2236,6 +2321,8 @@ export default function AdminDashboard() {
   };
 
   const [orderSearchTerm, setOrderSearchTerm] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusTab, setStatusTab] = useState('All');
   const [orderTab, setOrderTab] = useState('all');
   const [orderStatusFilter, setOrderStatusFilter] = useState('All Status');
   const [orderTypeFilter, setOrderTypeFilter] = useState('All Orders');
@@ -2314,17 +2401,24 @@ export default function AdminDashboard() {
       const now = new Date();
       const newEvent = {
         ...trackingEvent,
-        time: serverTimestamp(),
+        time: now.toISOString(),
         id: Math.random().toString(36).substr(2, 9)
       };
       
-      await updateDoc(doc(db, 'orders', viewingCustomer.id), {
-        trackingHistory: arrayUnion(newEvent)
-      });
+      const updatedHistory = [...(viewingCustomer.trackingHistory || []), newEvent];
+
+      const { error: supErr } = await supabase
+        .from('orders')
+        .update({
+          tracking_history: updatedHistory
+        })
+        .eq('id', viewingCustomer.id);
+
+      if (supErr) throw supErr;
       
       setViewingCustomer({
         ...viewingCustomer,
-        trackingHistory: [...(viewingCustomer.trackingHistory || []), { ...newEvent, time: now }]
+        trackingHistory: updatedHistory
       });
       
       setTrackingEvent({ status: '', location: '', description: '' });
@@ -2341,12 +2435,14 @@ export default function AdminDashboard() {
     if (!order) return;
     try {
       const now = new Date();
-      const updateData = {
-        status: 'Delivered',
-        deliveredAt: serverTimestamp(),
-      };
+      const { error: supErr } = await supabase
+        .from('orders')
+        .update({
+          status: 'delivered'
+        })
+        .eq('id', order.id);
 
-      await updateDoc(doc(db, 'orders', order.id), updateData);
+      if (supErr) throw supErr;
       
       // Notify customer
       try {
@@ -2418,8 +2514,10 @@ export default function AdminDashboard() {
       toast.success("Order marked as Delivered!");
       setViewingCustomer({ 
         ...order, 
-        ...updateData, 
-        deliveredAt: { seconds: Math.floor(now.getTime() / 1000) } 
+        status: 'Delivered',
+        deliveredAt: now.toISOString(),
+        fulfillmentStatus: 'Fulfilled',
+        fulfilledAt: now.toISOString()
       });
     } catch (error) {
       console.error("Error marking as delivered:", error);
@@ -2432,19 +2530,21 @@ export default function AdminDashboard() {
     setIsFulfilling(true);
     try {
       const now = new Date();
-      const updateData: any = {
-        status: 'Shipped',
-        fulfillmentStatus: 'Fulfilled',
-        fulfilledAt: serverTimestamp(),
-      };
+      const trNum = (isTrackingEnabled && trackingNumber) ? trackingNumber : null;
+      const carr = (isTrackingEnabled && trackingNumber) ? carrier : null;
+      const trUrl = (isTrackingEnabled && trackingNumber) ? getTrackingUrl(carrier, trackingNumber) : null;
 
-      if (isTrackingEnabled && trackingNumber) {
-        updateData.trackingNumber = trackingNumber;
-        updateData.carrier = carrier;
-        updateData.trackingUrl = getTrackingUrl(carrier, trackingNumber);
-      }
+      const { error: supErr } = await supabase
+        .from('orders')
+        .update({
+          status: 'shipped',
+          tracking_number: trNum,
+          carrier: carr,
+          tracking_url: trUrl
+        })
+        .eq('id', order.id);
 
-      await updateDoc(doc(db, 'orders', order.id), updateData);
+      if (supErr) throw supErr;
       
       // Notify customer if enabled
       if (notifyCustomer) {
@@ -2533,8 +2633,8 @@ export default function AdminDashboard() {
                            style="display: block; background-color: #FFFFFF; color: #000000; padding: 18px; border-radius: 4px; text-decoration: none; font-size: 16px; font-weight: 500; text-align: center; margin-bottom: 16px;">
                           Track My Order
                         </a>
-                        ${updateData.trackingNumber ? `
-                          <p style="font-size: 12px; color: #444444; margin-top: 16px;">Carrier: ${updateData.carrier} | AWB: ${updateData.trackingNumber}</p>
+                        ${trNum ? `
+                          <p style="font-size: 12px; color: #444444; margin-top: 16px;">Carrier: ${carr} | AWB: ${trNum}</p>
                         ` : ''}
                       </div>
 
@@ -2563,8 +2663,12 @@ export default function AdminDashboard() {
       // Update local state with a real timestamp for immediate UI feedback
       setViewingCustomer({ 
         ...order, 
-        ...updateData, 
-        fulfilledAt: { seconds: Math.floor(now.getTime() / 1000) } 
+        status: 'Shipped',
+        fulfillmentStatus: 'Fulfilled',
+        fulfilledAt: now.toISOString(),
+        trackingNumber: trNum || undefined,
+        carrier: carr || undefined,
+        trackingUrl: trUrl || undefined
       });
       setShowSuccessOverlay(true);
     } catch (error) {
@@ -2747,7 +2851,7 @@ export default function AdminDashboard() {
         },
         body: JSON.stringify({ 
           password: wipePassword,
-          adminUid: auth.currentUser?.uid
+          adminUid: user?.uid
         })
       });
 
@@ -2818,23 +2922,23 @@ export default function AdminDashboard() {
     try {
       const [
         productsSnap, ordersSnap, usersSnap, categoriesSnap, 
-        colorsSnap, sizesSnap, couponsSnap, bannersSnap, 
-        settingsSnap, reviewsSnap, cartsSnap, sessionsSnap, promotionsSnap,
+        colorsSnap, sizesSnap, couponsRes, bannersRes, 
+        settingsSnap, reviewsSnap, cartsSnap, sessionsSnap, promotionsRes,
         analyticsDailySnap
       ] = await Promise.all([
-        safeGetDocs(query(collection(db, 'products'), limit(500))),
-        safeGetDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(500))),
+        Promise.resolve({ docs: [], empty: true, size: 0 } as any),
+        Promise.resolve({ docs: [], empty: true, size: 0 } as any),
         safeGetDocs(query(collection(db, 'users'), limit(500))),
-        safeGetDocs(collection(db, 'categories')),
+        Promise.resolve({ docs: [], empty: true, size: 0 } as any),
         safeGetDocs(collection(db, 'colors')),
         safeGetDocs(collection(db, 'sizes')),
-        safeGetDocs(collection(db, 'coupons')),
-        safeGetDocs(collection(db, 'banners')),
+        supabase.from('coupons').select('*').order('created_at', { ascending: false }),
+        supabase.from('banners').select('*').order('created_at', { ascending: false }),
         safeGetDocs(collection(db, 'settings')),
         safeGetDocs(query(collection(db, 'reviews'), orderBy('createdAt', 'desc'), limit(100))),
         safeGetDocs(query(collection(db, 'carts'), orderBy('updatedAt', 'desc'), limit(100))),
         safeGetDocs(query(collection(db, 'active_sessions'), limit(100))),
-        safeGetDocs(query(collection(db, 'promotions'), orderBy('priority', 'asc'))),
+        supabase.from('promotions').select('*').order('priority', { ascending: true }),
         safeGetDocs(query(collection(db, 'analytics_daily'), orderBy('date', 'desc'), limit(365)))
       ]);
 
@@ -2850,29 +2954,319 @@ export default function AdminDashboard() {
         setSettings(prev => ({ ...prev, ...settingsData }));
       }
 
-      setProducts(productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
-      setOrders(ordersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      let supabaseMappedOrders: any[] = [];
+      try {
+        const { data: supOrders, error: supErr } = await supabase
+          .from('orders')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (supErr) {
+          console.warn("Error fetching orders from Supabase in AdminDashboard:", supErr);
+        } else if (supOrders) {
+          supabaseMappedOrders = supOrders.map(o => {
+            let clientStatus = o.status;
+            if (o.status === 'cancelled' && o.return_reason) {
+              clientStatus = 'Return Requested';
+            } else if (o.status === 'pending') {
+              clientStatus = 'Pending';
+            } else if (o.status === 'processing') {
+              clientStatus = 'Processing';
+            } else if (o.status === 'packed') {
+              clientStatus = 'Packed';
+            } else if (o.status === 'shipped') {
+              clientStatus = 'Shipped';
+            } else if (o.status === 'out_for_delivery') {
+              clientStatus = 'Out for Delivery';
+            } else if (o.status === 'delivered') {
+              clientStatus = 'Delivered';
+            } else if (o.status === 'cancelled') {
+              clientStatus = 'Cancelled';
+            }
+
+            const isFulfilled = o.status === 'shipped' || o.status === 'out_for_delivery' || o.status === 'delivered';
+
+            return {
+              id: o.id,
+              orderId: o.order_number,
+              userId: o.user_id || 'guest',
+              items: o.items || [],
+              subtotal: o.subtotal ?? o.total,
+              discount: o.discount ?? 0,
+              shippingCost: o.shipping_cost ?? 0,
+              codFee: o.cod_fee ?? 0,
+              total: o.total,
+              status: clientStatus,
+              paymentMethod: o.payment_method,
+              shippingMethod: o.shipping_method || 'Standard Delivery',
+              email: o.customer_email || '',
+              customerName: o.shipping_full_name || 'Customer',
+              address: {
+                name: o.shipping_full_name,
+                number: o.shipping_phone,
+                address: o.shipping_address,
+                city: o.shipping_city,
+                pincode: o.shipping_zip
+              },
+              createdAt: o.created_at,
+              estimatedDelivery: o.estimated_delivery || '2-5 Days',
+              paymentId: o.payment_id || 'COD',
+              paymentStatus: o.payment_status,
+              returnReason: o.return_reason,
+              returnComments: o.return_comments,
+              returnRequestedAt: o.return_requested_at,
+              returnStatus: o.return_status,
+              returnAdminNotes: o.return_admin_notes,
+              trackingHistory: o.tracking_history || [],
+              fulfillmentStatus: isFulfilled ? 'Fulfilled' : 'Unfulfilled',
+              fulfilledAt: isFulfilled ? (o.updated_at || o.created_at) : null,
+              deliveredAt: o.status === 'delivered' ? (o.updated_at || o.created_at) : null
+            };
+          });
+        }
+      } catch (e) {
+        console.error("Exception fetching orders from Supabase:", e);
+      }
+
+      const mergedOrders = [...supabaseMappedOrders];
+      mergedOrders.sort((a: any, b: any) => new Date(b.createdAt || b.created_at || 0).getTime() - new Date(a.createdAt || a.created_at || 0).getTime());
+
+      // Fetch categories from Supabase
+      let supabaseCategories: any[] = [];
+      try {
+        const { data: supCategories, error: supCatErr } = await supabase
+          .from('categories')
+          .select('*')
+          .order('sort_order', { ascending: true });
+        if (supCatErr) {
+          console.warn("Error fetching categories from Supabase inside fetchDashboardData:", supCatErr);
+        } else if (supCategories) {
+          supabaseCategories = supCategories.map(c => ({
+            id: c.id,
+            name: c.name || '',
+            image: c.image || '',
+            slug: c.slug || '',
+            sortOrder: c.sort_order !== undefined ? Number(c.sort_order) : 1000,
+            createdAt: c.created_at || new Date().toISOString()
+          }));
+        }
+      } catch (catExc) {
+        console.error("Exception fetching categories from Supabase inside fetchDashboardData:", catExc);
+      }
+
+      // Fetch products from Supabase
+      let supabaseProducts: Product[] = [];
+      try {
+        const { data: supProducts, error: supProdErr } = await supabase
+          .from('products')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (supProdErr) {
+          console.warn("Error fetching products from Supabase inside fetchDashboardData:", supProdErr);
+        } else if (supProducts) {
+          const categoryMap: Record<string, string> = {};
+          supabaseCategories.forEach(c => {
+            categoryMap[c.id] = c.name;
+          });
+          supabaseProducts = supProducts.map(p => mapSupabaseProduct(p, categoryMap));
+        }
+      } catch (prodExc) {
+        console.error("Exception fetching products from Supabase inside fetchDashboardData:", prodExc);
+      }
+
+      setProducts(supabaseProducts);
+      setOrders(mergedOrders);
       setUsersCount(usersSnap.size);
       setCustomers(usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      const catsSorted = categoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      catsSorted.sort((a, b) => {
-        const orderA = a.sortOrder !== undefined ? Number(a.sortOrder) : 1000;
-        const orderB = b.sortOrder !== undefined ? Number(b.sortOrder) : 1000;
-        return orderA - orderB;
-      });
-      setCategories(catsSorted);
+      setCategories(supabaseCategories);
       setColors(colorsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setSizes(sizesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setCoupons(couponsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setBanners(bannersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setReviews(reviewsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setAbandonedCarts(cartsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)).filter(cart => cart.status === 'active' && cart.items?.length > 0));
+      const supabaseCoupons = (couponsRes.data || []).map((c: any) => ({
+        ...c,
+        id: c.id,
+        code: c.code,
+        type: c.type || 'percentage',
+        value: Number(c.value ?? c.discount ?? 0),
+        discount: Number(c.value ?? c.discount ?? 0),
+        min_cart_value: Number(c.min_cart_value ?? c.minCartValue ?? 0),
+        minCartValue: Number(c.min_cart_value ?? c.minCartValue ?? 0),
+        usage_limit: c.usage_limit ?? c.usageLimit ?? null,
+        usageLimit: c.usage_limit ?? c.usageLimit ?? null,
+        used_count: Number(c.used_count ?? c.usedCount ?? 0),
+        usedCount: Number(c.used_count ?? c.usedCount ?? 0),
+        active: c.active ?? true,
+        start_date: c.start_date || c.startDate || null,
+        startDate: c.start_date || c.startDate || null,
+        end_date: c.end_date || c.expiryDate || null,
+        expiryDate: c.end_date || c.expiryDate || null,
+        created_at: c.created_at || c.createdAt || new Date().toISOString()
+      }));
+      setCoupons(supabaseCoupons);
+      const supabaseBanners = (bannersRes.data || []).map((b: any) => ({
+        id: b.id,
+        image: b.image || '',
+        title: b.title || '',
+        link: b.link || '',
+        active: b.active ?? true,
+        createdAt: b.created_at || new Date().toISOString()
+      }));
+      setBanners(supabaseBanners);
+      // Fetch reviews from Supabase
+      let supabaseReviews: any[] = [];
+      try {
+        const { data: revData, error: revErr } = await supabase
+          .from('reviews')
+          .select('*, products(name, images)')
+          .order('created_at', { ascending: false });
+
+        if (revErr) {
+          console.warn("Error fetching reviews from Supabase:", revErr);
+        } else if (revData) {
+          supabaseReviews = revData.map((row: any) => {
+            const prod = Array.isArray(row.products) ? row.products[0] : row.products;
+            
+            let commentText = row.comment || '';
+            let emailVal = row.reviewer_email || '';
+            let userImageVal = row.avatar_url || '';
+            
+            if (commentText.startsWith('{') && commentText.endsWith('}')) {
+              try {
+                const parsed = JSON.parse(commentText);
+                if (parsed && typeof parsed === 'object') {
+                  commentText = parsed.text || '';
+                  emailVal = parsed.userEmail || emailVal;
+                  userImageVal = parsed.userImage || userImageVal;
+                }
+              } catch (e) {
+                // ignore
+              }
+            }
+
+            return {
+              id: row.id,
+              user_id: row.user_id,
+              product_id: row.product_id,
+              userName: row.user_name || 'Anonymous',
+              userEmail: emailVal,
+              userImage: userImageVal,
+              rating: row.rating || 5,
+              comment: commentText,
+              createdAt: row.created_at || new Date().toISOString(),
+              likes: row.likes || 0,
+              productName: prod?.name || 'Unknown Product',
+              productImage: prod?.images?.[0] || '',
+            };
+          });
+        }
+      } catch (err) {
+        console.error("Failed to load reviews from Supabase in AdminDashboard:", err);
+      }
+      setReviews(supabaseReviews);
+
+      // Fetch and group abandoned carts from Supabase cart_items table
+      let supabaseAbandonedCarts: any[] = [];
+      try {
+        const { data: supCartItems, error: supCartErr } = await supabase
+          .from('cart_items')
+          .select('*, products(*), profiles(*)');
+
+        if (supCartErr) {
+          console.warn("Error fetching cart items from Supabase in AdminDashboard:", supCartErr);
+        } else if (supCartItems) {
+          const groupedCartsMap = new Map<string, any>();
+
+          supCartItems.forEach(row => {
+            const userId = row.user_id;
+            if (!userId) return;
+
+            const p = Array.isArray(row.products) ? row.products[0] : row.products;
+            const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+
+            if (!p) return;
+
+            const itemPrice = Number(p.price || 0);
+            const itemQty = Number(row.quantity || 1);
+            const itemTotal = itemPrice * itemQty;
+
+            const cartItem = {
+              id: p.id,
+              name: p.name || '',
+              price: itemPrice,
+              quantity: itemQty,
+              selectedSize: row.size || '',
+              selectedColor: row.color || '',
+              image: (p.images && p.images.length > 0) ? p.images[0] : ''
+            };
+
+            if (!groupedCartsMap.has(userId)) {
+              groupedCartsMap.set(userId, {
+                id: userId,
+                userId: userId,
+                userEmail: profile?.email || 'Registered User',
+                userName: profile?.display_name || 'User',
+                status: 'active',
+                items: [cartItem],
+                totalAmount: itemTotal,
+                updatedAt: row.updated_at || row.created_at || new Date().toISOString()
+              });
+            } else {
+              const existingCart = groupedCartsMap.get(userId);
+              existingCart.items.push(cartItem);
+              existingCart.totalAmount += itemTotal;
+              
+              const rowTime = new Date(row.updated_at || row.created_at || 0).getTime();
+              const existingTime = new Date(existingCart.updatedAt).getTime();
+              if (rowTime > existingTime) {
+                existingCart.updatedAt = row.updated_at || row.created_at;
+              }
+            }
+          });
+
+          supabaseAbandonedCarts = Array.from(groupedCartsMap.values());
+        }
+      } catch (e) {
+        console.error("Exception fetching Supabase cart items in AdminDashboard:", e);
+      }
+
+      if (supabaseAbandonedCarts.length > 0) {
+        setAbandonedCarts(supabaseAbandonedCarts);
+      } else {
+        setAbandonedCarts(cartsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)).filter(cart => cart.status === 'active' && cart.items?.length > 0));
+      }
+
       setLiveSessions(sessionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setPromotions(promotionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const supabasePromotions = (promotionsRes.data || []).map((p: any) => ({
+        ...p,
+        id: p.id,
+        name: p.name,
+        description: p.description || '',
+        priority: p.priority ?? 1,
+        status: p.status || 'draft',
+        type: p.type || 'bxgy',
+        conditions: p.conditions || { minCartValue: 0, minQuantity: 0, productIds: [], categoryIds: [], userType: 'all', startDate: '', endDate: '' },
+        bxgyConfig: p.bxgy_config || p.bxgyConfig || { buyQty: 2, getQty: 1, applyOn: 'same', maxFree: 1, repeat: false },
+        reward: p.reward || { method: 'auto', value: 100 },
+        limits: p.limits || { perUser: 1, totalUsage: 100, maxDiscount: 0 },
+        stackable: p.stackable ?? false,
+        created_at: p.created_at || p.createdAt || new Date().toISOString()
+      }));
+      setPromotions(supabasePromotions);
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, 'Multiple Collections (Bulk Fetch)');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRefreshOrders = async () => {
+    setIsRefreshingOrders(true);
+    try {
+      await fetchDashboardData();
+      toast.success("Orders refreshed!");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to refresh orders");
+    } finally {
+      setIsRefreshingOrders(false);
     }
   };
 
@@ -2955,7 +3349,13 @@ export default function AdminDashboard() {
   const confirmDeleteOrder = async () => {
     if (!orderToDelete) return;
     try {
-      await deleteDoc(doc(db, 'orders', orderToDelete));
+      const { error } = await supabase
+        .from('orders')
+        .delete()
+        .eq('id', orderToDelete);
+
+      if (error) throw error;
+
       setOrders(orders.filter(o => o.id !== orderToDelete));
       toast.success('Order deleted successfully');
     } catch (error) {
@@ -2969,6 +3369,7 @@ export default function AdminDashboard() {
 
   const handleUpdateOrderStatus = async (orderId: string, newStatus: string) => {
     try {
+      const order = orders.find(o => o.id === orderId);
       const updates: any = { status: newStatus };
       if (newStatus === 'Returned') {
         updates.returnStatus = 'Approved';
@@ -2976,8 +3377,30 @@ export default function AdminDashboard() {
         updates.returnStatus = 'Rejected';
       }
       
-      await updateDoc(doc(db, 'orders', orderId), updates);
-      const order = orders.find(o => o.id === orderId);
+      const mapClientStatusToSupabase = (clientStatus: string): string => {
+        const normalized = clientStatus.toLowerCase().trim();
+        if (normalized === 'pending') return 'pending';
+        if (normalized === 'paid') return 'pending';
+        if (normalized === 'processing') return 'processing';
+        if (normalized === 'packed') return 'packed';
+        if (normalized === 'shipped') return 'shipped';
+        if (normalized === 'in delivery' || normalized === 'out for delivery' || normalized === 'out_for_delivery') return 'out_for_delivery';
+        if (normalized === 'delivered') return 'delivered';
+        if (normalized === 'cancelled' || normalized === 'refunded' || normalized === 'return requested' || normalized === 'returned') return 'cancelled';
+        return 'pending';
+      };
+
+      const dbStatus = mapClientStatusToSupabase(newStatus);
+
+      const { error: supErr } = await supabase
+        .from('orders')
+        .update({
+          status: dbStatus,
+          return_status: updates.returnStatus || order?.returnStatus || null
+        })
+        .eq('id', orderId);
+
+      if (supErr) throw supErr;
       
       // Send OneSignal templated push notification & email to customer
       if (order && order.userId && order.userId !== 'guest') {
@@ -3052,9 +3475,9 @@ export default function AdminDashboard() {
         }
       }
 
-      setOrders(orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
+      setOrders(orders.map(o => o.id === orderId ? { ...o, status: newStatus, returnStatus: updates.returnStatus || o.returnStatus } : o));
       if (viewingCustomer && viewingCustomer.id === orderId) {
-        setViewingCustomer({ ...viewingCustomer, status: newStatus });
+        setViewingCustomer({ ...viewingCustomer, status: newStatus, returnStatus: updates.returnStatus || viewingCustomer.returnStatus });
       }
 
       // Send internal notification to user (with skipPush: true to prevent double push triggers)
@@ -3080,43 +3503,324 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleUpdateReturnStatus = async (orderId: string, returnStatus: string, adminNotes?: string) => {
+    const loadingToast = toast.loading(`Updating return status to ${returnStatus}...`);
+    try {
+      const order = orders.find(o => o.id === orderId);
+      const updates: any = { return_status: returnStatus };
+      if (adminNotes) {
+        updates.return_admin_notes = adminNotes;
+      }
+
+      const { error: supErr } = await supabase
+        .from('orders')
+        .update(updates)
+        .eq('id', orderId);
+
+      if (supErr) {
+        console.error("Supabase Error updating return status:", supErr);
+        throw supErr;
+      }
+
+      // Send customer notification if applicable
+      if (order && order.userId && order.userId !== 'guest') {
+        try {
+          let templateKey = '';
+          if (returnStatus === 'Approved') templateKey = 'return_approved';
+          else if (returnStatus === 'Refunded') templateKey = 'refund_completed';
+
+          if (templateKey) {
+            fetch('/api/send-templated-notification', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                templateKey,
+                userId: order.userId,
+                params: {
+                  customerName: order.address?.name || order.shipping_full_name || 'Customer',
+                  orderId: order.orderId || order.order_number
+                },
+                options: { url: '/my-orders' }
+              })
+            }).catch(e => console.error("Return notification fetch error:", e));
+          }
+        } catch (e) {
+          console.error("Failed to notify user of return status update:", e);
+        }
+      }
+
+      // Update local orders list state
+      setOrders(prev => prev.map(o => {
+        if (o.id === orderId) {
+          return {
+            ...o,
+            returnStatus,
+            returnAdminNotes: adminNotes || o.returnAdminNotes,
+            return_admin_notes: adminNotes || o.return_admin_notes
+          };
+        }
+        return o;
+      }));
+
+      if (viewingCustomer && viewingCustomer.id === orderId) {
+        setViewingCustomer((prev: any) => ({
+          ...prev,
+          returnStatus,
+          returnAdminNotes: adminNotes || prev?.returnAdminNotes,
+          return_admin_notes: adminNotes || prev?.return_admin_notes
+        }));
+      }
+
+      toast.success(`Return status updated to ${returnStatus}`, { id: loadingToast });
+    } catch (err: any) {
+      console.error("Error updating return status (Full Error Object):", err);
+      toast.error(`Failed to update return status: ${err?.message || 'Database error'}`, { id: loadingToast });
+    }
+  };
+
+  const ADMIN_RETURN_STAGES = [
+    { key: 'requested', label: 'Requested' },
+    { key: 'approved', label: 'Approved' },
+    { key: 'picked up', label: 'Picked Up' },
+    { key: 'refunded', label: 'Refunded' },
+  ];
+
+  const renderAdminReturnCard = (order: any) => {
+    if (!order || (!order.returnReason && !order.returnStatus && !order.return_reason && !order.return_status)) return null;
+
+    const currentReturnStatus = order.returnStatus || order.return_status || 'requested';
+    const isRejected = currentReturnStatus.toLowerCase() === 'rejected';
+    const normStatus = currentReturnStatus.toLowerCase();
+
+    let stageIndex = 0;
+    if (normStatus === 'approved') stageIndex = 1;
+    else if (normStatus === 'picked up' || normStatus === 'picked_up') stageIndex = 2;
+    else if (normStatus === 'refunded') stageIndex = 3;
+
+    return (
+      <div className="bg-purple-50/70 border border-purple-200/80 rounded-2xl p-5 shadow-sm space-y-4 my-4">
+        <div className="flex items-center justify-between border-b border-purple-200/60 pb-3">
+          <h3 className="text-sm font-bold text-purple-950 flex items-center gap-2">
+            <RotateCcw size={16} className="text-purple-600" />
+            <span>Return Request Details</span>
+          </h3>
+          <span className={cn(
+            "text-xs font-bold px-3 py-1 rounded-full border capitalize",
+            isRejected ? "bg-red-100 text-red-700 border-red-200" :
+            normStatus === 'refunded' ? "bg-emerald-100 text-emerald-800 border-emerald-200" :
+            normStatus === 'approved' ? "bg-blue-100 text-blue-800 border-blue-200" :
+            normStatus === 'picked up' ? "bg-indigo-100 text-indigo-800 border-indigo-200" :
+            "bg-purple-100 text-purple-800 border-purple-200"
+          )}>
+            {currentReturnStatus}
+          </span>
+        </div>
+
+        {/* REASON & COMMENTS */}
+        <div className="space-y-1 text-xs text-purple-950">
+          <p><span className="font-semibold text-purple-900">Reason:</span> {order.returnReason || order.return_reason || 'Standard Return'}</p>
+          {(order.returnComments || order.return_comments) && (
+            <p className="text-purple-800 italic bg-purple-100/50 p-2.5 rounded-xl border border-purple-200/50 mt-1">
+              "{order.returnComments || order.return_comments}"
+            </p>
+          )}
+          {(order.returnAdminNotes || order.return_admin_notes) && (
+            <p className="text-red-900 bg-red-100/80 p-2.5 rounded-xl border border-red-200 font-medium mt-2">
+              <span className="font-bold text-red-950">Return Rejected:</span> {order.returnAdminNotes || order.return_admin_notes}
+            </p>
+          )}
+          {(order.returnRequestedAt || order.return_requested_at) && (
+            <p className="text-[11px] text-purple-600 pt-1">
+              Requested on: {new Date(order.returnRequestedAt || order.return_requested_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </p>
+          )}
+        </div>
+
+        {/* RETURN PROGRESS TRACKER */}
+        {!isRejected && (
+          <div className="py-2">
+            <div className="relative flex items-center justify-between">
+              <div className="absolute top-3.5 left-5 right-5 h-1 bg-purple-200/80 rounded-full z-0" />
+              <div 
+                className="absolute top-3.5 left-5 h-1 bg-gradient-to-r from-purple-600 to-emerald-500 rounded-full transition-all duration-500 z-0"
+                style={{ width: `${(stageIndex / (ADMIN_RETURN_STAGES.length - 1)) * 85}%` }}
+              />
+              {ADMIN_RETURN_STAGES.map((stg, idx) => {
+                const isStepDone = idx < stageIndex || (idx === stageIndex && normStatus === 'refunded');
+                const isCurrActive = idx === stageIndex && !isStepDone;
+                return (
+                  <div key={stg.key} className="relative z-10 flex flex-col items-center">
+                    <div className={cn(
+                      "w-7 h-7 rounded-full flex items-center justify-center font-bold text-[11px] transition-all shadow-sm",
+                      isStepDone ? "bg-emerald-500 text-white ring-2 ring-emerald-100" :
+                      isCurrActive ? "bg-purple-600 text-white ring-2 ring-purple-200 scale-110 shadow" :
+                      "bg-white border-2 border-purple-200 text-purple-300"
+                    )}>
+                      {isStepDone ? <Check size={14} /> : isCurrActive ? <RotateCcw size={12} /> : idx + 1}
+                    </div>
+                    <span className={cn(
+                      "mt-1.5 text-[11px] transition-all",
+                      isStepDone ? "font-semibold text-emerald-800" :
+                      isCurrActive ? "font-bold text-purple-950" :
+                      "font-medium text-gray-400"
+                    )}>
+                      {stg.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* DYNAMIC ACTION BUTTONS */}
+        <div className="pt-2 flex flex-wrap items-center gap-2 border-t border-purple-200/60">
+          {(normStatus === 'requested' || normStatus === 'pending') && (
+            <>
+              <button
+                onClick={() => handleUpdateReturnStatus(order.id, 'Approved')}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+              >
+                <Check size={14} />
+                <span>Approve Return</span>
+              </button>
+              <button
+                onClick={() => {
+                  const reason = window.prompt("Reason for rejecting this return request?");
+                  if (reason !== null) {
+                    handleUpdateReturnStatus(order.id, 'Rejected', reason);
+                  }
+                }}
+                className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-xs font-bold transition-all border border-red-200 flex items-center gap-1.5"
+              >
+                <X size={14} />
+                <span>Reject Request</span>
+              </button>
+            </>
+          )}
+
+          {normStatus === 'approved' && (
+            <>
+              <button
+                onClick={() => handleUpdateReturnStatus(order.id, 'Picked Up')}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+              >
+                <Truck size={14} />
+                <span>Mark Picked Up</span>
+              </button>
+              <button
+                onClick={() => handleUpdateReturnStatus(order.id, 'Refunded')}
+                className="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+              >
+                <CheckCircle2 size={14} />
+                <span>Mark Picked Up & Refund</span>
+              </button>
+              <button
+                onClick={() => {
+                  const reason = window.prompt("Reason for rejecting return?");
+                  if (reason !== null) {
+                    handleUpdateReturnStatus(order.id, 'Rejected', reason);
+                  }
+                }}
+                className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+              >
+                <X size={14} />
+                <span>Reject</span>
+              </button>
+            </>
+          )}
+
+          {normStatus === 'picked up' && (
+            <>
+              <button
+                onClick={() => handleUpdateReturnStatus(order.id, 'Refunded')}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+              >
+                <CheckCircle2 size={14} />
+                <span>Process Refund</span>
+              </button>
+              <button
+                onClick={() => {
+                  const reason = window.prompt("Reason for rejecting return?");
+                  if (reason !== null) {
+                    handleUpdateReturnStatus(order.id, 'Rejected', reason);
+                  }
+                }}
+                className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+              >
+                <X size={14} />
+                <span>Reject</span>
+              </button>
+            </>
+          )}
+
+          {normStatus === 'refunded' && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
+              <CheckCircle2 size={14} />
+              <span>Refund Processed & Completed</span>
+            </span>
+          )}
+
+          {isRejected && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-bold">
+              <XCircle size={14} />
+              <span>Return Request Rejected</span>
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const handleAddOrder = async () => {
     try {
-      // Get next order number using transaction
-      const counterRef = doc(db, 'counters', 'orders');
-      const orderNumber = await runTransaction(db, async (transaction) => {
-        const counterDoc = await transaction.get(counterRef);
-        let nextNum = 1;
-        if (counterDoc.exists()) {
-          nextNum = counterDoc.data().count + 1;
-          transaction.update(counterRef, { count: nextNum });
+      let formattedOrderId = '';
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('generate_order_number');
+        if (rpcErr) {
+          console.warn("Supabase generate_order_number RPC failed:", rpcErr);
+          formattedOrderId = `#TRF${Math.floor(1000 + Math.random() * 9000)}`;
         } else {
-          transaction.set(counterRef, { count: 1 });
+          formattedOrderId = rpcData;
         }
-        return nextNum;
-      });
+      } catch (rpcEx) {
+        console.warn("Supabase generate_order_number RPC exception:", rpcEx);
+        formattedOrderId = `#TRF${Math.floor(1000 + Math.random() * 9000)}`;
+      }
 
-      const orderId = `#TRF${orderNumber.toString().padStart(4, '0')}`;
-      const newOrder = {
-        orderId,
-        address: {
-          name: 'Manual Order',
-          email: 'admin@theruby.com',
-          address: 'Store Pickup',
-          city: 'Store City',
-          state: 'Store State',
-          pincode: '000000',
-          number: '0000000000'
-        },
-        status: 'Pending',
-        total: 0,
-        createdAt: new Date().toISOString(),
+      const orderId = formattedOrderId;
+      const newOrderPayload = {
+        order_number: orderId,
         items: [],
-        paymentMethod: 'COD',
-        shippingMethod: 'Store Pickup'
+        total: 0,
+        subtotal: 0,
+        discount: 0,
+        shipping_cost: 0,
+        cod_fee: 0,
+        shipping_method: 'Standard Delivery',
+        estimated_delivery: '2-5 Days',
+        payment_id: 'COD',
+        status: 'pending',
+        payment_method: 'COD',
+        payment_status: 'Pending',
+        user_id: 'guest',
+        shipping_full_name: 'Manual Order',
+        shipping_phone: '0000000000',
+        customer_email: 'admin@theruby.com',
+        shipping_address: 'Store Pickup',
+        shipping_city: 'Store City',
+        shipping_zip: '000000',
+        created_at: new Date().toISOString()
       };
-      await addDoc(collection(db, 'orders'), newOrder);
+
+      const { error } = await supabase
+        .from('orders')
+        .insert(newOrderPayload);
+
+      if (error) throw error;
+
       toast.success(`Order ${orderId} added successfully`);
+      fetchDashboardData();
     } catch (error) {
       console.error('Error adding order:', error);
       toast.error('Failed to add order');
@@ -3137,7 +3841,7 @@ export default function AdminDashboard() {
     else if (orderTab === 'onhold') matchesTab = order.fulfillmentStatus === 'On Hold';
     else if (orderTab === 'closed') matchesTab = order.status === 'Delivered' || order.status === 'Cancelled';
 
-    const matchesStatus = orderStatusFilter === 'All Status' || order.status === orderStatusFilter;
+    const matchesStatus = orderStatusFilter === 'All Status' || order.status === orderStatusFilter || getEffectiveOrderStatus(order) === orderStatusFilter;
     
     let matchesDate = true;
     if (orderStartDate || orderEndDate) {
@@ -3195,10 +3899,42 @@ export default function AdminDashboard() {
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      const snapshot = await getDocs(collection(db, 'products'));
-      setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
+      // Fetch categories from Supabase
+      let supabaseCategories: any[] = [];
+      const { data: supCategories } = await supabase
+        .from('categories')
+        .select('*')
+        .order('sort_order', { ascending: true });
+      if (supCategories) {
+        supabaseCategories = supCategories.map(c => ({
+          id: c.id,
+          name: c.name || '',
+          image: c.image || '',
+          slug: c.slug || '',
+          sortOrder: c.sort_order !== undefined ? Number(c.sort_order) : 1000,
+          createdAt: c.created_at || new Date().toISOString()
+        }));
+      }
+
+      // Fetch products from Supabase
+      const { data: supProducts } = await supabase
+        .from('products')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (supProducts) {
+        const categoryMap: Record<string, string> = {};
+        supabaseCategories.forEach(c => {
+          categoryMap[c.id] = c.name;
+        });
+        const mapped = supProducts.map(p => mapSupabaseProduct(p, categoryMap));
+        setProducts(mapped);
+      }
+      if (supabaseCategories.length > 0) {
+        setCategories(supabaseCategories);
+      }
     } catch (error) {
-      console.error("Error fetching products:", error);
+      console.error("Error fetching products from Supabase:", error);
     } finally {
       setLoading(false);
     }
@@ -3206,7 +3942,7 @@ export default function AdminDashboard() {
 
   const handleLogout = async () => {
     localStorage.removeItem('phone_user');
-    await auth.signOut();
+    await supabase.auth.signOut();
     navigate('/login');
     window.location.reload();
   };
@@ -3280,17 +4016,66 @@ export default function AdminDashboard() {
         console.warn(`[Product Diagnostic - Health Check Warn during Product Save] Product "${productData.name}" is unhealthy:`, health.errors, health.warnings);
       }
 
+      // Build a map of Category Name -> Category ID from state categories
+      const nameToIdMap: Record<string, string> = {};
+      categories.forEach(c => {
+        if (c.name && c.id) {
+          nameToIdMap[c.name] = c.id;
+        }
+      });
+
+      const categoryIds = (formData.category || [])
+        .map((name: string) => nameToIdMap[name])
+        .filter(Boolean);
+
+      const supabaseProductPayload: any = {
+        name: productData.name,
+        description: productData.description || '',
+        price: Number(productData.price) || 0,
+        compare_price: Number(productData.comparePrice) || 0,
+        category_ids: categoryIds,
+        sizes: Array.isArray(productData.sizes) ? productData.sizes : [],
+        images: Array.isArray(productData.images) ? productData.images : [],
+        stock: Number(productData.stock) || 0,
+        stock_status: productData.stockStatus || 'In Stock',
+        is_trending: !!productData.isTrending,
+        is_popular: !!productData.isPopular,
+        sku: productData.sku || null,
+        barcode: productData.barcode || null,
+        weight: productData.weight || null,
+        dimensions: productData.dimensions || null,
+        seo_title: productData.seoTitle || null,
+        seo_description: productData.seoDescription || null,
+        variants: productData.variants || [],
+        updated_at: new Date().toISOString()
+      };
+
       if (editingProduct) {
-        await updateDoc(doc(db, 'products', editingProduct.id), productData);
+        const { error: updateErr } = await supabase
+          .from('products')
+          .update(supabaseProductPayload)
+          .eq('id', editingProduct.id);
+
+        if (updateErr) throw updateErr;
+
         logProductDiagnostics('Saved', { id: editingProduct.id, name: productData.name });
         toast.success("Product updated!", { id: uploadToast });
       } else {
-        const fullNewProduct = {
-          ...productData,
-          createdAt: new Date().toISOString()
+        const fullSupabaseProductPayload = {
+          ...supabaseProductPayload,
+          created_at: new Date().toISOString()
         };
-        const docRef = await addDoc(collection(db, 'products'), fullNewProduct);
-        logProductDiagnostics('Saved', { id: docRef.id, name: productData.name });
+
+        const { data: insertedProd, error: insertErr } = await supabase
+          .from('products')
+          .insert(fullSupabaseProductPayload)
+          .select()
+          .single();
+
+        if (insertErr) throw insertErr;
+
+        const insertedId = insertedProd?.id || 'new_id';
+        logProductDiagnostics('Saved', { id: insertedId, name: productData.name });
         toast.success("Product added successfully!", { id: uploadToast });
       }
 
@@ -3360,17 +4145,22 @@ export default function AdminDashboard() {
 
   const confirmDeleteProduct = async () => {
     if (!productToDelete) return;
-    console.log("Attempting to delete product:", productToDelete);
+    console.log("Attempting to delete product from Supabase:", productToDelete);
     const deleteToast = toast.loading("Deleting product...");
     try {
-      await deleteDoc(doc(db, 'products', productToDelete));
+      const { error: delErr } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', productToDelete);
+
+      if (delErr) throw delErr;
+
       console.log("Delete successful for:", productToDelete);
       toast.success("Product deleted", { id: deleteToast });
       fetchDashboardData();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Delete error for ID:", productToDelete, error);
-      handleFirestoreError(error, OperationType.DELETE, `products/${productToDelete}`);
-      toast.error("Failed to delete product", { id: deleteToast });
+      toast.error("Failed to delete product: " + (error.message || String(error)), { id: deleteToast });
     } finally {
       setDeleteModalOpen(false);
       setProductToDelete(null);
@@ -3403,6 +4193,17 @@ export default function AdminDashboard() {
                   ? String(item.category).split(',').map((c: string) => c.trim()).filter(Boolean) 
                   : ['Women'];
 
+                const nameToIdMap: Record<string, string> = {};
+                categories.forEach(c => {
+                  if (c.name && c.id) {
+                    nameToIdMap[c.name] = c.id;
+                  }
+                });
+
+                const categoryIds = productCategory
+                  .map((name: string) => nameToIdMap[name])
+                  .filter(Boolean);
+
                 const newProdData = {
                   name: String(item.name),
                   price: Number(item.price) || 0,
@@ -3422,7 +4223,26 @@ export default function AdminDashboard() {
                   console.warn(`[Product Diagnostic - Health Check Warn during Bulk Import] Product "${newProdData.name}" is unhealthy:`, health.errors, health.warnings);
                 }
 
-                await addDoc(collection(db, 'products'), newProdData);
+                const supabaseProductPayload: any = {
+                  name: newProdData.name,
+                  description: newProdData.description || '',
+                  price: Number(newProdData.price) || 0,
+                  compare_price: Number(newProdData.comparePrice) || 0,
+                  category_ids: categoryIds,
+                  sizes: ['S', 'M', 'L', 'XL'],
+                  images: Array.isArray(newProdData.images) ? newProdData.images : [],
+                  stock: Number(newProdData.stock) || 0,
+                  stock_status: 'In Stock',
+                  sku: newProdData.sku || null,
+                  created_at: new Date().toISOString()
+                };
+
+                const { error: bulkInsertErr } = await supabase
+                  .from('products')
+                  .insert(supabaseProductPayload);
+
+                if (bulkInsertErr) throw bulkInsertErr;
+
                 logProductDiagnostics('Saved', { name: newProdData.name });
                 successCount++;
               } catch (err: any) {
@@ -3737,7 +4557,11 @@ export default function AdminDashboard() {
   const confirmDeleteReview = async () => {
     if (!reviewToDelete) return;
     try {
-      await deleteDoc(doc(db, 'reviews', reviewToDelete));
+      const { error } = await supabase
+        .from('reviews')
+        .delete()
+        .eq('id', reviewToDelete);
+      if (error) throw error;
       toast.success("Review deleted");
       fetchDashboardData();
     } catch (error) {
@@ -3749,24 +4573,87 @@ export default function AdminDashboard() {
   };
 
   const handleSavePromotion = async () => {
-    if (!promotionForm.name) {
+    if (!promotionForm.name || !promotionForm.name.trim()) {
       toast.error("Promotion name is required");
+      return;
+    }
+
+    const safeNum = (val: any, fallback = 0): number => {
+      if (val === '' || val === null || val === undefined) return fallback;
+      const parsed = typeof val === 'number' ? val : parseFloat(val);
+      return isNaN(parsed) ? fallback : parsed;
+    };
+
+    const promoType = promotionForm.type || 'bxgy';
+    const priority = safeNum(promotionForm.priority, 1);
+    const buyQty = safeNum(promotionForm.bxgyConfig?.buyQty, 2);
+    const getQty = safeNum(promotionForm.bxgyConfig?.getQty, 1);
+    const minCartValue = safeNum(promotionForm.conditions?.minCartValue, 0);
+    const minQuantity = safeNum(promotionForm.conditions?.minQuantity, 0);
+    const rewardValue = safeNum(promotionForm.reward?.value, 0);
+    const perUserLimit = safeNum(promotionForm.limits?.perUser, 1);
+    const totalUsageLimit = safeNum(promotionForm.limits?.totalUsage, 100);
+    const maxDiscountLimit = safeNum(promotionForm.limits?.maxDiscount, 0);
+
+    if (promoType === 'bxgy' && (buyQty <= 0 || getQty <= 0)) {
+      toast.error("Buy Qty and Get Qty must be greater than 0 for Buy X Get Y offers");
+      return;
+    }
+
+    if ((promoType === 'percentage' || promoType === 'flat') && rewardValue <= 0) {
+      toast.error("Discount value must be greater than 0");
       return;
     }
 
     try {
       setLoading(true);
       const promoData = {
-        ...promotionForm,
-        updatedAt: new Date().toISOString()
+        name: promotionForm.name.trim(),
+        description: promotionForm.description ? promotionForm.description.trim() : '',
+        priority: priority,
+        status: promotionForm.status || 'draft',
+        type: promoType,
+        conditions: {
+          minCartValue,
+          minQuantity,
+          productIds: promotionForm.conditions?.productIds || [],
+          categoryIds: promotionForm.conditions?.categoryIds || [],
+          userType: promotionForm.conditions?.userType || 'all',
+          startDate: promotionForm.conditions?.startDate || '',
+          endDate: promotionForm.conditions?.endDate || ''
+        },
+        bxgy_config: {
+          buyQty,
+          getQty,
+          applyOn: promotionForm.bxgyConfig?.applyOn || 'same',
+          maxFree: safeNum(promotionForm.bxgyConfig?.maxFree, 1),
+          repeat: Boolean(promotionForm.bxgyConfig?.repeat)
+        },
+        reward: {
+          method: promotionForm.reward?.method || 'auto',
+          value: rewardValue
+        },
+        limits: {
+          perUser: perUserLimit,
+          totalUsage: totalUsageLimit,
+          maxDiscount: maxDiscountLimit
+        },
+        stackable: Boolean(promotionForm.stackable),
+        updated_at: new Date().toISOString()
       };
 
       if (editingPromotion) {
-        await updateDoc(doc(db, 'promotions', editingPromotion.id), promoData);
+        const { error } = await supabase
+          .from('promotions')
+          .update(promoData)
+          .eq('id', editingPromotion.id);
+        if (error) throw error;
         toast.success("Promotion updated successfully");
       } else {
-        promoData.createdAt = new Date().toISOString();
-        await addDoc(collection(db, 'promotions'), promoData);
+        const { error } = await supabase
+          .from('promotions')
+          .insert([promoData]);
+        if (error) throw error;
         toast.success("Promotion created successfully");
       }
 
@@ -3778,37 +4665,16 @@ export default function AdminDashboard() {
         priority: 1,
         status: 'draft',
         type: 'bxgy',
-        conditions: {
-          minCartValue: 0,
-          minQuantity: 0,
-          productIds: [],
-          categoryIds: [],
-          userType: 'all',
-          startDate: '',
-          endDate: ''
-        },
-        bxgyConfig: {
-          buyQty: 2,
-          getQty: 1,
-          applyOn: 'same',
-          maxFree: 1,
-          repeat: false
-        },
-        reward: {
-          method: 'auto',
-          value: 100
-        },
-        limits: {
-          perUser: 1,
-          totalUsage: 100,
-          maxDiscount: 0
-        },
+        conditions: { minCartValue: 0, minQuantity: 0, productIds: [], categoryIds: [], userType: 'all', startDate: '', endDate: '' },
+        bxgyConfig: { buyQty: 2, getQty: 1, applyOn: 'same', maxFree: 1, repeat: false },
+        reward: { method: 'auto', value: 100 },
+        limits: { perUser: 1, totalUsage: 100, maxDiscount: 0 },
         stackable: false
       });
       fetchDashboardData();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving promotion:", error);
-      toast.error("Failed to save promotion");
+      toast.error(error.message || "Failed to save promotion");
     } finally {
       setLoading(false);
     }
@@ -3822,11 +4688,16 @@ export default function AdminDashboard() {
   const confirmDeletePromotion = async () => {
     if (!promotionToDelete) return;
     try {
-      await deleteDoc(doc(db, 'promotions', promotionToDelete));
+      const { error } = await supabase
+        .from('promotions')
+        .delete()
+        .eq('id', promotionToDelete);
+      if (error) throw error;
       toast.success("Offer deleted permanently");
       fetchDashboardData();
-    } catch (error) {
-      toast.error("Failed to delete promotion");
+    } catch (error: any) {
+      console.error("Error deleting promotion:", error);
+      toast.error(error.message || "Failed to delete promotion");
     } finally {
       setDeletePromotionModalOpen(false);
       setPromotionToDelete(null);
@@ -3857,28 +4728,39 @@ export default function AdminDashboard() {
     try {
       const slug = categoryForm.name.toLowerCase().replace(/ /g, '-');
       const sortOrderNum = categoryForm.sortOrder ? parseInt(categoryForm.sortOrder, 10) : 0;
-      const payload: any = {
+      
+      const supabaseCategoryPayload: any = {
         name: categoryForm.name,
         image: categoryForm.image || '',
         slug,
-        sortOrder: isNaN(sortOrderNum) ? 0 : sortOrderNum
+        sort_order: isNaN(sortOrderNum) ? 0 : sortOrderNum
       };
 
       if (isEdit) {
-        await updateDoc(doc(db, 'categories', editingCategory.id), payload);
+        const { error: catUpdateErr } = await supabase
+          .from('categories')
+          .update(supabaseCategoryPayload)
+          .eq('id', editingCategory.id);
+
+        if (catUpdateErr) throw catUpdateErr;
       } else {
-        await addDoc(collection(db, 'categories'), { 
-          ...payload, 
-          createdAt: new Date().toISOString() 
-        });
+        const fullPayload = {
+          ...supabaseCategoryPayload,
+          created_at: new Date().toISOString()
+        };
+        const { error: catInsertErr } = await supabase
+          .from('categories')
+          .insert(fullPayload);
+
+        if (catInsertErr) throw catInsertErr;
       }
+      
       toast.success(successLabel, { id: saveToast });
       setIsCategoryModalOpen(false);
       setEditingCategory(null);
       fetchDashboardData();
     } catch (error: any) {
       console.error("Save category error:", error);
-      handleFirestoreError(error, OperationType.WRITE, 'categories');
       
       let errorMsg = isEdit ? 'Failed to update category' : 'Failed to add category';
       if (error.code === 'permission-denied') {
@@ -3887,7 +4769,7 @@ export default function AdminDashboard() {
         errorMsg = 'Category image is too large. Please use a smaller image.';
       }
       
-      toast.error(errorMsg, { id: saveToast });
+      toast.error(errorMsg + ": " + (error.message || String(error)), { id: saveToast });
     } finally {
       setLoading(false);
     }
@@ -3902,13 +4784,18 @@ export default function AdminDashboard() {
     if (!categoryToDelete) return;
     const deleteToast = toast.loading("Deleting category...");
     try {
-      await deleteDoc(doc(db, 'categories', categoryToDelete));
+      const { error: catDelErr } = await supabase
+        .from('categories')
+        .delete()
+        .eq('id', categoryToDelete);
+
+      if (catDelErr) throw catDelErr;
+
       toast.success('Category deleted', { id: deleteToast });
       fetchDashboardData();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Delete category error:", error);
-      handleFirestoreError(error, OperationType.DELETE, `categories/${categoryToDelete}`);
-      toast.error('Failed to delete category', { id: deleteToast });
+      toast.error('Failed to delete category: ' + (error.message || String(error)), { id: deleteToast });
     } finally {
       setDeleteCategoryModalOpen(false);
       setCategoryToDelete(null);
@@ -3996,79 +4883,95 @@ export default function AdminDashboard() {
   };
 
   const handleAddCoupon = () => {
-    setCouponForm({ code: '', discount: 0, expiryDate: '', type: 'percentage' });
+    setEditingCoupon(null);
+    setCouponForm({
+      code: '',
+      type: 'percentage',
+      value: 0,
+      min_cart_value: 0,
+      usage_limit: '',
+      active: true,
+      start_date: '',
+      end_date: ''
+    });
+    setIsCouponModalOpen(true);
+  };
+
+  const handleEditCoupon = (coupon: any) => {
+    setEditingCoupon(coupon);
+    setCouponForm({
+      code: coupon.code || '',
+      type: coupon.type || 'percentage',
+      value: coupon.value ?? coupon.discount ?? 0,
+      min_cart_value: coupon.min_cart_value ?? coupon.minCartValue ?? 0,
+      usage_limit: (coupon.usage_limit ?? coupon.usageLimit) !== null && (coupon.usage_limit ?? coupon.usageLimit) !== undefined ? String(coupon.usage_limit ?? coupon.usageLimit) : '',
+      active: coupon.active ?? true,
+      start_date: coupon.start_date ? new Date(coupon.start_date).toISOString().split('T')[0] : (coupon.startDate ? new Date(coupon.startDate).toISOString().split('T')[0] : ''),
+      end_date: (coupon.end_date || coupon.expiryDate) ? new Date(coupon.end_date || coupon.expiryDate).toISOString().split('T')[0] : ''
+    });
     setIsCouponModalOpen(true);
   };
 
   const handleSaveCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!couponForm.code || !couponForm.discount) return;
+    if (!couponForm.code) {
+      toast.error('Coupon code is required');
+      return;
+    }
+    const val = Number(couponForm.value ?? couponForm.discount ?? 0);
+    const typeVal = couponForm.type || 'percentage';
+
     try {
-      await addDoc(collection(db, 'coupons'), { 
-        ...couponForm,
-        code: couponForm.code.toUpperCase(), 
-        active: true,
-        createdAt: new Date().toISOString() 
-      });
+      const codeUpper = couponForm.code.toUpperCase().trim();
+      const payload: any = {
+        code: codeUpper,
+        type: typeVal,
+        value: val,
+        min_cart_value: Number(couponForm.min_cart_value || 0),
+        usage_limit: couponForm.usage_limit ? Number(couponForm.usage_limit) : null,
+        active: Boolean(couponForm.active ?? true),
+        start_date: couponForm.start_date ? new Date(couponForm.start_date).toISOString() : null,
+        end_date: couponForm.end_date ? new Date(couponForm.end_date).toISOString() : null
+      };
 
-      // Internal notification for new coupon (skip default push trigger to prevent duplicates)
-      await sendNotification({
-        title: 'New Discount Coupon! 🎟️',
-        body: `Use code ${couponForm.code.toUpperCase()} to get ${couponForm.discount}${couponForm.type === 'percentage' ? '%' : ' OFF'} on your next order!`,
-        type: 'coupon',
-        iconType: 'tag',
-        link: '/shop'
-      }, true);
+      if (editingCoupon) {
+        const { error } = await supabase
+          .from('coupons')
+          .update(payload)
+          .eq('id', editingCoupon.id);
+        if (error) throw error;
+        toast.success('Coupon updated successfully');
+      } else {
+        payload.used_count = 0;
+        payload.per_user_limit = 1;
+        const { error } = await supabase
+          .from('coupons')
+          .insert([payload]);
+        if (error) throw error;
 
-      // Send broadcast notification for new coupon using high-fidelity templates
-      try {
-        const discountText = `${couponForm.discount}${couponForm.type === 'percentage' ? '%' : ' OFF'}`;
-        fetch('/api/send-templated-notification', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            templateKey: 'coupon_received',
-            params: {
-              couponCode: couponForm.code.toUpperCase(),
-              discount: discountText
-            },
-            options: { url: '/' }
-          })
-        }).catch(err => console.error("Failed to broadcast coupon push notification:", err));
-
-        // Send Newsletter Emails
-        const newsletterSnap = await getDocs(collection(db, 'newsletter'));
-        const emails = newsletterSnap.docs.map(doc => doc.data().email).filter(Boolean);
-        
-        if (emails.length > 0) {
-          fetch('/api/send-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              to: emails,
-              subject: `New Discount Coupon: ${couponForm.code.toUpperCase()} 🎟️`,
-              html: `
-                <div style="font-family: sans-serif; padding: 20px; color: #1A2C54;">
-                  <h1 style="color: #E11D48;">Special Discount for You!</h1>
-                  <p>Hi there,</p>
-                  <p>We've just released a new discount coupon for our loyal subscribers!</p>
-                  <p>Use code <strong>${couponForm.code.toUpperCase()}</strong> to get <strong>${couponForm.discount}${couponForm.type === 'percentage' ? '%' : ' OFF'}</strong> on your next order.</p>
-                  <p>Hurry up and shop now!</p>
-                  <a href="${window.location.origin}" style="display: inline-block; background: #E11D48; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 20px;">Shop Now</a>
-                </div>
-              `
-            })
-          });
+        // Broadcast notifications for new coupon
+        try {
+          const discountText = typeVal === 'free_shipping' ? 'FREE SHIPPING' : `${val}${typeVal === 'percentage' ? '%' : ' OFF'}`;
+          await sendNotification({
+            title: 'New Discount Coupon! 🎟️',
+            body: `Use code ${codeUpper} to get ${discountText} on your next order!`,
+            type: 'coupon',
+            iconType: 'tag',
+            link: '/shop'
+          }, true);
+        } catch (e) {
+          console.error("Coupon notification error:", e);
         }
-      } catch (e) {
-        console.error("Newsletter notification error:", e);
+
+        toast.success('Coupon added successfully');
       }
 
-      toast.success('Coupon added');
       setIsCouponModalOpen(false);
+      setEditingCoupon(null);
       fetchDashboardData();
-    } catch (error) {
-      toast.error('Failed to add coupon');
+    } catch (error: any) {
+      console.error("Error saving coupon:", error);
+      toast.error(error.message || 'Failed to save coupon');
     }
   };
 
@@ -4079,11 +4982,16 @@ export default function AdminDashboard() {
       message: 'Are you sure you want to delete this discount coupon?',
       onConfirm: async () => {
         try {
-          await deleteDoc(doc(db, 'coupons', id));
+          const { error } = await supabase
+            .from('coupons')
+            .delete()
+            .eq('id', id);
+          if (error) throw error;
           toast.success('Coupon deleted');
           fetchDashboardData();
-        } catch (error) {
-          toast.error('Failed to delete coupon');
+        } catch (error: any) {
+          console.error("Error deleting coupon:", error);
+          toast.error(error.message || 'Failed to delete coupon');
         } finally {
           setGenericDeleteModal(prev => ({ ...prev, isOpen: false }));
         }
@@ -4175,39 +5083,97 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleAddBanner = async (e: React.FormEvent) => {
+  const handleOpenAddBanner = () => {
+    setBannerForm({ image: '', title: '', link: '', active: true });
+    setBannerLinkType('link');
+    setBannerLinkValue('');
+    setEditingBanner(null);
+    setIsBannerModalOpen(true);
+  };
+
+  const handleEditBanner = (banner: any) => {
+    setBannerForm({
+      image: banner.image || '',
+      title: banner.title || '',
+      link: banner.link || '',
+      active: banner.active ?? true
+    });
+    if (banner.link) {
+      if (banner.link.startsWith('/shop?category=')) {
+        setBannerLinkType('category');
+        setBannerLinkValue(decodeURIComponent(banner.link.replace('/shop?category=', '')));
+      } else if (banner.link.startsWith('/product/')) {
+        setBannerLinkType('product');
+        setBannerLinkValue(banner.link.replace('/product/', ''));
+      } else {
+        setBannerLinkType('link');
+        setBannerLinkValue(banner.link);
+      }
+    } else {
+      setBannerLinkType('link');
+      setBannerLinkValue('');
+    }
+    setEditingBanner(banner);
+    setIsBannerModalOpen(true);
+  };
+
+  const handleSaveBanner = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bannerForm.image || !bannerForm.title) {
       toast.error('Please provide an image and title');
       return;
     }
+    const isEdit = !!editingBanner;
+    const saveToast = toast.loading(isEdit ? 'Updating banner...' : 'Adding banner...');
     try {
-      await addDoc(collection(db, 'banners'), { 
-        ...bannerForm,
-        createdAt: new Date().toISOString() 
-      });
-      toast.success('Banner added');
+      const payload = {
+        image: bannerForm.image,
+        title: bannerForm.title,
+        link: bannerForm.link || '',
+        active: bannerForm.active ?? true,
+        created_at: isEdit ? (editingBanner.createdAt || new Date().toISOString()) : new Date().toISOString()
+      };
+
+      if (isEdit) {
+        const { error } = await supabase
+          .from('banners')
+          .update(payload)
+          .eq('id', editingBanner.id);
+        if (error) throw error;
+        toast.success('Banner updated', { id: saveToast });
+      } else {
+        const { error } = await supabase
+          .from('banners')
+          .insert(payload);
+        if (error) throw error;
+        toast.success('Banner added', { id: saveToast });
+      }
+
       setIsBannerModalOpen(false);
       setBannerForm({ image: '', title: '', link: '', active: true });
       setBannerLinkType('link');
       setBannerLinkValue('');
+      setEditingBanner(null);
       fetchDashboardData();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'banners');
-      toast.error('Failed to add banner');
+    } catch (error: any) {
+      console.error('Error saving banner to Supabase:', error);
+      toast.error(`Failed to save banner: ${error.message || error}`, { id: saveToast });
     }
   };
 
   const handleToggleBanner = async (id: string, currentStatus: boolean) => {
+    const toggleToast = toast.loading('Updating banner status...');
     try {
-      await updateDoc(doc(db, 'banners', id), {
-        active: !currentStatus
-      });
-      toast.success(`Banner ${!currentStatus ? 'activated' : 'deactivated'}`);
+      const { error } = await supabase
+        .from('banners')
+        .update({ active: !currentStatus })
+        .eq('id', id);
+      if (error) throw error;
+      toast.success(`Banner ${!currentStatus ? 'activated' : 'deactivated'}`, { id: toggleToast });
       fetchDashboardData();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `banners/${id}`);
-      toast.error('Failed to update banner status');
+    } catch (error: any) {
+      console.error('Error toggling banner status:', error);
+      toast.error(`Failed to update banner status: ${error.message || error}`, { id: toggleToast });
     }
   };
 
@@ -4217,12 +5183,18 @@ export default function AdminDashboard() {
       title: 'Delete Banner',
       message: 'Are you sure you want to delete this banner?',
       onConfirm: async () => {
+        const deleteToast = toast.loading('Deleting banner...');
         try {
-          await deleteDoc(doc(db, 'banners', id));
-          toast.success('Banner deleted');
+          const { error } = await supabase
+            .from('banners')
+            .delete()
+            .eq('id', id);
+          if (error) throw error;
+          toast.success('Banner deleted', { id: deleteToast });
           fetchDashboardData();
-        } catch (error) {
-          toast.error('Failed to delete banner');
+        } catch (error: any) {
+          console.error('Error deleting banner:', error);
+          toast.error(`Failed to delete banner: ${error.message || error}`, { id: deleteToast });
         } finally {
           setGenericDeleteModal(prev => ({ ...prev, isOpen: false }));
         }
@@ -4241,6 +5213,7 @@ export default function AdminDashboard() {
     { id: 'products', label: 'Products', icon: Package },
     { id: 'category', label: 'Category', icon: Tags },
     { id: 'orders', label: 'Orders', icon: ShoppingBag },
+    { id: 'returns', label: 'Returns', icon: RotateCcw },
     { id: 'colour', label: 'Colour', icon: Palette },
     { id: 'size', label: 'Size', icon: Maximize2 },
     { id: 'coupon', label: 'Coupon', icon: Ticket },
@@ -4263,472 +5236,11 @@ export default function AdminDashboard() {
     Shipped: 'bg-[#3B82F6]/10 text-[#3B82F6] border border-[#3B82F6]/20',
     Cancelled: 'bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/20',
     Processing: 'bg-[#FACC15]/10 text-[#854D0E] border border-[#FACC15]/20',
+    Packed: 'bg-indigo-500/10 text-indigo-600 border border-indigo-500/20',
+    'Out for Delivery': 'bg-sky-500/10 text-sky-600 border border-sky-500/20',
+    'In Delivery': 'bg-sky-500/10 text-sky-600 border border-sky-500/20',
     'Return Requested': 'bg-purple-500/10 text-purple-600 border border-purple-500/20',
     'Returned': 'bg-orange-500/10 text-orange-600 border border-orange-500/20',
-  };
-
-  const seedData = async () => {
-    setIsSeeding(true);
-    const loadingToast = toast.loading("Seeding premium ethnic wear collections, products, and analytics...");
-    try {
-      // 1. Seed Categories if empty
-      const categoriesRef = collection(db, 'categories');
-      const categorySnap = await getDocs(categoriesRef);
-      const categoryMap: Record<string, string> = {};
-      
-      const newCategories = [
-        { name: "Kurti", image: "https://images.unsplash.com/photo-1621184455862-c163dfb30e0f?auto=format&fit=crop&q=80&w=300", slug: "kurti" },
-        { name: "Sarees", image: "https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=300", slug: "sarees" },
-        { name: "Lehengas", image: "https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&q=80&w=300", slug: "lehengas" },
-        { name: "Suits", image: "https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&q=80&w=300", slug: "suits" },
-        { name: "Dupatta", image: "https://images.unsplash.com/photo-1583391733914-64c0242c1616?auto=format&fit=crop&q=80&w=300", slug: "dupatta" }
-      ];
-
-      if (categorySnap.empty) {
-        for (const cat of newCategories) {
-          const docRef = await addDoc(categoriesRef, {
-            ...cat,
-            createdAt: new Date().toISOString()
-          });
-          categoryMap[cat.name] = docRef.id;
-        }
-      } else {
-        categorySnap.docs.forEach(doc => {
-          categoryMap[doc.data().name] = doc.id;
-        });
-      }
-
-      // 2. Seed Colors if empty
-      const colorsRef = collection(db, 'colors');
-      const colorsSnap = await getDocs(colorsRef);
-      const newColors = [
-        { name: "Ruby Red", hex: "#E11D48" },
-        { name: "Emerald Green", hex: "#059669" },
-        { name: "Royal Blue", hex: "#2563EB" },
-        { name: "Jet Black", hex: "#111827" },
-        { name: "Lilac Violet", hex: "#8B5CF6" }
-      ];
-      if (colorsSnap.empty) {
-        for (const col of newColors) {
-          await addDoc(colorsRef, {
-            ...col,
-            createdAt: new Date().toISOString()
-          });
-        }
-      }
-
-      // 3. Seed Sizes if empty
-      const sizesRef = collection(db, 'sizes');
-      const sizesSnap = await getDocs(sizesRef);
-      const newSizes = ["S", "M", "L", "XL", "XXL"];
-      if (sizesSnap.empty) {
-        for (const sz of newSizes) {
-          await addDoc(sizesRef, {
-            name: sz,
-            createdAt: new Date().toISOString()
-          });
-        }
-      }
-
-      // 4. Seed Banners if empty
-      const bannersRef = collection(db, 'banners');
-      const bannersSnap = await getDocs(bannersRef);
-      if (bannersSnap.empty) {
-        const dummyBanners = [
-          {
-            title: "Festive Season Collection",
-            image: "https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=1200",
-            link: "/shop",
-            active: true,
-            createdAt: new Date().toISOString()
-          },
-          {
-            title: "Elegant Pure Cotton Kurtas",
-            image: "https://images.unsplash.com/photo-1621184455862-c163dfb30e0f?auto=format&fit=crop&q=80&w=1200",
-            link: "/shop?category=kurti",
-            active: true,
-            createdAt: new Date().toISOString()
-          }
-        ];
-        for (const ban of dummyBanners) {
-          await addDoc(bannersRef, ban);
-        }
-      }
-
-      // 5. Seed Coupons if empty
-      const couponsRef = collection(db, 'coupons');
-      const couponsSnap = await getDocs(couponsRef);
-      if (couponsSnap.empty) {
-        const dummyCoupons = [
-          { code: "RUBYWELCOME", discount: 150, type: "flat", expiryDate: "2026-12-31", active: true, createdAt: new Date().toISOString() },
-          { code: "FESTIVE25", discount: 25, type: "percentage", expiryDate: "2026-12-31", active: true, createdAt: new Date().toISOString() }
-        ];
-        for (const c of dummyCoupons) {
-          await addDoc(couponsRef, c);
-        }
-      }
-
-      // 6. Seed High Quality Products if empty
-      const productsRef = collection(db, 'products');
-      const productsSnap = await getDocs(productsRef);
-      let seededProducts: any[] = [];
-
-      const rawProducts = [
-        {
-          name: "Royal Crimson Anarkali Kurta Set",
-          price: 1899,
-          comparePrice: 2999,
-          category: ["Kurti"],
-          sizes: ["M", "L", "XL", "XXL"],
-          images: ["https://images.unsplash.com/photo-1621184455862-c163dfb30e0f?auto=format&fit=crop&q=80&w=800"],
-          stock: 25,
-          stockStatus: "In Stock",
-          isTrending: true,
-          description: "Grace any occasion with this beautiful heavy georgette crimson red Anarkali kurta set. Richly embroidered with golden zari work and featuring a matching dupatta with intricate borders.",
-          viewCount: 145,
-          wishlistCount: 38
-        },
-        {
-          name: "Elegant Banarasi Red Silk Saree",
-          price: 3499,
-          comparePrice: 5999,
-          category: ["Sarees"],
-          sizes: ["M", "L"],
-          images: ["https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&q=80&w=800"],
-          stock: 15,
-          stockStatus: "In Stock",
-          isTrending: true,
-          description: "Impeccably handwoven silk saree featuring exquisite golden Banarasi borders and elegant paisley motifs. Ideal for weddings, festivals, and royal family events.",
-          viewCount: 189,
-          wishlistCount: 52
-        },
-        {
-          name: "Sapphire Blue Velvet Lehenga Choli",
-          price: 4999,
-          comparePrice: 8999,
-          category: ["Lehengas"],
-          sizes: ["S", "M", "L"],
-          images: ["https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&q=80&w=800"],
-          stock: 10,
-          stockStatus: "In Stock",
-          isTrending: true,
-          description: "Make heads turn with this stunning sapphire blue velvet lehenga, heavily embellished with sequins, pearl work, and embroidery. Comes with deep-cut choli and sheer baby pink net dupatta.",
-          viewCount: 232,
-          wishlistCount: 89
-        },
-        {
-          name: "Classic Ivory Lucknowi Chikankari Kurti",
-          price: 1299,
-          comparePrice: 2299,
-          category: ["Kurti"],
-          sizes: ["S", "M", "L", "XL"],
-          images: ["https://images.unsplash.com/photo-1608933221953-c6cd6a7f0525?auto=format&fit=crop&q=80&w=800"],
-          stock: 45,
-          stockStatus: "In Stock",
-          isTrending: false,
-          description: "Traditional Lucknowi hand-embroidered georgette Chikankari kurti in ivory white. Breathable, comfortable, and semi-sheer with gorgeous handshadow-work embroidery details.",
-          viewCount: 94,
-          wishlistCount: 22
-        },
-        {
-          name: "Pastel Mint Green Sharara Set",
-          price: 2499,
-          comparePrice: 3999,
-          category: ["Suits"],
-          sizes: ["S", "M", "L", "XL"],
-          images: ["https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&q=80&w=800"],
-          stock: 18,
-          stockStatus: "In Stock",
-          isTrending: true,
-          description: "Indulge in absolute style with this beautiful mint green sharara suit set. Styled with intricate lace detailing on the neck, a flared bottom, and a matching organza dupatta.",
-          viewCount: 165,
-          wishlistCount: 41
-        },
-        {
-          name: "Handwoven Golden Zari Dupatta",
-          price: 799,
-          comparePrice: 1499,
-          category: ["Dupatta"],
-          sizes: ["M", "L"],
-          images: ["https://images.unsplash.com/photo-1583391733914-64c0242c1616?auto=format&fit=crop&q=80&w=800"],
-          stock: 30,
-          stockStatus: "In Stock",
-          isTrending: false,
-          description: "Premium handloom golden zari dupatta to elevate your simple ethnic kurtas. Lightweight, fluid, and textured with elegant metallic thread work.",
-          viewCount: 61,
-          wishlistCount: 14
-        },
-        {
-          name: "Floral Printed Peach Fusion Set",
-          price: 1699,
-          comparePrice: 2899,
-          category: ["Suits"],
-          sizes: ["M", "L", "XL"],
-          images: ["https://images.unsplash.com/photo-1583391733979-514d3ec17e3f?auto=format&fit=crop&q=80&w=800"],
-          stock: 22,
-          stockStatus: "In Stock",
-          isTrending: false,
-          description: "Enchanting peach-colored ethnic crop top and matching palazzo pants set, completed with an elegant floral printed long shrug jacket.",
-          viewCount: 110,
-          wishlistCount: 29
-        },
-        {
-          name: "Indigo Block-Print Cotton Kurti",
-          price: 999,
-          comparePrice: 1699,
-          category: ["Kurti"],
-          sizes: ["S", "M", "L", "XL", "XXL"],
-          images: ["https://images.unsplash.com/photo-1610030469668-93535c17b6b3?auto=format&fit=crop&q=80&w=800"],
-          stock: 40,
-          stockStatus: "In Stock",
-          isTrending: false,
-          description: "Pure organic cotton daily-wear Indigo kurti with artisanal hand-block print. Designed in a timeless straight-cut style with 3/4 sleeves.",
-          viewCount: 88,
-          wishlistCount: 19
-        }
-      ];
-
-      if (productsSnap.empty) {
-        for (const prod of rawProducts) {
-          const docRef = await addDoc(productsRef, {
-            ...prod,
-            createdAt: new Date().toISOString()
-          });
-          seededProducts.push({ id: docRef.id, ...prod });
-        }
-      } else {
-        seededProducts = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      }
-
-      // 7. Seed Users / Customers
-      const usersRef = collection(db, 'users');
-      const usersSnap = await getDocs(usersRef);
-      const seededUsers: any[] = [];
-      const dummyCustomers = [
-        { displayName: "Rajesh Sharma", email: "rajesh@example.com", role: "user", isVerified: true, loyaltyPoints: 350 },
-        { displayName: "Anita Verma", email: "anita@example.com", role: "user", isVerified: true, loyaltyPoints: 120 },
-        { displayName: "Vikram Gupta", email: "vikram@example.com", role: "user", isVerified: true, loyaltyPoints: 240 },
-        { displayName: "Sneha Patel", email: "sneha@example.com", role: "user", isVerified: true, loyaltyPoints: 90 },
-        { displayName: "Amit Kumar", email: "amit@example.com", role: "user", isVerified: true, loyaltyPoints: 180 }
-      ];
-
-      if (usersSnap.empty) {
-        for (const cust of dummyCustomers) {
-          const relativeDays = Math.floor(Math.random() * 20) + 10; // 10 to 30 days ago
-          const date = new Date(Date.now() - relativeDays * 24 * 60 * 60 * 1000).toISOString();
-          const docRef = await addDoc(usersRef, {
-            ...cust,
-            uid: `mock_${Math.random().toString(36).substring(7)}`,
-            createdAt: date,
-            updatedAt: date
-          });
-          seededUsers.push({ id: docRef.id, ...cust });
-        }
-      } else {
-        seededUsers.push(...usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }
-
-      // 8. Seed Orders spanning last 30 days
-      const ordersRef = collection(db, 'orders');
-      const ordersSnap = await getDocs(ordersRef);
-      if (ordersSnap.empty && seededProducts.length > 0) {
-        // Construct realistic order templates using our real products
-        const orderTemplates = [
-          {
-            customerName: "Rajesh Sharma",
-            userId: seededUsers[0]?.id || "mock_user_rajesh",
-            items: [
-              {
-                ...seededProducts[0],
-                selectedSize: "XL",
-                selectedColor: "Ruby Red",
-                quantity: 2
-              }
-            ],
-            total: seededProducts[0].price * 2,
-            status: "Delivered",
-            shippingMethod: "Express Shipping",
-            shippingAddress: {
-              fullName: "Rajesh Sharma",
-              phoneNumber: "+91 98765 43210",
-              address: "A-405, Shanti Vihar Apartments, Outer Ring Road",
-              city: "New Delhi",
-              zipCode: "110001",
-              country: "India"
-            },
-            relativeDaysAgo: 25
-          },
-          {
-            customerName: "Anita Verma",
-            userId: seededUsers[1]?.id || "mock_user_anita",
-            items: [
-              {
-                ...seededProducts[1],
-                selectedSize: "M",
-                selectedColor: "Ruby Red",
-                quantity: 1
-              }
-            ],
-            total: seededProducts[1].price,
-            status: "Shipped",
-            shippingMethod: "Standard Shipping",
-            shippingAddress: {
-              fullName: "Anita Verma",
-              phoneNumber: "+91 88822 34567",
-              address: "Flat 2C, Regency Towers, Gariahat",
-              city: "Kolkata",
-              zipCode: "700019",
-              country: "India"
-            },
-            relativeDaysAgo: 15
-          },
-          {
-            customerName: "Vikram Gupta",
-            userId: seededUsers[2]?.id || "mock_user_vikram",
-            items: [
-              {
-                ...seededProducts[2],
-                selectedSize: "L",
-                selectedColor: "Lilac Violet",
-                quantity: 1
-              }
-            ],
-            total: seededProducts[2].price,
-            status: "Processing",
-            shippingMethod: "Express Shipping",
-            shippingAddress: {
-              fullName: "Vikram Gupta",
-              phoneNumber: "+91 99112 23344",
-              address: "Villa 42, Green Meadows, Whitefield",
-              city: "Bengaluru",
-              zipCode: "560066",
-              country: "India"
-            },
-            relativeDaysAgo: 5
-          },
-          {
-            customerName: "Sneha Patel",
-            userId: seededUsers[3]?.id || "mock_user_sneha",
-            items: [
-              {
-                ...seededProducts[3],
-                selectedSize: "S",
-                selectedColor: "Jet Black",
-                quantity: 1
-              }
-            ],
-            total: seededProducts[3].price,
-            status: "Pending",
-            shippingMethod: "Standard Shipping",
-            shippingAddress: {
-              fullName: "Sneha Patel",
-              phoneNumber: "+91 77766 55443",
-              address: "15, Panchsheel Society, Ashram Road",
-              city: "Ahmedabad",
-              zipCode: "380009",
-              country: "India"
-            },
-            relativeDaysAgo: 2
-          },
-          {
-            customerName: "Amit Kumar",
-            userId: seededUsers[4]?.id || "mock_user_amit",
-            items: [
-              {
-                ...seededProducts[4],
-                selectedSize: "XL",
-                selectedColor: "Emerald Green",
-                quantity: 1
-              },
-              {
-                ...seededProducts[5],
-                selectedSize: "L",
-                selectedColor: "Ruby Red",
-                quantity: 1
-              }
-            ],
-            total: seededProducts[4].price + seededProducts[5].price,
-            status: "Delivered",
-            shippingMethod: "Standard Shipping",
-            shippingAddress: {
-              fullName: "Amit Kumar",
-              phoneNumber: "+91 98333 44455",
-              address: "B-12, Sector 62",
-              city: "Noida",
-              zipCode: "201301",
-              country: "India"
-            },
-            relativeDaysAgo: 20
-          },
-          {
-            customerName: "Rita Sen",
-            userId: "mock_user_rita",
-            items: [
-              {
-                ...seededProducts[7],
-                selectedSize: "M",
-                selectedColor: "Royal Blue",
-                quantity: 1
-              }
-            ],
-            total: seededProducts[7].price,
-            status: "Cancelled",
-            shippingMethod: "Standard Shipping",
-            shippingAddress: {
-              fullName: "Rita Sen",
-              phoneNumber: "+91 90071 82736",
-              address: "3B, Lake View Road",
-              city: "Kolkata",
-              zipCode: "700029",
-              country: "India"
-            },
-            relativeDaysAgo: 11
-          }
-        ];
-
-        for (const tmpl of orderTemplates) {
-          const date = new Date(Date.now() - tmpl.relativeDaysAgo * 24 * 60 * 60 * 1000).toISOString();
-          const { relativeDaysAgo, ...orderData } = tmpl;
-          await addDoc(ordersRef, {
-            ...orderData,
-            createdAt: date
-          });
-        }
-      }
-
-      // 9. Seed Daily Analytics to build beautiful charts
-      const analyticsRef = collection(db, 'analytics_daily');
-      const analyticsSnap = await getDocs(analyticsRef);
-      if (analyticsSnap.empty) {
-        // Build 14 days of historical stats
-        for (let i = 14; i >= 0; i--) {
-          const dateObj = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
-          const dateStr = dateObj.toISOString().substring(0, 10);
-          
-          // Generate realistic trends
-          const visitors = 45 + Math.floor(Math.random() * 40);
-          const ordersCount = Math.floor(visitors * 0.05) + (Math.random() > 0.5 ? 1 : 0);
-          const sales = ordersCount * (1200 + Math.floor(Math.random() * 1000));
-          
-          await addDoc(analyticsRef, {
-            date: dateStr,
-            total_sales: sales,
-            total_orders: ordersCount,
-            total_users: visitors,
-            conversions: visitors > 0 ? Number(((ordersCount / visitors) * 100).toFixed(1)) : 0,
-            createdAt: dateObj.toISOString()
-          });
-        }
-      }
-
-      toast.success("Fashion store seed data uploaded successfully! 🎉", { id: loadingToast });
-      fetchDashboardData();
-    } catch (error: any) {
-      console.error("Error seeding store data:", error);
-      toast.error(`Failed to seed data: ${error.message || error}`, { id: loadingToast });
-    } finally {
-      setIsSeeding(false);
-    }
   };
 
   const statsFilteredOrders = orders.filter(order => {
@@ -4895,7 +5407,7 @@ export default function AdminDashboard() {
                             { id: 'firebase', label: 'Firebase Status', icon: Cloud },
                             { id: 'sheets', label: 'Google Sheet URL', icon: Database },
                             { id: 'email', label: 'Email Settings', icon: Mail },
-                            { id: 'sms', label: 'SMS & OTP (Textbee)', icon: Smartphone },
+                            { id: 'sms', label: 'SMS & OTP (Compliance Local)', icon: Smartphone },
                             { id: 'security', label: 'Security & Limits', icon: Shield },
                             { id: 'sound', label: 'Notification Sound', icon: Volume2 },
                             { id: 'seo', label: 'SEO & Branding', icon: Globe },
@@ -5702,6 +6214,14 @@ export default function AdminDashboard() {
                 </div>
                 <div className="flex gap-1.5 w-full sm:w-auto">
                   <button 
+                    onClick={handleRefreshOrders}
+                    disabled={isRefreshingOrders}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-1 h-7 sm:h-10 px-2 sm:px-6 rounded-lg sm:rounded-xl border border-gray-200 bg-white text-[8px] sm:text-[12px] font-bold text-gray-600 shadow-sm transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    <RefreshCw size={12} className={`sm:w-3.5 sm:h-3.5 ${isRefreshingOrders ? 'animate-spin' : ''}`} />
+                    <span>{isRefreshingOrders ? 'Refreshing...' : 'Refresh'}</span>
+                  </button>
+                  <button 
                     onClick={() => {
                       const rows = [['Order', 'Customer', 'Email', 'Date', 'Total', 'Status', 'Fulfillment']];
                       filteredOrders.forEach(o => rows.push([
@@ -6005,7 +6525,7 @@ export default function AdminDashboard() {
                                   <p className="text-[10px] font-black text-gray-400 tracking-widest uppercase">Razorpay</p>
                                 </td>
                                 <td className="px-6 py-5 text-center">
-                                   <StatusBadge status={order.status || 'Pending'} />
+                                   <StatusBadge status={getEffectiveOrderStatus(order)} />
                                 </td>
                                 <td className="px-6 py-5 text-center">
                                    <StatusBadge status={order.fulfillmentStatus || 'Unfulfilled'} />
@@ -6020,10 +6540,20 @@ export default function AdminDashboard() {
                                         <Eye size={16} />
                                       </button>
                                       <button 
-                                        onClick={() => {
+                                        onClick={async () => {
                                           if (confirm('Are you sure you want to delete this order?')) {
-                                            deleteDoc(doc(db, 'orders', order.id));
-                                            toast.success('Order deleted');
+                                            try {
+                                              const { error } = await supabase
+                                                .from('orders')
+                                                .delete()
+                                                .eq('id', order.id);
+                                              if (error) throw error;
+                                              setOrders(orders.filter(o => o.id !== order.id));
+                                              toast.success('Order deleted successfully');
+                                            } catch (err) {
+                                              console.error('Error deleting order:', err);
+                                              toast.error('Failed to delete order');
+                                            }
                                           }
                                         }}
                                         className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-all font-medium"
@@ -6093,7 +6623,7 @@ export default function AdminDashboard() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                             <StatusBadge status={order.status || 'Pending'} className="scale-[0.8] sm:scale-90 origin-left" />
+                             <StatusBadge status={getEffectiveOrderStatus(order)} className="scale-[0.8] sm:scale-90 origin-left" />
                              <StatusBadge status={order.fulfillmentStatus || 'Unfulfilled'} className="scale-[0.8] sm:scale-90 origin-left" />
                              <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
                                 <div className="flex -space-x-1.5 sm:-space-x-2">
@@ -6156,7 +6686,11 @@ export default function AdminDashboard() {
                   <span className="text-gray-400 text-[13px]">›</span>
                   <span className="text-[13px] text-blue-600 cursor-pointer hover:underline">{viewingCustomer.orderId || `#${viewingCustomer.id.slice(-6).toUpperCase()}`}</span>
                   <span className="text-gray-400 text-[13px]">›</span>
-                  <span className="text-[13px] text-gray-500">Fulfill items</span>
+                  <span className="text-[13px] text-gray-500">
+                    {(viewingCustomer.status === 'Cancelled' || viewingCustomer.status === 'cancelled') ? 'Cancelled Order' : 
+                     (viewingCustomer.status === 'Delivered' || viewingCustomer.status === 'delivered') ? 'Delivered Order' : 
+                     'Fulfill items'}
+                  </span>
                 </div>
 
                 {/* PAGE HEADER */}
@@ -6165,12 +6699,18 @@ export default function AdminDashboard() {
                     <button onClick={() => setViewingCustomer(null)} className="w-[34px] h-[34px] bg-white border border-shop-border rounded-lg flex items-center justify-center shadow-sm hover:bg-gray-50 transition-colors">
                       <ChevronLeft size={16} className="text-shop-text" />
                     </button>
-                    <h2 className="text-[20px] font-[700] text-shop-text uppercase tracking-tight">Fulfill items</h2>
+                    <h2 className="text-[20px] font-[700] text-shop-text uppercase tracking-tight">
+                      {(viewingCustomer.status === 'Cancelled' || viewingCustomer.status === 'cancelled') ? 'Order Details' : 
+                       (viewingCustomer.status === 'Delivered' || viewingCustomer.status === 'delivered') ? 'Order Details' : 
+                       'Fulfill items'}
+                    </h2>
                     <span className={cn(
                       "px-2.5 py-1 rounded-full text-[12px] font-[600]",
+                      (viewingCustomer.status === 'Cancelled' || viewingCustomer.status === 'cancelled') ? "bg-red-100 text-red-700" :
+                      (viewingCustomer.status === 'Delivered' || viewingCustomer.status === 'delivered') ? "bg-emerald-100 text-emerald-800" :
                       viewingCustomer.fulfillmentStatus === 'Fulfilled' ? "bg-shop-green-light text-shop-green" : "bg-[#fff7e0] text-[#b98900]"
                     )}>
-                      {viewingCustomer.fulfillmentStatus || 'Unfulfilled'}
+                      {viewingCustomer.status || viewingCustomer.fulfillmentStatus || 'Unfulfilled'}
                     </span>
                   </div>
                   
@@ -6186,7 +6726,7 @@ export default function AdminDashboard() {
                         <span className="capitalize">{viewingCustomer.status || 'Status'}</span>
                       </button>
                       <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-shop-border rounded-xl shadow-2xl opacity-0 invisible group-hover/status:opacity-100 group-hover/status:visible transition-all z-[300] p-1.5 space-y-0.5">
-                        {['Pending', 'Paid', 'Processing', 'Shipped', 'In Delivery', 'Delivered', 'Cancelled', 'Refunded', 'Return Requested', 'Returned'].map(s => (
+                        {['Pending', 'Paid', 'Processing', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled', 'Refunded', 'Return Requested', 'Returned'].map(s => (
                           <button 
                             key={s}
                             onClick={async () => {
@@ -6216,34 +6756,101 @@ export default function AdminDashboard() {
                   {/* LEFT COLUMN */}
                   <div className="space-y-4">
 
-                    {/* RETURN REQUEST INFO */}
-                    {viewingCustomer.returnReason && (
-                      <div className="bg-purple-50/70 border border-purple-200/80 rounded-xl overflow-hidden shadow-sm">
-                        <div className="px-4 py-[14px] border-b border-purple-200/60 bg-purple-100/40 flex justify-between items-center">
-                          <h3 className="text-[14px] font-[700] text-purple-900 flex items-center gap-2">
-                            <span>🔄 Return Request Details</span>
-                          </h3>
-                          <span className="text-[11px] font-bold text-purple-700 bg-purple-200/50 px-2.5 py-0.5 rounded-full uppercase tracking-wider">{viewingCustomer.returnStatus || 'Pending'}</span>
-                        </div>
-                        <div className="p-4 space-y-2.5 text-[13px] text-purple-950">
-                          <div className="flex items-start gap-2">
-                            <span className="font-[600] text-purple-900 shrink-0">Reason:</span> 
-                            <span>{viewingCustomer.returnReason}</span>
+                    {/* CANCELLED ORDER VIEW */}
+                    {(viewingCustomer.status === 'Cancelled' || viewingCustomer.status === 'cancelled') ? (
+                      <div className="space-y-4">
+                        {/* Cancelled Banner */}
+                        <div className="bg-red-50 border border-red-200/80 rounded-2xl p-5 shadow-sm space-y-2">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center font-bold shrink-0">
+                              <XCircle size={22} />
+                            </div>
+                            <div>
+                              <h3 className="text-base font-bold text-red-950">This Order Was Cancelled</h3>
+                              <p className="text-xs text-red-700 font-medium">Fulfillment, shipping, and delivery operations are disabled for this order.</p>
+                            </div>
                           </div>
-                          {viewingCustomer.returnComments && (
-                            <div className="flex items-start gap-2 bg-purple-100/20 p-2.5 rounded-lg border border-purple-100/50">
-                              <span className="font-[600] text-purple-900 shrink-0">Notes:</span> 
-                              <span className="italic">"{viewingCustomer.returnComments}"</span>
+
+                          {(viewingCustomer.returnReason || viewingCustomer.cancelReason) && (
+                            <div className="mt-3 pt-3 border-t border-red-200/60 text-xs text-red-900 space-y-1">
+                              <p><span className="font-bold text-red-950">Cancellation Reason:</span> {viewingCustomer.returnReason || viewingCustomer.cancelReason}</p>
+                              {viewingCustomer.returnComments && (
+                                <p className="text-red-800 italic bg-red-100/40 p-2.5 rounded-xl border border-red-200/50 mt-1">
+                                  "{viewingCustomer.returnComments}"
+                                </p>
+                              )}
                             </div>
                           )}
-                          {viewingCustomer.returnRequestedAt && (
-                            <div className="text-[11px] text-purple-700 font-medium">
-                              Requested on: {new Date(viewingCustomer.returnRequestedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                            </div>
-                          )}
+                        </div>
+
+                        {/* Static Items Summary */}
+                        <div className="bg-white border border-shop-border rounded-2xl shadow-sm overflow-hidden">
+                          <div className="px-5 py-4 border-b border-shop-border flex items-center justify-between bg-gray-50/50">
+                            <h3 className="text-sm font-bold text-shop-text">Items in Cancelled Order</h3>
+                            <span className="text-xs text-gray-500">{viewingCustomer.items?.length || 0} items</span>
+                          </div>
+                          <div className="p-5 divide-y divide-gray-100">
+                            {viewingCustomer.items?.map((item: any, idx: number) => (
+                              <div key={idx} className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-12 h-12 rounded-xl border border-shop-border overflow-hidden bg-gray-50 shrink-0">
+                                    <img src={item.image} alt="" className="w-full h-full object-cover" />
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-bold text-shop-text">{item.name}</p>
+                                    <p className="text-xs text-gray-400">Qty: {item.quantity} {item.selectedSize ? `• Size: ${item.selectedSize}` : ''}</p>
+                                  </div>
+                                </div>
+                                <p className="text-sm font-bold text-shop-text">₹{(Number(item.price || 0) * Number(item.quantity || 1)).toLocaleString()}</p>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
-                    )}
+                    ) : (viewingCustomer.status === 'Delivered' || viewingCustomer.status === 'delivered') ? (
+                      <div className="space-y-4">
+                        {/* Delivered Banner */}
+                        <div className="bg-emerald-50 border border-emerald-200/80 rounded-2xl p-5 shadow-sm flex items-center gap-3.5">
+                          <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold shrink-0">
+                            <CheckCheck size={22} />
+                          </div>
+                          <div>
+                            <h3 className="text-base font-bold text-emerald-950">Order Delivered</h3>
+                            <p className="text-xs text-emerald-700 font-medium">This order has been successfully delivered and completed.</p>
+                          </div>
+                        </div>
+
+                        {/* Return details info if requested */}
+                        {renderAdminReturnCard(viewingCustomer)}
+
+                        {/* Delivered Items Summary */}
+                        <div className="bg-white border border-shop-border rounded-2xl shadow-sm overflow-hidden">
+                          <div className="px-5 py-4 border-b border-shop-border flex items-center justify-between bg-gray-50/50">
+                            <h3 className="text-sm font-bold text-shop-text">Delivered Items</h3>
+                            <span className="text-xs text-gray-500">{viewingCustomer.items?.length || 0} items</span>
+                          </div>
+                          <div className="p-5 divide-y divide-gray-100">
+                            {viewingCustomer.items?.map((item: any, idx: number) => (
+                              <div key={idx} className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-12 h-12 rounded-xl border border-shop-border overflow-hidden bg-gray-50 shrink-0">
+                                    <img src={item.image} alt="" className="w-full h-full object-cover" />
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-bold text-shop-text">{item.name}</p>
+                                    <p className="text-xs text-gray-400">Qty: {item.quantity} {item.selectedSize ? `• Size: ${item.selectedSize}` : ''}</p>
+                                  </div>
+                                </div>
+                                <p className="text-sm font-bold text-shop-text">₹{(Number(item.price || 0) * Number(item.quantity || 1)).toLocaleString()}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {/* RETURN REQUEST INFO */}
+                        {renderAdminReturnCard(viewingCustomer)}
                     
                     {/* FULFILL FROM */}
                     <div className="bg-white border border-shop-border rounded-xl shadow-sm overflow-hidden">
@@ -6490,6 +7097,8 @@ export default function AdminDashboard() {
                         )}
                       </div>
                     </div>
+                  </>
+                )}
 
                   </div>
 
@@ -6656,10 +7265,17 @@ export default function AdminDashboard() {
                                       e.stopPropagation();
                                       if (confirm('Delete this event?')) {
                                         const updatedHistory = viewingCustomer.trackingHistory.filter((it: any) => (it.id || it.time) !== (evt.id || evt.time));
-                                        await updateDoc(doc(db, 'orders', viewingCustomer.id), {
-                                          trackingHistory: updatedHistory
+                                        const { error } = await supabase
+                                          .from('orders')
+                                          .update({
+                                            tracking_history: updatedHistory
+                                          })
+                                          .eq('id', viewingCustomer.id);
+                                        if (error) throw error;
+                                        setViewingCustomer({ 
+                                          ...viewingCustomer, 
+                                          trackingHistory: updatedHistory 
                                         });
-                                        setViewingCustomer({ ...viewingCustomer, trackingHistory: updatedHistory });
                                         toast.success('Event removed');
                                       }
                                     }}
@@ -6805,6 +7421,280 @@ export default function AdminDashboard() {
             </div>
           )}
 
+          {activeTab === 'returns' && (
+            <div className="space-y-6 w-full max-w-full px-1">
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-2">
+                <div>
+                  <h1 className="text-3xl sm:text-5xl font-extrabold text-[#1A2C54] tracking-tighter font-syne uppercase flex items-center gap-3">
+                    <RotateCcw className="text-purple-600" size={32} />
+                    <span>Returns & Refunds</span>
+                  </h1>
+                  <p className="text-gray-400 mt-1 text-sm sm:text-base font-medium">
+                    Manage Flipkart/Amazon-style customer return requests, pickups, and refunds.
+                  </p>
+                </div>
+              </div>
+
+              {/* Filter Bar */}
+              <div className="bg-white p-4 rounded-2xl border border-shop-border shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="relative w-full md:w-80">
+                  <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search by Order ID, Customer..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full h-10 pl-10 pr-4 rounded-xl border border-shop-border bg-gray-50/50 text-xs font-semibold focus:bg-white focus:border-purple-500 outline-none transition-all"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto pb-1 md:pb-0 scrollbar-none">
+                  {['All', 'Requested', 'Approved', 'Refunded', 'Rejected'].map((statusFilter) => {
+                    const isSelected = (statusTab || 'All') === statusFilter;
+                    return (
+                      <button
+                        key={statusFilter}
+                        onClick={() => setStatusTab(statusFilter)}
+                        className={cn(
+                          "px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap",
+                          isSelected
+                            ? "bg-purple-600 text-white shadow-md shadow-purple-600/20"
+                            : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                        )}
+                      >
+                        {statusFilter}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Returns List */}
+              {(() => {
+                const returnOrders = orders.filter(o => {
+                  const hasReturn = o.returnStatus || o.returnReason || o.status === 'Return Requested' || o.status === 'Returned' || o.status === 'returned';
+                  if (!hasReturn) return false;
+
+                  if (searchQuery) {
+                    const query = searchQuery.toLowerCase();
+                    const matchesId = o.orderId?.toLowerCase().includes(query) || o.id?.toLowerCase().includes(query);
+                    const matchesName = (o.address?.name || o.customerName || '').toLowerCase().includes(query);
+                    if (!matchesId && !matchesName) return false;
+                  }
+
+                  if (statusTab && statusTab !== 'All') {
+                    const rStatus = o.returnStatus || 'Requested';
+                    if (statusTab === 'Requested' && (rStatus.toLowerCase() === 'requested' || rStatus.toLowerCase() === 'pending')) return true;
+                    if (rStatus.toLowerCase() !== statusTab.toLowerCase()) return false;
+                  }
+
+                  return true;
+                });
+
+                if (returnOrders.length === 0) {
+                  return (
+                    <div className="bg-white rounded-2xl border border-shop-border p-12 text-center space-y-3">
+                      <div className="w-16 h-16 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center mx-auto">
+                        <RotateCcw size={32} />
+                      </div>
+                      <h3 className="text-lg font-bold text-gray-800">No Return Requests Found</h3>
+                      <p className="text-sm text-gray-500 max-w-sm mx-auto">
+                        There are currently no customer return requests matching your filter.
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-4">
+                    {returnOrders.map((order) => {
+                      const currentReturnStatus = order.returnStatus || 'Requested';
+                      return (
+                        <div key={order.id} className="bg-white rounded-2xl border border-shop-border shadow-sm overflow-hidden hover:border-purple-200 transition-all">
+                          {/* Card Top Header */}
+                          <div className="p-4 sm:p-5 bg-gray-50/70 border-b border-shop-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 font-bold flex items-center justify-center shrink-0">
+                                <RotateCcw size={20} />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h3 className="text-base font-bold text-gray-900">{order.orderId || `#${order.id.slice(-6).toUpperCase()}`}</h3>
+                                  <span className={cn(
+                                    "px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider",
+                                    currentReturnStatus === 'Approved' ? "bg-blue-100 text-blue-700" :
+                                    currentReturnStatus === 'Refunded' ? "bg-emerald-100 text-emerald-700" :
+                                    currentReturnStatus === 'Rejected' ? "bg-red-100 text-red-700" :
+                                    "bg-purple-100 text-purple-800"
+                                  )}>
+                                    {currentReturnStatus}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-500 font-medium">
+                                  Customer: <strong className="text-gray-800">{order.address?.name || order.customerName || 'Customer'}</strong> ({order.address?.phone || order.address?.email || 'N/A'})
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+                              <span className="text-xs text-gray-400 font-medium">
+                                {new Date(order.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                              </span>
+                              <button
+                                onClick={() => {
+                                  setViewingCustomer(order);
+                                  setActiveTab('orders');
+                                }}
+                                className="px-3.5 py-1.5 rounded-xl border border-shop-border bg-white text-xs font-bold text-gray-700 hover:bg-gray-50 transition-all flex items-center gap-1.5"
+                              >
+                                <span>Full Order</span>
+                                <ArrowRight size={14} />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Reason & Comments Box */}
+                          <div className="p-4 sm:p-5 border-b border-shop-border bg-purple-50/30 space-y-2 text-xs">
+                            <div className="flex items-start gap-2 text-purple-950">
+                              <span className="font-bold shrink-0">Return Reason:</span>
+                              <span className="font-semibold text-purple-900">{order.returnReason || 'Not specified'}</span>
+                            </div>
+                            {order.returnComments && (
+                              <div className="p-3 bg-white/80 rounded-xl border border-purple-100 text-purple-900 italic">
+                                "{order.returnComments}"
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Items Grid */}
+                          <div className="p-4 sm:p-5 divide-y divide-gray-100">
+                            {order.items?.map((item: any, idx: number) => (
+                              <div key={idx} className="py-2.5 first:pt-0 last:pb-0 flex items-center justify-between gap-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-11 h-11 rounded-lg border border-shop-border overflow-hidden bg-gray-50 shrink-0">
+                                    <img src={item.image} alt="" className="w-full h-full object-cover" />
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-bold text-gray-900">{item.name}</p>
+                                    <p className="text-[11px] text-gray-400">Qty: {item.quantity} {item.selectedSize ? `• Size: ${item.selectedSize}` : ''}</p>
+                                  </div>
+                                </div>
+                                <p className="text-xs font-bold text-gray-900">₹{(Number(item.price || 0) * Number(item.quantity || 1)).toLocaleString()}</p>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Admin Action Bar */}
+                          <div className="p-4 sm:p-5 bg-gray-50/50 border-t border-shop-border flex flex-col sm:flex-row items-center justify-between gap-3">
+                            <div className="text-xs text-gray-500 font-medium">
+                              Total Order Value: <strong className="text-gray-900 text-sm">₹{Number(order.total || 0).toLocaleString()}</strong>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                              {(currentReturnStatus.toLowerCase() === 'requested' || currentReturnStatus.toLowerCase() === 'pending') && (
+                                <>
+                                  <button
+                                    onClick={() => handleUpdateReturnStatus(order.id, 'Approved')}
+                                    className="flex-1 sm:flex-none px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5"
+                                  >
+                                    <Check size={14} />
+                                    <span>Approve Return</span>
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      const reason = window.prompt("Reason for rejecting return?");
+                                      if (reason !== null) {
+                                        handleUpdateReturnStatus(order.id, 'Rejected', reason);
+                                      }
+                                    }}
+                                    className="flex-1 sm:flex-none px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-xs font-bold border border-red-200 transition-all flex items-center justify-center gap-1.5"
+                                  >
+                                    <X size={14} />
+                                    <span>Reject Request</span>
+                                  </button>
+                                </>
+                              )}
+
+                              {currentReturnStatus.toLowerCase() === 'approved' && (
+                                <>
+                                  <button
+                                    onClick={() => handleUpdateReturnStatus(order.id, 'Picked Up')}
+                                    className="flex-1 sm:flex-none px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5"
+                                  >
+                                    <Truck size={14} />
+                                    <span>Mark Picked Up</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleUpdateReturnStatus(order.id, 'Refunded')}
+                                    className="flex-1 sm:flex-none px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5"
+                                  >
+                                    <CheckCircle2 size={14} />
+                                    <span>Mark Picked Up & Refund</span>
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      const reason = window.prompt("Reason for rejecting return?");
+                                      if (reason !== null) {
+                                        handleUpdateReturnStatus(order.id, 'Rejected', reason);
+                                      }
+                                    }}
+                                    className="flex-1 sm:flex-none px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                                  >
+                                    <X size={14} />
+                                    <span>Reject</span>
+                                  </button>
+                                </>
+                              )}
+
+                              {(currentReturnStatus.toLowerCase() === 'picked up' || currentReturnStatus.toLowerCase() === 'picked_up') && (
+                                <>
+                                  <button
+                                    onClick={() => handleUpdateReturnStatus(order.id, 'Refunded')}
+                                    className="flex-1 sm:flex-none px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5"
+                                  >
+                                    <CheckCircle2 size={14} />
+                                    <span>Process Refund</span>
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      const reason = window.prompt("Reason for rejecting return?");
+                                      if (reason !== null) {
+                                        handleUpdateReturnStatus(order.id, 'Rejected', reason);
+                                      }
+                                    }}
+                                    className="flex-1 sm:flex-none px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                                  >
+                                    <X size={14} />
+                                    <span>Reject</span>
+                                  </button>
+                                </>
+                              )}
+
+                              {currentReturnStatus.toLowerCase() === 'refunded' && (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
+                                  <CheckCircle2 size={14} />
+                                  <span>Refund Processed & Completed</span>
+                                </span>
+                              )}
+
+                              {currentReturnStatus.toLowerCase() === 'rejected' && (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-bold">
+                                  <XCircle size={14} />
+                                  <span>Return Request Rejected</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
           {activeTab === 'category' && (
             <div className="space-y-8">
               <div className="flex justify-between items-center">
@@ -6922,35 +7812,52 @@ export default function AdminDashboard() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {coupons.map(coupon => (
-                  <div key={coupon.id} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4 group hover:border-ruby/30 transition-all relative overflow-hidden">
-                    <div className="flex justify-between items-start">
-                      <div className="px-3 py-1 bg-ruby/10 text-ruby rounded-lg text-xs font-black tracking-widest">
-                        {coupon.code}
-                      </div>
-                      <button onClick={() => handleDeleteCoupon(coupon.id)} className="p-2 text-gray-300 hover:text-red-500 transition-colors">
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                    <div>
-                      <h3 className="text-2xl font-black text-[#1A2C54]">
-                        {coupon.type === 'percentage' ? `${coupon.discount}%` : `₹${coupon.discount}`} OFF
-                      </h3>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">
-                        {coupon.type === 'percentage' ? 'Percentage Discount' : 'Fixed Amount Discount'}
-                      </p>
-                    </div>
-                    <div className="flex flex-col space-y-2 pt-4 border-t border-gray-50">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2">
-                          <div className={`w-2 h-2 rounded-full ${coupon.active ? 'bg-green-500' : 'bg-gray-300'}`}></div>
-                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{coupon.active ? 'Active' : 'Inactive'}</span>
+                  <div key={coupon.id} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4 group hover:border-ruby/30 transition-all relative overflow-hidden flex flex-col justify-between">
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-start">
+                        <div className="px-3 py-1 bg-ruby/10 text-ruby rounded-lg text-xs font-black tracking-widest uppercase">
+                          {coupon.code}
                         </div>
-                        {coupon.expiryDate && (
-                          <span className="text-[10px] font-bold text-ruby uppercase tracking-widest">
-                            Exp: {new Date(coupon.expiryDate).toLocaleDateString()}
-                          </span>
-                        )}
+                        <div className="flex items-center space-x-1">
+                          <button onClick={() => handleEditCoupon(coupon)} className="p-2 text-gray-300 hover:text-ruby transition-colors" title="Edit Coupon">
+                            <Edit2 size={16} />
+                          </button>
+                          <button onClick={() => handleDeleteCoupon(coupon.id)} className="p-2 text-gray-300 hover:text-red-500 transition-colors" title="Delete Coupon">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </div>
+                      <div>
+                        <h3 className="text-2xl font-black text-[#1A2C54]">
+                          {coupon.type === 'free_shipping' ? 'FREE SHIPPING' : coupon.type === 'percentage' ? `${coupon.value ?? coupon.discount}% OFF` : `₹${coupon.value ?? coupon.discount} OFF`}
+                        </h3>
+                        <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">
+                          {coupon.type === 'free_shipping' ? 'Free Shipping Offer' : coupon.type === 'percentage' ? 'Percentage Discount' : 'Flat Discount'}
+                        </p>
+                      </div>
+                      <div className="space-y-1.5 text-xs text-gray-500 font-medium pt-2 border-t border-gray-50">
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-gray-400">Min Cart Value:</span>
+                          <span className="font-bold text-[#1A2C54]">₹{coupon.min_cart_value || coupon.minCartValue || 0}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-gray-400">Usage Count:</span>
+                          <span className="font-bold text-[#1A2C54]">
+                            {coupon.used_count ?? coupon.usedCount ?? 0} {coupon.usage_limit || coupon.usageLimit ? `/ ${coupon.usage_limit || coupon.usageLimit}` : '(Unlimited)'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-3 border-t border-gray-50">
+                      <div className="flex items-center space-x-2">
+                        <div className={`w-2 h-2 rounded-full ${coupon.active ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{coupon.active ? 'Active' : 'Inactive'}</span>
+                      </div>
+                      {(coupon.end_date || coupon.expiryDate) && (
+                        <span className="text-[10px] font-bold text-ruby uppercase tracking-widest">
+                          Exp: {new Date(coupon.end_date || coupon.expiryDate).toLocaleDateString()}
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -7045,7 +7952,39 @@ export default function AdminDashboard() {
                       <button 
                         onClick={() => {
                           setEditingPromotion(promo);
-                          setPromotionForm(promo);
+                          setPromotionForm({
+                            name: promo.name || '',
+                            description: promo.description || '',
+                            priority: promo.priority ?? 1,
+                            status: promo.status || 'draft',
+                            type: promo.type || 'bxgy',
+                            conditions: {
+                              minCartValue: promo.conditions?.minCartValue ?? 0,
+                              minQuantity: promo.conditions?.minQuantity ?? 0,
+                              productIds: promo.conditions?.productIds || [],
+                              categoryIds: promo.conditions?.categoryIds || [],
+                              userType: promo.conditions?.userType || 'all',
+                              startDate: promo.conditions?.startDate || '',
+                              endDate: promo.conditions?.endDate || ''
+                            },
+                            bxgyConfig: {
+                              buyQty: (promo.bxgyConfig || promo.bxgy_config)?.buyQty ?? 2,
+                              getQty: (promo.bxgyConfig || promo.bxgy_config)?.getQty ?? 1,
+                              applyOn: (promo.bxgyConfig || promo.bxgy_config)?.applyOn || 'same',
+                              maxFree: (promo.bxgyConfig || promo.bxgy_config)?.maxFree ?? 1,
+                              repeat: (promo.bxgyConfig || promo.bxgy_config)?.repeat ?? false
+                            },
+                            reward: {
+                              method: promo.reward?.method || 'auto',
+                              value: promo.reward?.value ?? 100
+                            },
+                            limits: {
+                              perUser: promo.limits?.perUser ?? 1,
+                              totalUsage: promo.limits?.totalUsage ?? 100,
+                              maxDiscount: promo.limits?.maxDiscount ?? 0
+                            },
+                            stackable: promo.stackable ?? false
+                          });
                           setIsPromotionModalOpen(true);
                         }}
                         className="flex-grow py-2.5 bg-white border border-gray-100 text-[#1A2C54] rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-[#1A2C54] hover:text-white transition-all shadow-sm"
@@ -7229,13 +8168,7 @@ export default function AdminDashboard() {
                                       {ensureDate(order.createdAt).toLocaleDateString()}
                                     </td>
                                     <td className="py-3 px-4">
-                                      <span className={cn(
-                                        "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                                        order.status === 'Delivered' ? "bg-green-50 text-green-700" : 
-                                        order.status === 'Cancelled' ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"
-                                      )}>
-                                        {order.status || 'Pending'}
-                                      </span>
+                                      <StatusBadge status={getEffectiveOrderStatus(order)} />
                                     </td>
                                     <td className="py-3 px-4 text-right font-bold text-sm text-gray-900">
                                       ₹{Number(order.total || 0).toLocaleString()}
@@ -7409,7 +8342,7 @@ export default function AdminDashboard() {
                   <h2 className="text-2xl font-bold text-gray-800">Marketing & Promotions</h2>
                   <p className="text-sm text-gray-400">Manage homepage banners and promotional content</p>
                 </div>
-                <button onClick={() => setIsBannerModalOpen(true)} className="bg-ruby text-white px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all flex items-center shadow-lg shadow-ruby/20">
+                <button onClick={handleOpenAddBanner} className="bg-ruby text-white px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all flex items-center shadow-lg shadow-ruby/20">
                   <Plus size={16} className="mr-2" /> Add Banner
                 </button>
               </div>
@@ -7426,17 +8359,32 @@ export default function AdminDashboard() {
                           {banner.active ? 'Active' : 'Inactive'}
                         </button>
                         <button 
+                          onClick={() => handleEditBanner(banner)}
+                          className="p-2 bg-blue-500/80 text-white rounded-xl backdrop-blur-md border border-white/20 hover:bg-blue-600 transition-all"
+                          title="Edit Banner"
+                        >
+                          <Edit2 size={18} />
+                        </button>
+                        <button 
                           onClick={() => handleDeleteBanner(banner.id)}
                           className="p-2 bg-red-500/80 text-white rounded-xl backdrop-blur-md border border-white/20 hover:bg-red-600 transition-all"
+                          title="Delete Banner"
                         >
                           <Trash2 size={18} />
                         </button>
                       </div>
-                      {banner.link && (
-                        <div className="absolute bottom-4 left-4 bg-white/80 backdrop-blur-md px-3 py-1 rounded-lg text-[10px] font-bold text-gray-600 truncate max-w-[200px]">
-                          Link: {banner.link}
-                        </div>
-                      )}
+                      <div className="absolute bottom-4 left-4 flex flex-col gap-1.5 items-start">
+                        {banner.title && (
+                          <div className="bg-[#1A1A1A]/90 backdrop-blur-md px-3 py-1 rounded-lg text-[10px] font-black text-white uppercase tracking-wider">
+                            {banner.title}
+                          </div>
+                        )}
+                        {banner.link && (
+                          <div className="bg-white/80 backdrop-blur-md px-3 py-1 rounded-lg text-[10px] font-bold text-gray-600 truncate max-w-[200px]">
+                            Link: {banner.link}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -9811,65 +10759,42 @@ export default function AdminDashboard() {
                         className="space-y-6"
                       >
                         <h3 className="text-lg font-bold text-[#1A2C54] flex items-center">
-                          <Smartphone size={20} className="mr-2 text-ruby" /> SMS & OTP Configuration (Textbee)
+                          <Smartphone size={20} className="mr-2 text-ruby" /> SMS & OTP Configuration (Compliance Safe Mode)
                         </h3>
                         <div className="space-y-6">
                           <div className="p-5 border border-gray-100 rounded-3xl space-y-4">
                             <h4 className="text-xs font-bold text-[#1A2C54] uppercase tracking-wider flex items-center gap-2">
                               <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                              Service: Textbee SMS Gateway (Free Android SMS)
+                              Service: Local Sandbox Verification (100% Offline & Regulatory Safe)
                             </h4>
                             
                             <div className="bg-green-50 border border-green-100 rounded-2xl p-4 space-y-2">
                               <h4 className="text-[11px] font-bold text-green-700 uppercase tracking-widest flex items-center">
-                                <Info size={14} className="mr-2" /> Textbee Setup Instructions
+                                <Info size={14} className="mr-2" /> Compliance & Telecom Safety Information
                               </h4>
                               <ul className="text-[10px] text-green-600 space-y-1 font-medium leading-relaxed">
-                                <li>• Go to <a href="https://textbee.dev" target="_blank" rel="noopener noreferrer" className="underline font-bold">textbee.dev</a> and log in.</li>
-                                <li>• Install the Textbee Android app on your phone and register the device.</li>
-                                <li>• Copy your <b>API Key</b> and your <b>Device ID</b> from the dashboard.</li>
-                                <li>• Enable the OTP verification toggle below to require OTP verification when saving addresses during checkout.</li>
+                                <li>• To comply with strict telecom regulatory frameworks, <b>all third-party gateway integrations (Textbee) have been permanently disabled and removed</b>.</li>
+                                <li>• There is absolutely <b>zero telecom transmission</b>, meaning no SMS messages are broadcasted over cellular networks.</li>
+                                <li>• This guarantees 100% safety from compliance penalties, unauthorized broadcast fines, or commercial abuse.</li>
+                                <li>• For checkout flows that require verifying customer numbers, the checkout modal will generate and display a secure local code directly on screen.</li>
                               </ul>
                             </div>
 
                             {/* OTP Enable Toggle */}
                             <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
                               <div>
-                                <h5 className="text-xs font-bold text-[#1A2C54]">Enable Phone OTP Verification</h5>
-                                <p className="text-[10px] text-gray-400 font-medium">Require customer mobile number verification before saving an address</p>
+                                <h5 className="text-xs font-bold text-[#1A2C54]">Enable Phone OTP Verification (Simulated)</h5>
+                                <p className="text-[10px] text-gray-400 font-medium">Require customer mobile number verification using compliance-safe local codes during checkout</p>
                               </div>
                               <label className="relative inline-flex items-center cursor-pointer">
                                 <input 
                                   type="checkbox" 
-                                  checked={settings.textbeeOtpEnabled || false}
-                                  onChange={(e) => setSettings({...settings, textbeeOtpEnabled: e.target.checked})}
+                                  checked={settings.phoneOtpEnabled || false}
+                                  onChange={(e) => setSettings({...settings, phoneOtpEnabled: e.target.checked})}
                                   className="sr-only peer"
                                 />
                                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-ruby"></div>
                               </label>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Textbee API Key</label>
-                                <input 
-                                  type="password" 
-                                  placeholder="Enter Textbee API Key"
-                                  value={settings.textbeeApiKey || ''}
-                                  onChange={(e) => setSettings({...settings, textbeeApiKey: e.target.value})}
-                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Textbee Device ID</label>
-                                <input 
-                                  type="text" 
-                                  placeholder="Enter Textbee Device ID"
-                                  value={settings.textbeeDeviceId || ''}
-                                  onChange={(e) => setSettings({...settings, textbeeDeviceId: e.target.value})}
-                                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-ruby/20 transition-all font-medium" 
-                                />
-                              </div>
                             </div>
                           </div>
 
@@ -10807,62 +11732,129 @@ export default function AdminDashboard() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative bg-white w-full max-w-md p-6 md:p-8 rounded-3xl shadow-2xl space-y-6"
+              className="relative bg-white w-full max-w-lg p-6 md:p-8 rounded-3xl shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center border-b border-gray-50 pb-4">
-                <h2 className="text-xl font-bold text-gray-800">Add Coupon</h2>
+                <h2 className="text-xl font-bold text-gray-800">{editingCoupon ? 'Edit Coupon' : 'Add New Coupon'}</h2>
                 <button onClick={() => setIsCouponModalOpen(false)} className="p-2 hover:text-ruby transition-colors bg-gray-50 rounded-full">
                   <X size={20} />
                 </button>
               </div>
-              <form onSubmit={handleSaveCoupon} className="space-y-6">
-                <div className="space-y-2">
+              <form onSubmit={handleSaveCoupon} className="space-y-5">
+                <div className="space-y-1.5">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Coupon Code</label>
                   <input 
                     type="text" 
                     required
                     value={couponForm.code || ''}
                     onChange={e => setCouponForm({...couponForm, code: e.target.value.toUpperCase()})}
-                    className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent font-black tracking-widest"
+                    className="w-full border-b border-gray-200 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent font-black tracking-widest text-[#1A2C54]"
                     placeholder="e.g. SUMMER50"
                   />
                 </div>
+
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Discount Type</label>
                     <select 
                       value={couponForm.type || 'percentage'}
-                      onChange={e => setCouponForm({...couponForm, type: e.target.value as 'percentage' | 'fixed'})}
-                      className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
+                      onChange={e => setCouponForm({...couponForm, type: e.target.value})}
+                      className="w-full border-b border-gray-200 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent font-medium"
                     >
                       <option value="percentage">Percentage (%)</option>
-                      <option value="fixed">Fixed Price (₹)</option>
+                      <option value="flat">Flat Amount (₹)</option>
+                      <option value="free_shipping">Free Shipping</option>
                     </select>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Value</label>
+
+                  {couponForm.type !== 'free_shipping' ? (
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Discount Value</label>
+                      <input 
+                        type="number" 
+                        required
+                        min="0"
+                        value={couponForm.value ?? couponForm.discount ?? ''}
+                        onChange={e => setCouponForm({...couponForm, value: parseFloat(e.target.value) || 0, discount: parseFloat(e.target.value) || 0})}
+                        className="w-full border-b border-gray-200 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent font-medium"
+                        placeholder={couponForm.type === 'percentage' ? 'e.g. 20' : 'e.g. 500'}
+                      />
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Discount Value</label>
+                      <input 
+                        type="text" 
+                        disabled
+                        value="100% Free Shipping"
+                        className="w-full border-b border-gray-200 py-2 text-sm bg-gray-50 text-gray-400 font-medium cursor-not-allowed"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Min Cart Value (₹)</label>
                     <input 
                       type="number" 
-                      required
-                      value={couponForm.discount || ''}
-                      onChange={e => setCouponForm({...couponForm, discount: parseInt(e.target.value) || 0})}
-                      className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
-                      placeholder={couponForm.type === 'percentage' ? '50' : '500'}
+                      min="0"
+                      value={couponForm.min_cart_value ?? couponForm.minCartValue ?? ''}
+                      onChange={e => setCouponForm({...couponForm, min_cart_value: parseFloat(e.target.value) || 0})}
+                      className="w-full border-b border-gray-200 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent font-medium"
+                      placeholder="e.g. 499 (0 for no min)"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Usage Limit (Total)</label>
+                    <input 
+                      type="number" 
+                      min="1"
+                      value={couponForm.usage_limit ?? ''}
+                      onChange={e => setCouponForm({...couponForm, usage_limit: e.target.value})}
+                      className="w-full border-b border-gray-200 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent font-medium"
+                      placeholder="Blank for unlimited"
                     />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Expiry Date</label>
-                  <input 
-                    type="date" 
-                    required
-                    value={couponForm.expiryDate || ''}
-                    onChange={e => setCouponForm({...couponForm, expiryDate: e.target.value})}
-                    className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent"
-                  />
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Start Date</label>
+                    <input 
+                      type="date" 
+                      value={couponForm.start_date || ''}
+                      onChange={e => setCouponForm({...couponForm, start_date: e.target.value})}
+                      className="w-full border-b border-gray-200 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent font-medium"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">End Date / Expiry</label>
+                    <input 
+                      type="date" 
+                      value={couponForm.end_date || couponForm.expiryDate || ''}
+                      onChange={e => setCouponForm({...couponForm, end_date: e.target.value, expiryDate: e.target.value})}
+                      className="w-full border-b border-gray-200 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent font-medium"
+                    />
+                  </div>
                 </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Status</label>
+                  <select 
+                    value={couponForm.active ? 'true' : 'false'}
+                    onChange={e => setCouponForm({...couponForm, active: e.target.value === 'true'})}
+                    className="w-full border-b border-gray-200 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent font-medium"
+                  >
+                    <option value="true">Active ✅</option>
+                    <option value="false">Inactive ❌</option>
+                  </select>
+                </div>
+
                 <button type="submit" className="w-full py-4 bg-ruby text-white rounded-2xl text-sm font-bold uppercase tracking-widest shadow-lg shadow-ruby/20 hover:bg-ruby-dark transition-all active:scale-95">
-                  Save Coupon
+                  {editingCoupon ? 'Update Coupon' : 'Save Coupon'}
                 </button>
               </form>
             </motion.div>
@@ -10889,12 +11881,12 @@ export default function AdminDashboard() {
               className="relative bg-white w-full max-w-md p-8 rounded-3xl shadow-2xl space-y-6"
             >
               <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold text-gray-800">Add New Banner</h2>
+                <h2 className="text-xl font-bold text-gray-800">{editingBanner ? "Edit Banner" : "Add New Banner"}</h2>
                 <button onClick={() => setIsBannerModalOpen(false)} className="p-2 hover:text-ruby transition-colors">
                   <X size={20} />
                 </button>
               </div>
-              <form onSubmit={handleAddBanner} className="space-y-6">
+              <form onSubmit={handleSaveBanner} className="space-y-6">
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Banner Image</label>
                   <div 
@@ -11002,7 +11994,7 @@ export default function AdminDashboard() {
                   </div>
                 </div>
                 <button type="submit" className="w-full py-4 bg-ruby text-white rounded-2xl text-sm font-bold uppercase tracking-widest shadow-lg shadow-ruby/20 hover:bg-ruby-dark transition-all">
-                  Add Banner
+                  {editingBanner ? "Update Banner" : "Add Banner"}
                 </button>
               </form>
             </motion.div>
@@ -11193,8 +12185,11 @@ export default function AdminDashboard() {
                          type="number" 
                          min="1"
                          max="10"
-                         value={promotionForm.priority}
-                         onChange={e => setPromotionForm({...promotionForm, priority: parseInt(e.target.value)})}
+                         value={promotionForm.priority === '' || promotionForm.priority === null || promotionForm.priority === undefined || isNaN(promotionForm.priority) ? '' : promotionForm.priority}
+                         onChange={e => {
+                           const val = e.target.value === '' ? '' : parseInt(e.target.value, 10);
+                           setPromotionForm({...promotionForm, priority: isNaN(val as any) ? '' : val});
+                         }}
                          className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20 transition-all"
                        />
                     </div>
@@ -11254,11 +12249,14 @@ export default function AdminDashboard() {
                           <label className="text-[9px] font-black text-ruby uppercase tracking-widest">Buy Qty</label>
                           <input 
                             type="number" 
-                            value={promotionForm.bxgyConfig.buyQty}
-                            onChange={e => setPromotionForm({
-                              ...promotionForm, 
-                              bxgyConfig: { ...promotionForm.bxgyConfig, buyQty: parseInt(e.target.value) }
-                            })}
+                            value={promotionForm.bxgyConfig?.buyQty === '' || promotionForm.bxgyConfig?.buyQty === null || promotionForm.bxgyConfig?.buyQty === undefined || isNaN(promotionForm.bxgyConfig?.buyQty) ? '' : promotionForm.bxgyConfig?.buyQty}
+                            onChange={e => {
+                              const val = e.target.value === '' ? '' : parseInt(e.target.value, 10);
+                              setPromotionForm({
+                                ...promotionForm, 
+                                bxgyConfig: { ...promotionForm.bxgyConfig, buyQty: isNaN(val as any) ? '' : val }
+                              });
+                            }}
                             className="w-full bg-white border-none rounded-xl px-4 py-2.5 text-sm font-bold text-ruby"
                           />
                         </div>
@@ -11266,18 +12264,21 @@ export default function AdminDashboard() {
                           <label className="text-[9px] font-black text-ruby uppercase tracking-widest">Get Qty (Free)</label>
                           <input 
                             type="number" 
-                            value={promotionForm.bxgyConfig.getQty}
-                            onChange={e => setPromotionForm({
-                              ...promotionForm, 
-                              bxgyConfig: { ...promotionForm.bxgyConfig, getQty: parseInt(e.target.value) }
-                            })}
+                            value={promotionForm.bxgyConfig?.getQty === '' || promotionForm.bxgyConfig?.getQty === null || promotionForm.bxgyConfig?.getQty === undefined || isNaN(promotionForm.bxgyConfig?.getQty) ? '' : promotionForm.bxgyConfig?.getQty}
+                            onChange={e => {
+                              const val = e.target.value === '' ? '' : parseInt(e.target.value, 10);
+                              setPromotionForm({
+                                ...promotionForm, 
+                                bxgyConfig: { ...promotionForm.bxgyConfig, getQty: isNaN(val as any) ? '' : val }
+                              });
+                            }}
                             className="w-full bg-white border-none rounded-xl px-4 py-2.5 text-sm font-bold text-ruby"
                           />
                         </div>
                         <div className="space-y-2">
                           <label className="text-[9px] font-black text-ruby uppercase tracking-widest">Apply On</label>
                           <select 
-                            value={promotionForm.bxgyConfig.applyOn}
+                            value={promotionForm.bxgyConfig?.applyOn || 'same'}
                             onChange={e => setPromotionForm({
                               ...promotionForm, 
                               bxgyConfig: { ...promotionForm.bxgyConfig, applyOn: e.target.value as any }
@@ -11307,11 +12308,14 @@ export default function AdminDashboard() {
                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Min Cart Value (₹)</label>
                        <input 
                          type="number" 
-                         value={promotionForm.conditions.minCartValue}
-                         onChange={e => setPromotionForm({
-                           ...promotionForm,
-                           conditions: { ...promotionForm.conditions, minCartValue: parseInt(e.target.value) }
-                         })}
+                         value={promotionForm.conditions?.minCartValue === '' || promotionForm.conditions?.minCartValue === null || promotionForm.conditions?.minCartValue === undefined || isNaN(promotionForm.conditions?.minCartValue) ? '' : promotionForm.conditions?.minCartValue}
+                         onChange={e => {
+                           const val = e.target.value === '' ? '' : parseFloat(e.target.value);
+                           setPromotionForm({
+                             ...promotionForm,
+                             conditions: { ...promotionForm.conditions, minCartValue: isNaN(val as any) ? '' : val }
+                           });
+                         }}
                          className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
                        />
                     </div>
@@ -11319,18 +12323,21 @@ export default function AdminDashboard() {
                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Min Quantity</label>
                        <input 
                          type="number" 
-                         value={promotionForm.conditions.minQuantity}
-                         onChange={e => setPromotionForm({
-                           ...promotionForm,
-                           conditions: { ...promotionForm.conditions, minQuantity: parseInt(e.target.value) }
-                         })}
+                         value={promotionForm.conditions?.minQuantity === '' || promotionForm.conditions?.minQuantity === null || promotionForm.conditions?.minQuantity === undefined || isNaN(promotionForm.conditions?.minQuantity) ? '' : promotionForm.conditions?.minQuantity}
+                         onChange={e => {
+                           const val = e.target.value === '' ? '' : parseInt(e.target.value, 10);
+                           setPromotionForm({
+                             ...promotionForm,
+                             conditions: { ...promotionForm.conditions, minQuantity: isNaN(val as any) ? '' : val }
+                           });
+                         }}
                          className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
                        />
                     </div>
                     <div className="space-y-2">
                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Target User Segment</label>
                        <select 
-                         value={promotionForm.conditions.userType}
+                         value={promotionForm.conditions?.userType || 'all'}
                          onChange={e => setPromotionForm({
                            ...promotionForm,
                            conditions: { ...promotionForm.conditions, userType: e.target.value as any }
@@ -11357,7 +12364,7 @@ export default function AdminDashboard() {
                     <div className="space-y-2">
                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Discount Method</label>
                        <select 
-                         value={promotionForm.reward.method}
+                         value={promotionForm.reward?.method || 'auto'}
                          onChange={e => setPromotionForm({
                            ...promotionForm,
                            reward: { ...promotionForm.reward, method: e.target.value as any }
@@ -11372,11 +12379,14 @@ export default function AdminDashboard() {
                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Discount Value (%)</label>
                        <input 
                          type="number" 
-                         value={promotionForm.reward.value}
-                         onChange={e => setPromotionForm({
-                           ...promotionForm,
-                           reward: { ...promotionForm.reward, value: parseInt(e.target.value) }
-                         })}
+                         value={promotionForm.reward?.value === '' || promotionForm.reward?.value === null || promotionForm.reward?.value === undefined || isNaN(promotionForm.reward?.value) ? '' : promotionForm.reward?.value}
+                         onChange={e => {
+                           const val = e.target.value === '' ? '' : parseFloat(e.target.value);
+                           setPromotionForm({
+                             ...promotionForm,
+                             reward: { ...promotionForm.reward, value: isNaN(val as any) ? '' : val }
+                           });
+                         }}
                          className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
                          placeholder="Value (e.g. 10)"
                        />
@@ -11397,11 +12407,14 @@ export default function AdminDashboard() {
                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Usage per Customer</label>
                        <input 
                          type="number" 
-                         value={promotionForm.limits.perUser}
-                         onChange={e => setPromotionForm({
-                           ...promotionForm,
-                           limits: { ...promotionForm.limits, perUser: parseInt(e.target.value) }
-                         })}
+                         value={promotionForm.limits?.perUser === '' || promotionForm.limits?.perUser === null || promotionForm.limits?.perUser === undefined || isNaN(promotionForm.limits?.perUser) ? '' : promotionForm.limits?.perUser}
+                         onChange={e => {
+                           const val = e.target.value === '' ? '' : parseInt(e.target.value, 10);
+                           setPromotionForm({
+                             ...promotionForm,
+                             limits: { ...promotionForm.limits, perUser: isNaN(val as any) ? '' : val }
+                           });
+                         }}
                          className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
                        />
                     </div>
@@ -11409,11 +12422,14 @@ export default function AdminDashboard() {
                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Total Store Usage</label>
                        <input 
                          type="number" 
-                         value={promotionForm.limits.totalUsage}
-                         onChange={e => setPromotionForm({
-                           ...promotionForm,
-                           limits: { ...promotionForm.limits, totalUsage: parseInt(e.target.value) }
-                         })}
+                         value={promotionForm.limits?.totalUsage === '' || promotionForm.limits?.totalUsage === null || promotionForm.limits?.totalUsage === undefined || isNaN(promotionForm.limits?.totalUsage) ? '' : promotionForm.limits?.totalUsage}
+                         onChange={e => {
+                           const val = e.target.value === '' ? '' : parseInt(e.target.value, 10);
+                           setPromotionForm({
+                             ...promotionForm,
+                             limits: { ...promotionForm.limits, totalUsage: isNaN(val as any) ? '' : val }
+                           });
+                         }}
                          className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
                        />
                     </div>
@@ -11421,11 +12437,14 @@ export default function AdminDashboard() {
                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Max Cap Discount (₹)</label>
                        <input 
                          type="number" 
-                         value={promotionForm.limits.maxDiscount}
-                         onChange={e => setPromotionForm({
-                           ...promotionForm,
-                           limits: { ...promotionForm.limits, maxDiscount: parseInt(e.target.value) }
-                         })}
+                         value={promotionForm.limits?.maxDiscount === '' || promotionForm.limits?.maxDiscount === null || promotionForm.limits?.maxDiscount === undefined || isNaN(promotionForm.limits?.maxDiscount) ? '' : promotionForm.limits?.maxDiscount}
+                         onChange={e => {
+                           const val = e.target.value === '' ? '' : parseFloat(e.target.value);
+                           setPromotionForm({
+                             ...promotionForm,
+                             limits: { ...promotionForm.limits, maxDiscount: isNaN(val as any) ? '' : val }
+                           });
+                         }}
                          className="w-full bg-gray-50 border-none rounded-2xl px-5 py-3.5 text-sm font-bold text-[#1A2C54]"
                        />
                     </div>

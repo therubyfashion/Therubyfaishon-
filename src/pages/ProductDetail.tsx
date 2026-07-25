@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { doc, getDoc, collection, addDoc, query, where, onSnapshot, orderBy, serverTimestamp, updateDoc, increment, getDocs, limit } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { Product, Review } from '../types';
 import { useCart } from '../contexts/CartContext';
 import { useWishlist } from '../contexts/WishlistContext';
@@ -43,17 +44,26 @@ function ReviewForm({ productId, onReviewAdded }: { productId: string; onReviewA
     setIsSubmitting(true);
     const postToast = toast.loading("Submitting review...");
     try {
-      await addDoc(collection(db, 'reviews'), {
-        productId,
-        userName: profile?.displayName || user.displayName || user.email?.split('@')[0] || 'Anonymous',
-        userEmail: user.email,
-        userImage: profile?.photoURL || user.photoURL || '',
-        rating,
-        comment,
-        image,
-        createdAt: new Date().toISOString(),
-        likes: 0
-      });
+      const uName = profile?.displayName || user.displayName || user.email?.split('@')[0] || 'Anonymous';
+      const uEmail = user.email || '';
+      const uImage = profile?.photoURL || user.photoURL || '';
+
+      const { error } = await supabase
+        .from('reviews')
+        .insert({
+          user_id: user.uid,
+          product_id: productId,
+          user_name: uName,
+          reviewer_email: uEmail,
+          avatar_url: uImage,
+          rating: rating,
+          comment: comment,
+          likes: 0,
+          created_at: new Date().toISOString()
+        });
+
+      if (error) throw error;
+
       toast.success("Review submitted successfully!", { id: postToast });
       setComment('');
       setRating(5);
@@ -315,6 +325,7 @@ export default function ProductDetail() {
   const navigate = useNavigate();
   const { addToCart } = useCart();
   const { toggleWishlist, isInWishlist } = useWishlist();
+  const { user } = useAuth();
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedSize, setSelectedSize] = useState('');
@@ -365,54 +376,165 @@ export default function ProductDetail() {
         let data: Product | null = null;
         let related: Product[] = [];
 
-        // 1. Try to fetch from Firestore first
+        // 1. Try to fetch from Supabase first
         try {
-          const docRef = doc(db, 'products', id);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            data = { id: docSnap.id, ...docSnap.data() } as Product;
+          const { data: catData } = await supabase
+            .from('categories')
+            .select('*');
+
+          const categoryMap: Record<string, string> = {};
+          if (catData) {
+            catData.forEach(c => {
+              categoryMap[c.id] = c.name;
+            });
           }
-        } catch (dbErr) {
-          console.warn("Firestore fetch failed, will try fallback data:", dbErr);
+
+          const { data: p, error: prodErr } = await supabase
+            .from('products')
+            .select('*')
+            .eq('id', id)
+            .maybeSingle();
+
+          if (prodErr) {
+            console.warn("Supabase single product fetch error:", prodErr);
+          }
+
+          if (p) {
+            data = {
+              id: p.id,
+              name: p.name || '',
+              description: p.description || '',
+              price: Number(p.price || 0),
+              comparePrice: p.compare_price ? Number(p.compare_price) : undefined,
+              category: (p.category_ids || []).map((id: string) => categoryMap[id]).filter(Boolean),
+              sizes: Array.isArray(p.sizes) ? p.sizes : [],
+              images: Array.isArray(p.images) ? p.images : [],
+              stock: Number(p.stock ?? 0),
+              stockStatus: p.stock_status || undefined,
+              createdAt: p.created_at || new Date().toISOString(),
+              isTrending: p.is_trending ?? false,
+              isPopular: p.is_popular ?? false,
+              sku: p.sku || undefined,
+              barcode: p.barcode || undefined,
+              weight: p.weight || undefined,
+              dimensions: p.dimensions || undefined,
+              seoTitle: p.seo_title || undefined,
+              seoDescription: p.seo_description || undefined,
+              variants: p.variants || [],
+              viewCount: p.view_count ?? 0,
+              wishlistCount: p.wishlist_count ?? 0,
+            };
+
+            // Increment view count in Supabase
+            try {
+              await supabase
+                .from('products')
+                .update({ view_count: (p.view_count || 0) + 1 })
+                .eq('id', id);
+            } catch (vErr) {
+              console.warn("Failed to increment view count in Supabase:", vErr);
+            }
+
+            // Fetch Related Products from Supabase
+            try {
+              const { data: relatedData } = await supabase
+                .from('products')
+                .select('*')
+                .neq('id', id)
+                .limit(10);
+
+              if (relatedData) {
+                const currentCatIds = p.category_ids || [];
+                const matched = relatedData.filter((r: any) => {
+                  const rCatIds = r.category_ids || [];
+                  return rCatIds.some((cid: string) => currentCatIds.includes(cid));
+                });
+                const finalRelated = matched.length > 0 ? matched : relatedData;
+
+                related = finalRelated.map((rp: any) => ({
+                  id: rp.id,
+                  name: rp.name || '',
+                  description: rp.description || '',
+                  price: Number(rp.price || 0),
+                  comparePrice: rp.compare_price ? Number(rp.compare_price) : undefined,
+                  category: (rp.category_ids || []).map((id: string) => categoryMap[id]).filter(Boolean),
+                  sizes: Array.isArray(rp.sizes) ? rp.sizes : [],
+                  images: Array.isArray(rp.images) ? rp.images : [],
+                  stock: Number(rp.stock ?? 0),
+                  stockStatus: rp.stock_status || undefined,
+                  createdAt: rp.created_at || new Date().toISOString(),
+                  isTrending: rp.is_trending ?? false,
+                  isPopular: rp.is_popular ?? false,
+                  sku: rp.sku || undefined,
+                  barcode: rp.barcode || undefined,
+                  weight: rp.weight || undefined,
+                  dimensions: rp.dimensions || undefined,
+                  variants: rp.variants || [],
+                  viewCount: rp.view_count ?? 0,
+                  wishlistCount: rp.wishlist_count ?? 0,
+                })).slice(0, 4);
+              }
+            } catch (relatedErr) {
+              console.warn("Supabase related products fetch failed:", relatedErr);
+            }
+          }
+        } catch (supabaseErr) {
+          console.warn("Supabase fetch failed, trying Firestore next:", supabaseErr);
         }
 
-         // 2. If Firestore failed or product doesn't exist, check cache
-         if (!data) {
-           try {
-             const cached = localStorage.getItem(cacheKey);
-             if (cached) {
-               const parsed = JSON.parse(cached);
-               if (parsed.product) data = parsed.product;
-             }
-           } catch (e) {
-             console.warn(e);
-           }
-         }
+        // 2. Try Firestore fallback if Supabase failed
+        if (!data) {
+          try {
+            const docRef = doc(db, 'products', id);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+              data = { id: docSnap.id, ...docSnap.data() } as Product;
+            }
+          } catch (dbErr) {
+            console.warn("Firestore fallback fetch failed:", dbErr);
+          }
+        }
 
-         if (data) {
-           setProduct(data);
-           
-           // Preselect sizes/colors if not already set by cache or UI
-           setSelectedSize(prev => prev || (data!.sizes && data!.sizes.length > 0 ? data!.sizes[0] : ''));
-           setSelectedColor(prev => prev || (data!.variants && data!.variants.length > 0 ? data!.variants[0].color : ''));
-           
-           // Fetch Related Products from Firestore if possible
-           try {
-             const relatedQuery = query(
-               collection(db, 'products'),
-               where('category', '==', data.category),
-               limit(5)
-             );
-             const relatedSnap = await getDocs(relatedQuery);
-             related = relatedSnap.docs
-               .map(doc => ({ id: doc.id, ...doc.data() } as Product))
-               .filter(p => p.id !== id)
-               .slice(0, 4);
-           } catch (relatedErr) {
-             console.warn("Firestore related products fetch failed:", relatedErr);
-           }
+        // 3. Try Cache fallback if both failed
+        if (!data) {
+          try {
+            const cached = localStorage.getItem(cacheKey);
+            if (cached) {
+              const parsed = JSON.parse(cached);
+              if (parsed.product) data = parsed.product;
+            }
+          } catch (e) {
+            console.warn("Cache fallback failed:", e);
+          }
+        }
 
-           setRelatedProducts(related);
+        if (data) {
+          setProduct(data);
+          
+          // Preselect sizes/colors if not already set by cache or UI
+          setSelectedSize(prev => prev || (data!.sizes && data!.sizes.length > 0 ? data!.sizes[0] : ''));
+          setSelectedColor(prev => prev || (data!.variants && data!.variants.length > 0 ? data!.variants[0].color : ''));
+          
+          if (related.length > 0) {
+            setRelatedProducts(related);
+          } else {
+            // Fallback related products from Firestore
+            try {
+              const relatedQuery = query(
+                collection(db, 'products'),
+                where('category', '==', data.category),
+                limit(5)
+              );
+              const relatedSnap = await getDocs(relatedQuery);
+              related = relatedSnap.docs
+                .map(doc => ({ id: doc.id, ...doc.data() } as Product))
+                .filter(p => p.id !== id)
+                .slice(0, 4);
+              setRelatedProducts(related);
+            } catch (relatedErr) {
+              console.warn("Firestore related products fetch failed:", relatedErr);
+            }
+          }
 
           // Track Recently Viewed
           try {
@@ -460,12 +582,47 @@ export default function ProductDetail() {
       if (!id) return;
       const cacheKey = `ruby_product_cache_${id}`;
       try {
-        const q = query(
-          collection(db, 'reviews'),
-          where('productId', '==', id)
-        );
-        const snapshot = await getDocs(q);
-        const fetchedReviews = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Review));
+        const { data, error } = await supabase
+          .from('reviews')
+          .select('*')
+          .eq('product_id', id);
+
+        if (error) throw error;
+
+        const fetchedReviews = (data || []).map(row => {
+          let commentText = row.comment || '';
+          let emailVal = row.reviewer_email || '';
+          let userImageVal = row.avatar_url || '';
+          let imageVal = null;
+
+          try {
+            if (commentText.startsWith('{') && commentText.endsWith('}')) {
+              const parsed = JSON.parse(commentText);
+              if (parsed && typeof parsed === 'object') {
+                commentText = parsed.text || '';
+                emailVal = parsed.userEmail || emailVal;
+                userImageVal = parsed.userImage || userImageVal;
+                imageVal = parsed.image || null;
+              }
+            }
+          } catch (e) {
+            // ignore
+          }
+
+          return {
+            id: row.id,
+            productId: row.product_id || '',
+            userName: row.user_name || 'Anonymous',
+            userEmail: emailVal,
+            userImage: userImageVal,
+            rating: row.rating || 5,
+            comment: commentText,
+            image: imageVal,
+            createdAt: row.created_at || new Date().toISOString(),
+            likes: row.likes || 0,
+          };
+        });
+
         // Sort client-side to avoid needing a composite index
         fetchedReviews.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setReviews(fetchedReviews);
@@ -514,17 +671,27 @@ export default function ProductDetail() {
   };
 
   const handleLikeReview = async (reviewId: string) => {
-    if (!auth.currentUser) {
+    if (!user) {
       toast.error("Please login to like a review");
       return;
     }
     try {
-      const reviewRef = doc(db, 'reviews', reviewId);
-      await updateDoc(reviewRef, {
-        likes: increment(1)
-      });
+      const reviewObj = reviews.find(r => r.id === reviewId);
+      const currentLikes = reviewObj ? reviewObj.likes : 0;
+      const newLikes = currentLikes + 1;
+
+      const { error } = await supabase
+        .from('reviews')
+        .update({ likes: newLikes })
+        .eq('id', reviewId);
+
+      if (error) throw error;
+
+      setReviews(prev => prev.map(r => r.id === reviewId ? { ...r, likes: newLikes } : r));
+      toast.success("Thanks for liking this review!");
     } catch (error) {
       console.error("Error liking review:", error);
+      toast.error("Failed to like review");
     }
   };
 
@@ -586,6 +753,10 @@ export default function ProductDetail() {
   const stockVal = product.stock !== undefined && product.stock !== null ? Number(product.stock) : 99;
 
   const handleToggleWishlist = () => {
+    if (!user) {
+      toast.error("Please login to add items to your wishlist");
+      return;
+    }
     const isCurrentlyFavorite = isFavorite;
     toggleWishlist(product);
     if (isCurrentlyFavorite) {

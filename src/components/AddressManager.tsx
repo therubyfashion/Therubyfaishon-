@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Plus, Home, Briefcase, Trash2, Edit2, CheckCircle2, X, ChevronRight, Smartphone } from 'lucide-react';
-import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
@@ -10,7 +9,6 @@ import { cn } from '../lib/utils';
 interface Address {
   id: string;
   name: string;
-  email: string;
   number: string;
   address: string;
   landmark?: string;
@@ -29,7 +27,6 @@ export default function AddressManager() {
   const [editingAddress, setEditingAddress] = useState<Address | null>(null);
   const [formData, setFormData] = useState({
     name: '',
-    email: '',
     number: '',
     address: '',
     landmark: '',
@@ -39,6 +36,39 @@ export default function AddressManager() {
     label: 'Home' as 'Home' | 'Office' | 'Other'
   });
 
+  const deserializeAddress = (row: any): Address => {
+    let addressText = row.address_line || '';
+    let landmarkText = row.landmark || '';
+    let labelVal: 'Home' | 'Office' | 'Other' = (row.label as any) || 'Home';
+
+    // fallback for old JSON format if any
+    if (addressText.startsWith('{') && addressText.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(addressText);
+        if (parsed && typeof parsed === 'object') {
+          addressText = parsed.address || '';
+          landmarkText = parsed.landmark || landmarkText;
+          labelVal = parsed.label || labelVal;
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    return {
+      id: row.id,
+      name: row.full_name || '',
+      number: row.phone || '',
+      address: addressText,
+      landmark: landmarkText,
+      state: row.state || '',
+      city: row.city || '',
+      pincode: row.zip || '',
+      label: labelVal,
+      isDefault: row.is_default || false,
+    };
+  };
+
   useEffect(() => {
     fetchAddresses();
   }, [user]);
@@ -46,12 +76,18 @@ export default function AddressManager() {
   const fetchAddresses = async () => {
     if (!user) return;
     try {
-      const q = query(collection(db, `users/${user.uid}/addresses`), orderBy('createdAt', 'desc'));
-      const querySnapshot = await getDocs(q);
-      const fetched = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Address[];
+      const { data, error } = await supabase
+        .from('addresses')
+        .select('*')
+        .eq('user_id', user.uid)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error("Error fetching addresses:", error);
+        return;
+      }
+
+      const fetched = (data || []).map(deserializeAddress);
       setAddresses(fetched);
     } catch (error) {
       console.error("Error fetching addresses:", error);
@@ -66,20 +102,47 @@ export default function AddressManager() {
 
     try {
       if (editingAddress) {
-        await updateDoc(doc(db, `users/${user.uid}/addresses`, editingAddress.id), formData);
+        const { error } = await supabase
+          .from('addresses')
+          .update({
+            full_name: formData.name,
+            phone: formData.number,
+            address_line: formData.address,
+            landmark: formData.landmark,
+            label: formData.label,
+            city: formData.city,
+            state: formData.state,
+            zip: formData.pincode,
+          })
+          .eq('id', editingAddress.id);
+
+        if (error) throw error;
         toast.success("Address updated successfully!");
       } else {
-        await addDoc(collection(db, `users/${user.uid}/addresses`), {
-          ...formData,
-          isDefault: addresses.length === 0,
-          createdAt: new Date().toISOString()
-        });
+        const { error } = await supabase
+          .from('addresses')
+          .insert({
+            user_id: user.uid,
+            full_name: formData.name,
+            phone: formData.number,
+            address_line: formData.address,
+            landmark: formData.landmark,
+            label: formData.label,
+            city: formData.city,
+            state: formData.state,
+            zip: formData.pincode,
+            country: 'India',
+            is_default: addresses.length === 0,
+            created_at: new Date().toISOString()
+          });
+
+        if (error) throw error;
         toast.success("Address added successfully!");
       }
       setShowForm(false);
       setEditingAddress(null);
       setFormData({
-        name: '', email: '', number: '', address: '', landmark: '', state: '', city: '', pincode: '', label: 'Home'
+        name: '', number: '', address: '', landmark: '', state: '', city: '', pincode: '', label: 'Home'
       });
       fetchAddresses();
     } catch (error) {
@@ -91,7 +154,12 @@ export default function AddressManager() {
   const handleDelete = async (id: string) => {
     if (!user) return;
     try {
-      await deleteDoc(doc(db, `users/${user.uid}/addresses`, id));
+      const { error } = await supabase
+        .from('addresses')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
       toast.success("Address deleted.");
       fetchAddresses();
     } catch (error) {
@@ -100,11 +168,35 @@ export default function AddressManager() {
     }
   };
 
+  const handleSetDefault = async (id: string) => {
+    if (!user) return;
+    try {
+      const { error: resetErr } = await supabase
+        .from('addresses')
+        .update({ is_default: false })
+        .eq('user_id', user.uid);
+
+      if (resetErr) throw resetErr;
+
+      const { error: setErr } = await supabase
+        .from('addresses')
+        .update({ is_default: true })
+        .eq('id', id);
+
+      if (setErr) throw setErr;
+
+      toast.success("Default address updated!");
+      fetchAddresses();
+    } catch (error) {
+      console.error("Error setting default address:", error);
+      toast.error("Failed to set default address.");
+    }
+  };
+
   const handleEdit = (address: Address) => {
     setEditingAddress(address);
     setFormData({
       name: address.name,
-      email: address.email,
       number: address.number,
       address: address.address,
       landmark: address.landmark || '',
@@ -157,23 +249,13 @@ export default function AddressManager() {
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Email</label>
-                <input 
-                  type="email" required value={formData.email}
-                  onChange={e => setFormData({...formData, email: e.target.value})}
-                  className="w-full bg-gray-50 border border-gray-100 px-4 py-3 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-ruby/10"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Phone</label>
-                <input 
-                  type="tel" required value={formData.number}
-                  onChange={e => setFormData({...formData, number: e.target.value})}
-                  className="w-full bg-gray-50 border border-gray-100 px-4 py-3 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-ruby/10"
-                />
-              </div>
+            <div className="space-y-1">
+              <label className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Phone</label>
+              <input 
+                type="tel" required value={formData.number}
+                onChange={e => setFormData({...formData, number: e.target.value})}
+                className="w-full bg-gray-50 border border-gray-100 px-4 py-3 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-ruby/10"
+              />
             </div>
 
             <div className="space-y-1">
@@ -265,7 +347,15 @@ export default function AddressManager() {
                       {addr.number}
                     </div>
                   </div>
-                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity items-center">
+                    {!addr.isDefault && (
+                      <button
+                        onClick={() => handleSetDefault(addr.id)}
+                        className="px-2 py-1 rounded-lg bg-gray-50 text-[8px] font-bold text-gray-400 hover:text-green-500 hover:bg-green-50 transition-all uppercase tracking-wider"
+                      >
+                        Set Default
+                      </button>
+                    )}
                     <button onClick={() => handleEdit(addr)} className="p-2 text-gray-400 hover:text-ruby transition-colors">
                       <Edit2 size={16} />
                     </button>

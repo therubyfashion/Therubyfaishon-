@@ -66,6 +66,18 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
     }
   };
 
+  const handleHandleClick = () => {
+    if (isComplete || disabled || isLoading) return;
+    
+    // Play a gorgeous spring sliding animation to the right edge and complete!
+    animate(x, swipeRange, { type: 'spring', stiffness: 350, damping: 24 });
+    setIsComplete(true);
+    
+    setTimeout(() => {
+      onConfirm();
+    }, 200);
+  };
+
   if (isLoading) {
     return (
       <div className="w-full h-[72px] bg-ruby/5 rounded-[24px] flex items-center justify-center border-2 border-ruby/10 shadow-inner">
@@ -83,7 +95,8 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
     <motion.div 
       ref={containerRef}
       style={{ backgroundColor: bgColor }}
-      className={`relative w-full h-[72px] rounded-[24px] border-2 overflow-hidden select-none shadow-md ${
+      onClick={handleHandleClick}
+      className={`relative w-full h-[72px] rounded-[24px] border-2 overflow-hidden select-none shadow-md cursor-pointer ${
         isComplete 
           ? 'border-ruby shadow-xl shadow-ruby/20' 
           : 'border-gray-200'
@@ -119,6 +132,7 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
       {/* Handle */}
       {!isComplete && !disabled && (
         <motion.div
+          key={`handle-${swipeRange}`}
           drag="x"
           dragConstraints={{ left: 0, right: swipeRange }}
           dragElastic={0.05}
@@ -126,6 +140,10 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
           style={{ x }}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
+          onClick={(e) => {
+            e.stopPropagation(); // Prevent duplicate trigger from parent container click
+            handleHandleClick();
+          }}
           className="absolute left-2 top-2 w-[56px] h-[56px] bg-ruby rounded-[18px] shadow-lg shadow-ruby/20 flex items-center justify-center z-10 cursor-grab active:cursor-grabbing"
         >
           <motion.div

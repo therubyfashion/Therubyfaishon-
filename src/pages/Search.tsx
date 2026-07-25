@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { Product } from '../types';
 import { Search as SearchIcon, X, ArrowRight, ShoppingBag } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -17,15 +16,50 @@ export default function Search() {
   useEffect(() => {
     const fetchProducts = async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, 'products'));
-        const productsData = querySnapshot.docs.map(doc => {
-          const prod = {
-            id: doc.id,
-            ...doc.data()
-          } as Product;
-          logProductDiagnostics('Fetched', prod);
-          return prod;
-        });
+        const { data: catData } = await supabase
+          .from('categories')
+          .select('*');
+
+        const categoryMap: Record<string, string> = {};
+        if (catData) {
+          catData.forEach(c => {
+            categoryMap[c.id] = c.name;
+          });
+        }
+
+        const { data: prodData, error: prodErr } = await supabase
+          .from('products')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (prodErr) {
+          console.warn("Search products fetch error:", prodErr);
+        }
+
+        const productsData: Product[] = (prodData || []).map(p => ({
+          id: p.id,
+          name: p.name || '',
+          description: p.description || '',
+          price: Number(p.price || 0),
+          comparePrice: p.compare_price ? Number(p.compare_price) : undefined,
+          category: (p.category_ids || []).map((id: string) => categoryMap[id]).filter(Boolean),
+          sizes: Array.isArray(p.sizes) ? p.sizes : [],
+          images: Array.isArray(p.images) ? p.images : [],
+          stock: Number(p.stock ?? 0),
+          stockStatus: p.stock_status || undefined,
+          createdAt: p.created_at || new Date().toISOString(),
+          isTrending: p.is_trending ?? false,
+          isPopular: p.is_popular ?? false,
+          sku: p.sku || undefined,
+          barcode: p.barcode || undefined,
+          weight: p.weight || undefined,
+          dimensions: p.dimensions || undefined,
+          seoTitle: p.seo_title || undefined,
+          seoDescription: p.seo_description || undefined,
+          variants: p.variants || [],
+          viewCount: p.view_count ?? 0,
+          wishlistCount: p.wishlist_count ?? 0,
+        }));
 
         console.log(`[Product Diagnostic - Query Result Count] Search fetched ${productsData.length} products total.`);
 

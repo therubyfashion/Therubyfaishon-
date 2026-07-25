@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { Mail, Phone, MapPin, Send } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
-import { db } from '../firebase';
-import { collection, addDoc } from 'firebase/firestore';
+import { supabase } from '../supabase';
 
 export default function Contact() {
   const [firstName, setFirstName] = useState('');
@@ -17,14 +16,15 @@ export default function Contact() {
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, 'tickets'), {
-        name: `${firstName} ${lastName}`.trim(),
-        email,
-        subject,
-        message,
-        createdAt: new Date().toISOString(),
-        status: 'open'
-      });
+      const { error } = await supabase
+        .from('contact_queries')
+        .insert({
+          name: `${firstName} ${lastName}`.trim(),
+          email,
+          message
+        });
+      if (error) throw error;
+
       toast.success("Message sent! We'll get back to you shortly.");
       setFirstName('');
       setLastName('');
