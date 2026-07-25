@@ -1318,12 +1318,16 @@ export const NotificationService = {
         const { data: admins } = await supabase
           .from('profiles')
           .select('onesignal_id')
-          .eq('role', 'admin');
+          .eq('role', 'admin')
+          .not('onesignal_id', 'is', null);
 
         if (admins) {
           admins.forEach((a: any) => {
             if (a.onesignal_id) {
-              adminSubIds.push(String(a.onesignal_id).trim());
+              const cleaned = String(a.onesignal_id).trim();
+              if (cleaned && !adminSubIds.includes(cleaned)) {
+                adminSubIds.push(cleaned);
+              }
             }
           });
         }
@@ -1334,9 +1338,9 @@ export const NotificationService = {
       let resultStatus = "success";
       let msgId: string | null = null;
 
-      // EXCLUSIVE DELIVERY STRATEGY TO PREVENT DUPLICATES:
-      // If there are direct active subscriptions, target them directly.
-      // Do NOT send by tags if targeting by subscription IDs to prevent duplicate pushes!
+      // DIRECT SUBSCRIPTION DELIVERY STRATEGY:
+      // Target admin devices directly using their saved onesignal_id in profiles.
+      // Do NOT use tag filters since client devices are not tagged in OneSignal.
       if (adminSubIds.length > 0) {
         try {
           const directNotif = {
@@ -1351,19 +1355,8 @@ export const NotificationService = {
           resultStatus = "warning";
         }
       } else {
-        // Fallback to tag filter delivery ONLY if no active admin subscription is registered
-        try {
-          const filterNotif = {
-            ...notification,
-            filters: [{ field: "tag", key: "role", relation: "=", value: "admin" }]
-          };
-          const res = await this.send(filterNotif);
-          msgId = res?.data?.id || msgId;
-          resultStatus = hasInvalidIdsError(res?.data) ? "failed" : "success";
-        } catch (fErr: any) {
-          console.warn("[NotificationService] Tag filter push warning:", fErr.message);
-          resultStatus = "warning";
-        }
+        console.warn("[NotificationService] No admins found with valid onesignal_id in profiles.");
+        resultStatus = "skipped_no_subscription";
       }
 
       await this.log(title, body, "admin", resultStatus, msgId, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
@@ -4405,24 +4398,37 @@ async function startServer() {
     try {
       console.log("OneSignal: Constructing push to admins...");
 
-      // Fetch all admins with synced onesignalIds from Supabase profiles
+      // Fetch all admins with synced onesignal_id from Supabase profiles
       let adminPlayerIds: string[] = [];
       try {
         const supabase = getSupabaseAdmin();
         const { data: admins } = await supabase
           .from('profiles')
           .select('onesignal_id')
-          .eq('role', 'admin');
+          .eq('role', 'admin')
+          .not('onesignal_id', 'is', null);
 
         if (admins) {
           admins.forEach((doc: any) => {
             if (doc.onesignal_id) {
-              adminPlayerIds.push(String(doc.onesignal_id).trim());
+              const cleaned = String(doc.onesignal_id).trim();
+              if (cleaned && !adminPlayerIds.includes(cleaned)) {
+                adminPlayerIds.push(cleaned);
+              }
             }
           });
         }
       } catch (dbErr: any) {
         console.warn("OneSignal: Failed to query admins from Supabase profiles:", dbErr.message);
+      }
+
+      if (adminPlayerIds.length === 0) {
+        console.warn("OneSignal: No admins with valid onesignal_id found in profiles table.");
+        return res.json({ 
+          success: true, 
+          warning: "No admins subscribed to push notifications (no onesignal_id found in profiles).", 
+          id: null 
+        });
       }
 
       const notification: any = {
@@ -4436,6 +4442,7 @@ async function startServer() {
         android_sound: "shopify",
         ios_sound: "shopify.wav",
         sound: "shopify.wav",
+        include_subscription_ids: adminPlayerIds
       };
 
       if (imageUrl) {
@@ -4445,43 +4452,14 @@ async function startServer() {
         notification.ios_attachments = { id1: imageUrl };
       }
 
-      // Track resulting responses
-      let filterResponseId = null;
-      let directResponseId = null;
+      const response = await sendOneSignalNotification(notification);
+      const msgId = response?.data?.id || null;
 
-      // 1. Send via Tag Filter (for general / pre-existing admins)
-      try {
-        const filterNotif = {
-          ...notification,
-          filters: [
-            { field: "tag", key: "role", relation: "=", value: "admin" }
-          ]
-        };
-        const r1 = await sendOneSignalNotification(filterNotif);
-        filterResponseId = r1?.data?.id || null;
-        console.log(`OneSignal: Tag-filtered admin push sent. MsgID: ${filterResponseId}`);
-      } catch (fErr: any) {
-        console.warn("OneSignal: Role filter push failed or skipped:", fErr.message);
-      }
-
-      // 2. Send via Dedicated Player ID (highly robust, direct-delivery bypass)
-      if (adminPlayerIds.length > 0) {
-        try {
-          const directNotif = {
-            ...notification,
-            include_subscription_ids: adminPlayerIds
-          };
-          const r2 = await sendOneSignalNotification(directNotif);
-          directResponseId = r2?.data?.id || null;
-          console.log(`OneSignal: Direct targeted admin player push sent. MsgID: ${directResponseId}`);
-        } catch (dErr: any) {
-          console.warn("OneSignal: Direct player push failed:", dErr.message);
-        }
-      }
+      console.log(`OneSignal: Direct targeted admin push sent to ${adminPlayerIds.length} subscription(s). MsgID: ${msgId}`);
 
       res.json({ 
         success: true, 
-        id: directResponseId || filterResponseId || "simulated-id",
+        id: msgId || "simulated-id",
         syncedAdminsCount: adminPlayerIds.length 
       });
     } catch (error: any) {
@@ -4490,11 +4468,11 @@ async function startServer() {
       
       console.error("OneSignal Admin Push Error Detail:", JSON.stringify(errorData || error.message, null, 2));
 
-      if (errorMsg.includes("not subscribed") || errorMsg.includes("no users") || errorMsg.includes("players are not subscribed")) {
-        return res.json({ success: true, warning: "Admin notifications drafted (best-effort tags/subs).", id: null });
+      if (errorMsg.includes("not subscribed") || errorMsg.includes("no users") || errorMsg.includes("players are not subscribed") || errorMsg.includes("All included players are not subscribed")) {
+        return res.json({ success: true, warning: "Admin notifications skipped (no subscribed players).", id: null });
       }
       
-      let userFriendlyError = "Admin notification dispatch completed with standard warning.";
+      let userFriendlyError = "Admin notification dispatch completed with warning.";
       res.status(500).json({ 
         error: userFriendlyError,
         details: errorData || error.message
