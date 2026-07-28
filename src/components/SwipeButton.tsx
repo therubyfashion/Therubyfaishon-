@@ -8,9 +8,10 @@ interface SwipeButtonProps {
   price: number;
   disabled?: boolean;
   isLoading?: boolean;
+  isConfirmed?: boolean;
 }
 
-const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, isLoading }) => {
+const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, isLoading, isConfirmed = false }) => {
   const [isComplete, setIsComplete] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const x = useMotionValue(0);
@@ -36,6 +37,17 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
   const handleSize = 56;
   const swipeRange = Math.max(100, containerWidth - handleSize - (padding * 2));
 
+  // Sync swipe state with confirmed/loading status
+  useEffect(() => {
+    if (isConfirmed) {
+      setIsComplete(true);
+      animate(x, swipeRange, { type: 'spring', stiffness: 450, damping: 24 });
+    } else if (!isLoading && !isConfirmed) {
+      setIsComplete(false);
+      animate(x, 0, { type: 'spring', stiffness: 350, damping: 22 });
+    }
+  }, [isLoading, isConfirmed, swipeRange, x]);
+
   const opacity = useTransform(x, [0, swipeRange * 0.3], [1, 0.1]);
   const bgColor = useTransform(
     x,
@@ -53,11 +65,10 @@ const SwipeButton: React.FC<SwipeButtonProps> = ({ onConfirm, price, disabled, i
     if (isComplete || disabled || isLoading) return;
     const currentX = x.get();
     
-    // Require dragging at least 85% of the total track width to complete order
+    // Require dragging at least 85% of the total track width to trigger order confirm
     if (currentX >= swipeRange * 0.85) {
-      // Complete swipe
+      // Move handle to end
       animate(x, swipeRange, { type: 'spring', stiffness: 450, damping: 24 });
-      setIsComplete(true);
       
       // Short delay before trigger
       setTimeout(() => {

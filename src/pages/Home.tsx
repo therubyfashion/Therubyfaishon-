@@ -434,8 +434,8 @@ export default function Home() {
 
   return (
     <div className="bg-[#f2f2f2] min-h-screen pb-24">
-      {/* Header (Not Sticky) */}
-      <div className="bg-white border-b border-gray-100 px-5 py-4">
+      {/* Header (Mobile Only) */}
+      <div className="bg-white border-b border-gray-100 px-5 py-4 md:hidden">
         <div className="flex items-center justify-between mb-4">
           <Link to="/profile" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
             <div className="w-11 h-11 rounded-full bg-[#c4a882] overflow-hidden flex items-center justify-center text-white font-bold">
@@ -481,9 +481,9 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-5 pt-6 space-y-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8 md:space-y-12">
         {/* Promo Banner Carousel */}
-        <div className="relative overflow-hidden rounded-[2rem] bg-white shadow-sm h-[180px]">
+        <div className="relative overflow-hidden rounded-2xl md:rounded-3xl bg-white shadow-sm h-48 md:h-80 lg:h-[420px] w-full">
           {loading ? (
             <div className="h-full w-full bg-gray-100 animate-pulse flex items-center justify-center">
               <div className="w-12 h-12 border-4 border-ruby/20 border-t-ruby rounded-full animate-spin" />
@@ -512,7 +512,7 @@ export default function Home() {
                   <img 
                     src={banners[currentBanner].image} 
                     alt="Promo Banner" 
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-cover md:object-cover md:w-full"
                   />
                 </motion.div>
               </AnimatePresence>
@@ -550,11 +550,11 @@ export default function Home() {
             <h3 className="text-[17px] font-bold text-[#111]">Categories</h3>
             <Link to="/shop" className="text-[13px] font-medium text-gray-600">See all</Link>
           </div>
-          <div className="flex space-x-5 overflow-x-auto pb-2 scrollbar-hide">
+          <div className="flex md:grid md:grid-cols-6 lg:grid-cols-8 gap-4 md:gap-6 space-x-5 md:space-x-0 overflow-x-auto md:overflow-visible pb-2 scrollbar-hide">
             {loading ? (
-              [1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="flex flex-col items-center space-y-2 flex-shrink-0 animate-pulse">
-                  <div className="w-[60px] h-[60px] rounded-full bg-gray-200" />
+              [1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="flex flex-col items-center space-y-2 flex-shrink-0 md:flex-shrink animate-pulse">
+                  <div className="w-[60px] h-[60px] md:w-20 md:h-20 rounded-full bg-gray-200" />
                   <div className="h-3 w-12 bg-gray-200 rounded" />
                 </div>
               ))
@@ -565,9 +565,9 @@ export default function Home() {
                   <Link 
                     key={cat.id} 
                     to={`/shop?category=${cat.name}`}
-                    className="flex flex-col items-center space-y-2 flex-shrink-0 group"
+                    className="flex flex-col items-center space-y-2 flex-shrink-0 md:flex-shrink group"
                   >
-                    <div className="w-[60px] h-[60px] rounded-full bg-[#f0f0f0] flex items-center justify-center group-hover:bg-ruby/10 transition-colors overflow-hidden">
+                    <div className="w-[60px] h-[60px] md:w-20 md:h-20 rounded-full bg-[#f0f0f0] flex items-center justify-center group-hover:bg-ruby/10 transition-colors overflow-hidden">
                       {cat.image ? (
                         <img 
                           src={cat.image} 
@@ -578,7 +578,7 @@ export default function Home() {
                         <Icon size={26} className="text-[#222] group-hover:text-ruby transition-colors" />
                       )}
                     </div>
-                    <span className="text-[12px] font-medium text-[#333] tracking-tight">{cat.name}</span>
+                    <span className="text-[12px] md:text-xs font-medium text-[#333] tracking-tight text-center">{cat.name}</span>
                   </Link>
                 );
               })
@@ -596,11 +596,11 @@ export default function Home() {
           </div>
           
           {loading ? (
-            <div className="grid grid-cols-2 gap-4">
-              {[1, 2, 3, 4].map(i => <ProductCardSkeleton key={i} />)}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6 lg:gap-8">
+              {[1, 2, 3, 4, 5, 6, 7, 8].map(i => <ProductCardSkeleton key={i} />)}
             </div>
           ) : filteredTrendingProducts.length > 0 ? (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6 lg:gap-8">
               {filteredTrendingProducts.map(product => (
                 <ProductCard key={product.id} product={product} />
               ))}
@@ -627,11 +627,11 @@ export default function Home() {
           </div>
           
           {loading ? (
-            <div className="grid grid-cols-2 gap-4">
-              {[1, 2, 3, 4].map(i => <ProductCardSkeleton key={i} />)}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6 lg:gap-8">
+              {[1, 2, 3, 4, 5, 6, 7, 8].map(i => <ProductCardSkeleton key={i} />)}
             </div>
           ) : filteredPopularProducts.length > 0 ? (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6 lg:gap-8">
               {filteredPopularProducts.map(product => (
                 <ProductCard key={product.id} product={product} />
               ))}

@@ -103,7 +103,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
       onClick={handleCardClick}
       className="product-card group block bg-white rounded-2xl overflow-hidden border border-gray-100 cursor-pointer transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl"
     >
-      <div className="product-img relative aspect-[3/4] bg-gray-50 flex items-center justify-center overflow-hidden">
+      <div className="product-img relative aspect-[3/4] md:aspect-square bg-gray-50 flex items-center justify-center overflow-hidden">
         {(product.images && product.images[0]) ? (
           <img 
             src={product.images[0]} 

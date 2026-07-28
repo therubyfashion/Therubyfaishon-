@@ -10,7 +10,7 @@ export const Skeleton: React.FC<SkeletonProps> = ({ className }) => (
 
 export const ProductCardSkeleton = () => (
   <div className="bg-white rounded-2xl p-0 space-y-4 border border-gray-100 shadow-sm overflow-hidden">
-    <Skeleton className="aspect-[3/4] w-full rounded-none" />
+    <Skeleton className="aspect-[3/4] md:aspect-square w-full rounded-none" />
     <div className="p-4 space-y-2">
       <Skeleton className="h-3 w-1/4" />
       <Skeleton className="h-4 w-3/4" />

@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import { cn, syncToGoogleSheets } from '../lib/utils';
 import { sendNotification } from '../lib/notifications';
-import { ChevronLeft, ShoppingBag, MapPin, Home, Briefcase, Plus, CheckCircle2, Lock, Smartphone, Building2, Handshake, Check } from 'lucide-react';
+import { ChevronLeft, ShoppingBag, MapPin, Home, Briefcase, Plus, CheckCircle2, Lock, Smartphone, Building2, Handshake, Check, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { io } from 'socket.io-client';
 import { LoadingSpinner } from '../components/Skeleton';
@@ -84,6 +84,7 @@ export default function Checkout() {
   const [selectedShipping, setSelectedShipping] = useState('standard');
   const [selectedPayment, setSelectedPayment] = useState('cod');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [isOrderConfirmed, setIsOrderConfirmed] = useState(false);
   const [paymentStep, setPaymentStep] = useState(1);
 
   useEffect(() => {
@@ -106,7 +107,8 @@ export default function Checkout() {
   const [pendingAddress, setPendingAddress] = useState<any>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [storeSettings, setStoreSettings] = useState<any>(null);
-  const { profile } = useAuth();
+  const { profile, refreshProfile } = useAuth();
+  const [useLoyaltyPoints, setUseLoyaltyPoints] = useState(false);
 
   // Phone OTP States
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
@@ -303,7 +305,18 @@ export default function Checkout() {
   const discount = Number(appliedPromo ? appliedPromo.discount : 0);
   const shippingCost = Number(selectedShippingObj?.cost || 0);
   const codFee = Number(selectedPayment === 'cod' ? 80 : 0);
-  const finalTotal = Math.max(0, subtotal - discount + shippingCost + codFee);
+
+  // Loyalty Points calculation: 100 points = ₹10 discount (min 100 points required)
+  const userPoints = Number(profile?.loyaltyPoints || 0);
+  const canRedeemPoints = userPoints >= 100;
+  const maxDiscountFromPoints = Math.max(0, subtotal - discount + shippingCost + codFee);
+  const pointsNeededForFullDiscount = Math.floor(maxDiscountFromPoints * 10);
+  const pointsToRedeem = (useLoyaltyPoints && canRedeemPoints) 
+    ? Math.min(userPoints, pointsNeededForFullDiscount) 
+    : 0;
+  const pointsDiscount = Math.floor(pointsToRedeem / 10);
+
+  const finalTotal = Math.max(0, subtotal - discount - pointsDiscount + shippingCost + codFee);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -587,6 +600,7 @@ export default function Checkout() {
 
     // Removed verification check for placing order - proceed directly to processing
     setIsProcessingPayment(true);
+    setIsOrderConfirmed(false);
     
     try {
       // Get next order number using Supabase function RPC call
@@ -663,6 +677,8 @@ export default function Checkout() {
               shipping_method: finalOrderData.shippingMethod,
               estimated_delivery: finalOrderData.estimatedDelivery,
               payment_id: finalOrderData.paymentId,
+              points_redeemed: pointsToRedeem,
+              points_earned: 0,
               tracking_history: []
             };
 
@@ -673,9 +689,40 @@ export default function Checkout() {
             if (supErr) {
               console.error("Supabase order insert failed:", supErr);
               toast.error("Database order placement failed. Please try again.");
+              setIsOrderConfirmed(false);
+              setIsProcessingPayment(false);
               throw supErr;
             } else {
               console.log("Supabase order insert success!");
+              setIsOrderConfirmed(true);
+
+              // Deduct redeemed loyalty points immediately on successful order placement
+              if (pointsToRedeem > 0 && user?.uid) {
+                try {
+                  const newBalance = Math.max(0, userPoints - pointsToRedeem);
+                  await supabase
+                    .from('profiles')
+                    .update({ loyalty_points: newBalance })
+                    .eq('id', user.uid);
+
+                  const cleanOrderNum = String(finalOrderData.orderId).replace(/^#/, '');
+                  await supabase
+                    .from('loyalty_points_log')
+                    .insert({
+                      user_id: user.uid,
+                      points: pointsToRedeem,
+                      type: 'redeemed',
+                      description: `Redeemed on order #${cleanOrderNum}`,
+                      created_at: new Date().toISOString()
+                    });
+
+                  if (refreshProfile) {
+                    refreshProfile().catch(e => console.error("Profile refresh error:", e));
+                  }
+                } catch (ptsErr) {
+                  console.error("Failed to process loyalty points redemption:", ptsErr);
+                }
+              }
               
               // Increment coupon used_count in Supabase if a promo was applied
               if (appliedPromo && appliedPromo.code) {
@@ -965,6 +1012,7 @@ export default function Checkout() {
         } catch (error) {
           console.error("Error completing order:", error);
           toast.error("Failed to place order. Please try again.");
+          setIsOrderConfirmed(false);
           setIsProcessingPayment(false);
         }
       };
@@ -1059,14 +1107,17 @@ export default function Checkout() {
             modal: {
               ondismiss: function() {
                 setIsProcessingPayment(false);
+                setIsOrderConfirmed(false);
+                toast.info("Payment cancelled. You can try again.");
               }
             }
           };
 
           const rzp = new (window as any).Razorpay(options);
           rzp.on('payment.failed', function (response: any) {
-            toast.error(response.error.description);
+            toast.error(response.error?.description || 'Payment failed. Please try again.');
             setIsProcessingPayment(false);
+            setIsOrderConfirmed(false);
           });
           rzp.open();
         } catch (e: any) {
@@ -1100,7 +1151,7 @@ export default function Checkout() {
         </div>
       </div>
 
-      <div className="max-w-2xl mx-auto px-4 pt-8 sm:pt-12">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 sm:pt-12">
         <div className="checkout-main">
           {/* Stepper */}
           <div className="checkout-steps bg-white rounded-[2rem] p-8 border border-gray-100 mb-10 shadow-sm">
@@ -1590,6 +1641,52 @@ export default function Checkout() {
                       </div>
                     </div>
 
+                    {/* Loyalty Points Redemption Toggle Card */}
+                    {user && (
+                      <div className="bg-gradient-to-br from-amber-50 to-orange-50/40 rounded-[2rem] p-6 border border-amber-200/60 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold">
+                              <Sparkles size={20} />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-bold text-[#1A2C54]">Use Loyalty Points</h4>
+                              <p className="text-xs text-amber-800 font-medium">Available: <strong className="text-amber-900 font-black">{userPoints} pts</strong></p>
+                            </div>
+                          </div>
+                          
+                          {canRedeemPoints ? (
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input 
+                                type="checkbox" 
+                                checked={useLoyaltyPoints} 
+                                onChange={(e) => setUseLoyaltyPoints(e.target.checked)} 
+                                className="sr-only peer"
+                              />
+                              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                            </label>
+                          ) : (
+                            <span className="text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2.5 py-1 rounded-full uppercase tracking-wider">
+                              Min 100 pts
+                            </span>
+                          )}
+                        </div>
+
+                        {canRedeemPoints && useLoyaltyPoints && (
+                          <div className="bg-white/90 rounded-xl p-3 border border-amber-200 flex items-center justify-between text-xs text-amber-900 font-semibold shadow-sm">
+                            <span>Redeeming {pointsToRedeem} points for discount</span>
+                            <span className="text-emerald-600 font-bold font-syne text-sm">-₹{pointsDiscount} OFF</span>
+                          </div>
+                        )}
+
+                        {!canRedeemPoints && (
+                          <p className="text-[11px] text-amber-700/90 leading-relaxed font-medium">
+                            You need at least 100 loyalty points to redeem discounts at checkout (100 pts = ₹10 off). Earn points on every delivered order!
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     {/* Price Breakdown Review - MOVED FROM SIDEBAR */}
                     <div className="bg-gray-50 rounded-[2rem] p-8 space-y-6 border border-gray-100/50">
                       <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Price Breakdown</p>
@@ -1600,8 +1697,16 @@ export default function Checkout() {
                         </div>
                         {discount > 0 && (
                           <div className="flex justify-between text-sm font-bold text-ruby">
-                            <span>Discount</span>
+                            <span>Promo Discount</span>
                             <span>-{formatPrice(discount)}</span>
+                          </div>
+                        )}
+                        {pointsDiscount > 0 && (
+                          <div className="flex justify-between text-sm font-bold text-emerald-600">
+                            <span className="flex items-center gap-1.5">
+                              <Sparkles size={14} /> Loyalty Discount ({pointsToRedeem} pts)
+                            </span>
+                            <span>-{formatPrice(pointsDiscount)}</span>
                           </div>
                         )}
                         <div className="flex justify-between text-sm font-medium text-gray-400">
@@ -1727,7 +1832,8 @@ export default function Checkout() {
                       price={finalTotal}
                       onConfirm={handlePlaceOrder}
                       isLoading={isProcessingPayment}
-                      disabled={isProcessingPayment}
+                      disabled={isProcessingPayment || isOrderConfirmed}
+                      isConfirmed={isOrderConfirmed}
                     />
                   </div>
                 </motion.div>

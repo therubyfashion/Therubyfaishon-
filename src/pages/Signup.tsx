@@ -208,7 +208,7 @@ export default function Signup() {
       }
 
       localStorage.removeItem('phone_user');
-      navigate(`/verify-prompt?email=${encodeURIComponent(formData.email)}&uid=${sUser.id}`);
+      navigate(`/verify-prompt?email=${encodeURIComponent(formData.email)}&uid=${sUser.id}`, { replace: true });
     } catch (error: any) {
       console.error("Signup error:", error);
       toast.error(error.message || "Failed to create account. Please try again.");

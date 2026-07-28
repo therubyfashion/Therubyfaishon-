@@ -704,7 +704,7 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                   />
                 </div>
 
-                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   <div className="flex items-center space-x-3 p-4 bg-gray-50 rounded-2xl border border-gray-100">
                     <button
                       type="button"
@@ -732,6 +732,22 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Show in homepage most popular section</p>
                     </div>
                   </div>
+
+                  {!isEditing && (
+                    <div className="flex items-center space-x-3 p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, notifySubscribers: formData.notifySubscribers === false })}
+                        className={`w-12 h-6 rounded-full transition-all relative flex-shrink-0 ${formData.notifySubscribers !== false ? 'bg-ruby' : 'bg-gray-300'}`}
+                      >
+                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${formData.notifySubscribers !== false ? 'left-7' : 'left-1'}`} />
+                      </button>
+                      <div>
+                        <p className="text-sm font-bold text-[#1A2C54]">Notify subscribers about this product</p>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Send push & in-app notification</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -2334,6 +2350,34 @@ export default function AdminDashboard() {
   const [activeOrderMenu, setActiveOrderMenu] = useState<string | null>(null);
   const [viewingCustomer, setViewingCustomer] = useState<any | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
+  const [customerLoyaltyLogs, setCustomerLoyaltyLogs] = useState<any[]>([]);
+  const [loadingCustomerLogs, setLoadingCustomerLogs] = useState(false);
+  const [isGrantBonusModalOpen, setIsGrantBonusModalOpen] = useState(false);
+  const [bonusPointsInput, setBonusPointsInput] = useState('100');
+  const [bonusReasonInput, setBonusReasonInput] = useState('');
+
+  useEffect(() => {
+    if (!selectedCustomer?.id) return;
+    const fetchCustomerLogs = async () => {
+      setLoadingCustomerLogs(true);
+      try {
+        const { data, error } = await supabase
+          .from('loyalty_points_log')
+          .select('*')
+          .eq('user_id', selectedCustomer.id)
+          .order('created_at', { ascending: false });
+
+        if (!error && data) {
+          setCustomerLoyaltyLogs(data);
+        }
+      } catch (e) {
+        console.error("Error fetching customer loyalty logs:", e);
+      } finally {
+        setLoadingCustomerLogs(false);
+      }
+    };
+    fetchCustomerLogs();
+  }, [selectedCustomer?.id]);
   const [trackingNumber, setTrackingNumber] = useState('');
   const [carrier, setCarrier] = useState('');
   const [isTrackingEnabled, setIsTrackingEnabled] = useState(false);
@@ -2717,6 +2761,7 @@ export default function AdminDashboard() {
     barcode: '',
     isTrending: false,
     isPopular: false,
+    notifySubscribers: true,
     variants: []
   });
 
@@ -2788,24 +2833,94 @@ export default function AdminDashboard() {
     return () => unsubscribe();
   }, []);
 
-  // Real-time listener for customer chats
+  // Real-time listener for customer chats in Supabase
   useEffect(() => {
-    const q = query(
-      collection(db, 'chats'),
-      orderBy('lastMessageAt', 'desc')
-    );
+    let isMounted = true;
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const chatsList = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setChats(chatsList);
-    }, (error) => {
-      console.error("Chats listener error:", error);
-    });
+    const fetchAdminChats = async () => {
+      try {
+        const { data: rawChatsData, error: chatsError } = await supabase
+          .from('chats')
+          .select('*, profiles:user_id(id, display_name, email, photo_url)')
+          .order('last_message_at', { ascending: false });
 
-    return () => unsubscribe();
+        let rawChats = rawChatsData || [];
+
+        if (chatsError || (rawChats.length > 0 && (!rawChats[0].profiles || (Array.isArray(rawChats[0].profiles) && rawChats[0].profiles.length === 0)))) {
+          const { data: fallbackChats } = await supabase
+            .from('chats')
+            .select('*')
+            .order('last_message_at', { ascending: false });
+          
+          if (fallbackChats && fallbackChats.length > 0) {
+            const uIds = [...new Set(fallbackChats.map(c => c.user_id).filter(Boolean))];
+            let profMap = new Map();
+            if (uIds.length > 0) {
+              const { data: profs } = await supabase
+                .from('profiles')
+                .select('id, display_name, email, photo_url')
+                .in('id', uIds);
+              profMap = new Map((profs || []).map(p => [p.id, p]));
+            }
+            rawChats = fallbackChats.map(c => ({
+              ...c,
+              profiles: profMap.get(c.user_id) || null
+            }));
+          }
+        }
+
+        // Fetch unread messages count per chat for admin
+        const { data: unreadMsgs } = await supabase
+          .from('chat_messages')
+          .select('chat_id')
+          .eq('sender_role', 'user')
+          .eq('is_read', false);
+
+        const unreadMap: Record<string, number> = {};
+        if (unreadMsgs) {
+          unreadMsgs.forEach((m: any) => {
+            unreadMap[m.chat_id] = (unreadMap[m.chat_id] || 0) + 1;
+          });
+        }
+
+        const formattedChats = rawChats.map((c: any) => {
+          const prof = Array.isArray(c.profiles) ? c.profiles[0] : c.profiles;
+          const uName = prof?.display_name || prof?.email || c.user_name || 'Customer';
+          return {
+            ...c,
+            userId: c.user_id,
+            userName: uName,
+            userEmail: prof?.email || '',
+            lastMessage: c.last_message || 'No messages',
+            lastMessageAt: c.last_message_at || c.created_at,
+            unreadCountAdmin: unreadMap[c.id] || 0
+          };
+        });
+
+        if (isMounted) {
+          setChats(formattedChats);
+        }
+      } catch (err: any) {
+        console.error("Admin chats fetch error:", err);
+      }
+    };
+
+    fetchAdminChats();
+
+    const chatsChannel = supabase
+      .channel('admin_chats_channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chats' }, () => {
+        fetchAdminChats();
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, () => {
+        fetchAdminChats();
+      })
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(chatsChannel);
+    };
   }, []);
 
   // Keep selectedChat updated when chats list changes
@@ -2814,7 +2929,7 @@ export default function AdminDashboard() {
     const latestChat = chats.find(c => c.id === selectedChat.id);
     if (latestChat) {
       if (
-        latestChat.lastMessageAt?.seconds !== selectedChat.lastMessageAt?.seconds ||
+        latestChat.last_message_at !== selectedChat.last_message_at ||
         latestChat.unreadCountAdmin !== selectedChat.unreadCountAdmin ||
         latestChat.lastMessage !== selectedChat.lastMessage
       ) {
@@ -3273,24 +3388,100 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!selectedChat) return;
 
-    const q = query(
-      collection(db, 'chats', selectedChat.id, 'messages'),
-      orderBy('createdAt', 'asc')
-    );
+    let isMounted = true;
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setChatMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      
-      // Mark as read by admin
-      setDoc(doc(db, 'chats', selectedChat.id), {
-        unreadCountAdmin: 0
-      }, { merge: true }).catch(() => {});
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `chats/${selectedChat.id}/messages`);
-    });
+    const fetchMessages = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('chat_messages')
+          .select('*')
+          .eq('chat_id', selectedChat.id)
+          .order('created_at', { ascending: true });
 
-    return () => unsubscribe();
-  }, [selectedChat]);
+        if (error) {
+          console.error("Error loading chat messages:", error);
+          return;
+        }
+
+        if (data && isMounted) {
+          const msgs = data.map((m: any) => ({
+            id: m.id,
+            chat_id: m.chat_id,
+            senderId: m.sender_role === 'admin' ? 'admin' : m.sender_id,
+            senderRole: m.sender_role,
+            text: m.message,
+            type: (m.message?.startsWith('data:image/') || m.message?.startsWith('http://') || m.message?.startsWith('https://')) ? 'image' : 'text',
+            image: (m.message?.startsWith('data:image/') || m.message?.startsWith('http://') || m.message?.startsWith('https://')) ? m.message : undefined,
+            is_read: m.is_read,
+            createdAt: m.created_at
+          }));
+          setChatMessages(msgs);
+        }
+
+        // Mark messages as read by admin when chat is opened
+        await supabase
+          .from('chat_messages')
+          .update({ is_read: true })
+          .eq('chat_id', selectedChat.id)
+          .eq('sender_role', 'user')
+          .eq('is_read', false);
+
+        if (isMounted) {
+          setChats(prev => prev.map(c => c.id === selectedChat.id ? { ...c, unreadCountAdmin: 0 } : c));
+        }
+      } catch (err) {
+        console.error("Error fetching admin chat messages:", err);
+      }
+    };
+
+    fetchMessages();
+
+    // Real-time subscription so new customer messages appear instantly
+    const channel = supabase
+      .channel(`admin_chat_msgs_${selectedChat.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `chat_id=eq.${selectedChat.id}`
+        },
+        (payload) => {
+          const m = payload.new;
+          if (!m) return;
+
+          setChatMessages((prev) => {
+            if (prev.some(item => item.id === m.id)) return prev;
+            return [...prev, {
+              id: m.id,
+              chat_id: m.chat_id,
+              senderId: m.sender_role === 'admin' ? 'admin' : m.sender_id,
+              senderRole: m.sender_role,
+              text: m.message,
+              type: (m.message?.startsWith('data:image/') || m.message?.startsWith('http://') || m.message?.startsWith('https://')) ? 'image' : 'text',
+              image: (m.message?.startsWith('data:image/') || m.message?.startsWith('http://') || m.message?.startsWith('https://')) ? m.message : undefined,
+              is_read: m.is_read,
+              createdAt: m.created_at
+            }];
+          });
+
+          if (m.sender_role === 'user') {
+            supabase
+              .from('chat_messages')
+              .update({ is_read: true })
+              .eq('id', m.id)
+              .then(() => {});
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, [selectedChat?.id]);
 
   useEffect(() => {
     if (chatScrollRef.current) {
@@ -3303,22 +3494,36 @@ export default function AdminDashboard() {
     if (!selectedChat || (!adminMessage.trim() && !imageUrl)) return;
 
     const text = adminMessage.trim();
+    const messageContent = imageUrl || text;
     setAdminMessage('');
 
     try {
-      await addDoc(collection(db, 'chats', selectedChat.id, 'messages'), {
-        text: text || '',
-        image: imageUrl || null,
-        type: imageUrl ? 'image' : 'text',
-        senderId: 'admin',
-        createdAt: serverTimestamp()
-      });
+      const nowIso = new Date().toISOString();
 
-      await setDoc(doc(db, 'chats', selectedChat.id), {
-        lastMessage: imageUrl ? 'Sent an image' : text,
-        lastMessageAt: serverTimestamp(),
-        unreadCountUser: (selectedChat.unreadCountUser || 0) + 1
-      }, { merge: true });
+      // 1. Insert into chat_messages with sender_role = 'admin'
+      const { error: msgErr } = await supabase
+        .from('chat_messages')
+        .insert({
+          chat_id: selectedChat.id,
+          sender_id: user?.uid || user?.id || 'admin',
+          sender_role: 'admin',
+          message: messageContent,
+          is_read: false,
+          created_at: nowIso
+        });
+
+      if (msgErr) throw msgErr;
+
+      // 2. Update chats.last_message and chats.last_message_at
+      await supabase
+        .from('chats')
+        .update({
+          last_message: imageUrl ? 'Sent an image' : text,
+          last_message_at: nowIso,
+          status: 'open'
+        })
+        .eq('id', selectedChat.id);
+
     } catch (error) {
       console.error("Error sending admin message:", error);
       toast.error("Failed to send message");
@@ -3527,7 +3732,8 @@ export default function AdminDashboard() {
         try {
           let templateKey = '';
           if (returnStatus === 'Approved') templateKey = 'return_approved';
-          else if (returnStatus === 'Refunded') templateKey = 'refund_completed';
+          else if (returnStatus === 'Rejected') templateKey = 'return_rejected';
+          else if (returnStatus === 'Refunded' || returnStatus === 'Refund Completed') templateKey = 'refund_completed';
 
           if (templateKey) {
             fetch('/api/send-templated-notification', {
@@ -3535,10 +3741,11 @@ export default function AdminDashboard() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 templateKey,
-                userId: order.userId,
+                userId: order.userId || order.user_id,
                 params: {
                   customerName: order.address?.name || order.shipping_full_name || 'Customer',
-                  orderId: order.orderId || order.order_number
+                  orderId: order.orderId || order.order_number || order.id,
+                  reason: adminNotes || 'Does not meet return policy requirements'
                 },
                 options: { url: '/my-orders' }
               })
@@ -4075,8 +4282,22 @@ export default function AdminDashboard() {
         if (insertErr) throw insertErr;
 
         const insertedId = insertedProd?.id || 'new_id';
-        logProductDiagnostics('Saved', { id: insertedId, name: productData.name });
+        const productName = productData.name || formData.name;
+        logProductDiagnostics('Saved', { id: insertedId, name: productName });
         toast.success("Product added successfully!", { id: uploadToast });
+
+        if (formData.notifySubscribers !== false) {
+          fetch('/api/send-user-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: 'broadcast',
+              title: '✨ New Arrival!',
+              body: `Check out our new product: ${productName}`,
+              url: `/product/${insertedId}`
+            })
+          }).catch(err => console.error("Broadcast push error:", err));
+        }
       }
 
       // CLOSE UI FIRST for speed
@@ -4104,23 +4325,12 @@ export default function AdminDashboard() {
         barcode: '',
         isTrending: false,
         isPopular: false,
+        notifySubscribers: true,
         variants: []
       });
 
       // Fetch products without blocking
       fetchProducts();
-
-      // Trigger background notification
-      fetch('/api/send-push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: 'New Arrival! 👗',
-          body: `${formData.name} is now available.`,
-          url: '/',
-          type: 'all'
-        })
-      }).catch(() => {});
 
     } catch (error: any) {
       toast.dismiss(uploadToast);
@@ -4536,15 +4746,39 @@ export default function AdminDashboard() {
     }
   };
 
-  const updateLoyaltyPoints = async (userId: string, points: number) => {
+  const updateLoyaltyPoints = async (userId: string, points: number, reason?: string) => {
     try {
-      const userRef = doc(db, 'users', userId);
-      const userDoc = customers.find(u => u.id === userId);
-      const currentPoints = userDoc?.loyaltyPoints || 0;
-      await updateDoc(userRef, { loyaltyPoints: currentPoints + points });
-      toast.success(`Added ${points} points!`);
-      fetchDashboardData();
+      const res = await fetch('/api/loyalty/grant-bonus-points', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, points, reason: reason || 'Admin bonus points' })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast.success(`Granted ${points} bonus points!`);
+        if (selectedCustomer && selectedCustomer.id === userId) {
+          setSelectedCustomer({
+            ...selectedCustomer,
+            loyaltyPoints: data.newTotalPoints
+          });
+        }
+        // Refresh loyalty logs
+        try {
+          const { data: logData } = await supabase
+            .from('loyalty_points_log')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
+          if (logData) setCustomerLoyaltyLogs(logData);
+        } catch (e) {
+          console.error("Failed to refresh loyalty log:", e);
+        }
+        fetchDashboardData();
+      } else {
+        toast.error(data.error || "Failed to update points");
+      }
     } catch (error) {
+      console.error("Grant bonus points error:", error);
       toast.error("Failed to update points");
     }
   };
@@ -8061,7 +8295,7 @@ export default function AdminDashboard() {
                       <button 
                         onClick={() => {
                           const customerId = selectedCustomer.id || selectedCustomer.email;
-                          const existingChat = chats.find(c => c.id === customerId || c.userId === customerId);
+                          const existingChat = chats.find(c => c.id === customerId || c.userId === customerId || c.user_id === customerId || (selectedCustomer.email && c.userEmail === selectedCustomer.email));
                           if (existingChat) {
                             setSelectedChat(existingChat);
                             setActiveTab('chats');
@@ -8219,6 +8453,55 @@ export default function AdminDashboard() {
                         </div>
                       </div>
 
+                      {/* LOYALTY POINTS HISTORY */}
+                      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                          <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                            <Sparkles size={16} className="text-amber-500" />
+                            Loyalty Points History
+                          </h3>
+                          <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">
+                            Balance: {selectedCustomer.loyaltyPoints || 0} pts
+                          </span>
+                        </div>
+                        <div className="p-4">
+                          {loadingCustomerLogs ? (
+                            <div className="py-6 text-center text-xs text-gray-400 font-medium">Loading history...</div>
+                          ) : customerLoyaltyLogs.length > 0 ? (
+                            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                              {customerLoyaltyLogs.map((log) => {
+                                const isEarned = log.type === 'earned' || log.type === 'bonus';
+                                return (
+                                  <div key={log.id} className="p-3 bg-gray-50 rounded-xl flex items-center justify-between text-xs border border-gray-100">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                      <span className={cn(
+                                        "w-6 h-6 rounded-lg flex items-center justify-center font-bold text-[10px] shrink-0",
+                                        log.type === 'earned' ? "bg-emerald-100 text-emerald-700" :
+                                        log.type === 'bonus' ? "bg-purple-100 text-purple-700" :
+                                        "bg-rose-100 text-rose-700"
+                                      )}>
+                                        {isEarned ? '+' : '-'}
+                                      </span>
+                                      <div className="min-w-0">
+                                        <p className="font-bold text-gray-800 truncate">{log.description || log.type}</p>
+                                        <p className="text-[10px] text-gray-400">{new Date(log.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                                      </div>
+                                    </div>
+                                    <span className={cn("font-bold shrink-0 ml-2", isEarned ? "text-emerald-600" : "text-rose-600")}>
+                                      {isEarned ? `+${log.points}` : `-${log.points}`} pts
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="py-6 text-center bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">No loyalty activity logged</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
                     </div>
 
                     {/* RIGHT COLUMN */}
@@ -8260,11 +8543,15 @@ export default function AdminDashboard() {
                           </div>
                           <div className="pt-2 border-t border-gray-100 space-y-2">
                             <button 
-                              onClick={() => updateLoyaltyPoints(selectedCustomer.id, 100)}
-                              className="w-full py-2 bg-yellow-50 text-yellow-700 rounded-lg text-[10px] font-bold uppercase tracking-widest hover:bg-yellow-100 transition-all flex items-center justify-center gap-2"
+                              onClick={() => {
+                                setBonusPointsInput('100');
+                                setBonusReasonInput('VIP Reward Bonus');
+                                setIsGrantBonusModalOpen(true);
+                              }}
+                              className="w-full py-2 bg-amber-50 text-amber-700 rounded-lg text-[10px] font-bold uppercase tracking-widest hover:bg-amber-100 transition-all flex items-center justify-center gap-2"
                             >
-                              <Star size={12} />
-                              Gift 100 Points
+                              <Sparkles size={12} />
+                              Grant Bonus Points
                             </button>
                             <button 
                               onClick={() => {
@@ -12549,6 +12836,92 @@ export default function AdminDashboard() {
                 >
                   <Save size={18} />
                   {loading ? 'Saving...' : (editingPromotion ? 'Update Offer' : 'Save Offer')}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* GRANT BONUS POINTS MODAL */}
+      <AnimatePresence>
+        {isGrantBonusModalOpen && selectedCustomer && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsGrantBonusModalOpen(false)}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl relative z-10 border border-gray-100 space-y-6"
+            >
+              <div className="flex items-center justify-between pb-4 border-b border-gray-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+                    <Sparkles size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900">Grant Bonus Points</h3>
+                    <p className="text-xs text-gray-500">Add custom loyalty points to {selectedCustomer.displayName || selectedCustomer.email || 'Customer'}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setIsGrantBonusModalOpen(false)}
+                  className="p-2 hover:bg-gray-100 rounded-xl text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Points Amount</label>
+                  <input 
+                    type="number" 
+                    value={bonusPointsInput} 
+                    onChange={(e) => setBonusPointsInput(e.target.value)} 
+                    placeholder="e.g. 100" 
+                    className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-sm font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Reason / Description</label>
+                  <input 
+                    type="text" 
+                    value={bonusReasonInput} 
+                    onChange={(e) => setBonusReasonInput(e.target.value)} 
+                    placeholder="e.g. Special VIP Gift, Goodwill Bonus" 
+                    className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button 
+                  onClick={() => setIsGrantBonusModalOpen(false)} 
+                  className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-2xl text-xs font-bold uppercase tracking-wider transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={async () => {
+                    const pts = parseInt(bonusPointsInput);
+                    if (isNaN(pts) || pts <= 0) {
+                      toast.error("Please enter a valid points amount");
+                      return;
+                    }
+                    await updateLoyaltyPoints(selectedCustomer.id, pts, bonusReasonInput || 'Admin bonus points');
+                    setIsGrantBonusModalOpen(false);
+                  }} 
+                  className="flex-1 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl text-xs font-bold uppercase tracking-wider transition-colors shadow-lg shadow-amber-500/20 font-bold"
+                >
+                  Grant Points
                 </button>
               </div>
             </motion.div>

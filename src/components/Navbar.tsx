@@ -32,20 +32,16 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
   const navLinks = [
     { name: 'Home', path: '/' },
     { name: 'Shop', path: '/shop' },
-    { name: 'About', path: '/about' },
-    { name: 'Track Order', path: '/track' },
-    { name: 'FAQ', path: '/faq' },
+    { name: 'Cart', path: '/cart' },
+    { name: 'Wishlist', path: '/wishlist' },
+    { name: 'Profile', path: '/profile' },
   ];
 
   const isSolid = solid || isScrolled;
 
   return (
     <nav 
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
-        isSolid 
-          ? 'bg-white/80 backdrop-blur-lg shadow-sm py-3' 
-          : 'bg-transparent py-6'
-      }`}
+      className={`hidden md:block sticky top-0 left-0 right-0 z-50 transition-all duration-300 bg-white/95 backdrop-blur-md shadow-xs border-b border-gray-100 py-3.5`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center">
@@ -53,7 +49,7 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
           <div className="flex md:hidden">
             <button 
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className={`${isSolid ? 'text-gray-900' : 'text-white'} p-2`}
+              className="text-gray-900 p-2"
             >
               {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
             </button>
@@ -73,22 +69,18 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
                 TR
               </div>
             )}
-            <span className={`text-xl font-serif font-bold tracking-tighter ${
-              isSolid ? 'text-gray-900' : 'text-white'
-            }`}>
+            <span className="text-xl font-serif font-bold tracking-tighter text-gray-900">
               {storeSettings?.storeName || 'The Ruby Fashion'}
             </span>
           </Link>
 
           {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-10">
+          <div className="hidden md:flex items-center space-x-8 lg:space-x-10">
             {navLinks.map((link) => (
               <Link 
                 key={link.name}
                 to={link.path}
-                className={`text-[10px] font-bold uppercase tracking-[0.2em] transition-all hover:text-ruby relative group ${
-                  isSolid ? 'text-gray-600' : 'text-white/80'
-                }`}
+                className="text-[11px] font-bold uppercase tracking-[0.2em] transition-all text-gray-700 hover:text-ruby relative group"
               >
                 {link.name}
                 <span className={`absolute -bottom-1 left-0 w-0 h-0.5 bg-ruby transition-all group-hover:w-full ${
@@ -99,14 +91,14 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
           </div>
 
           {/* Icons */}
-          <div className="flex items-center space-x-2 md:space-x-6">
-            <Link to="/search" className={`p-2 transition-colors ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
+          <div className="flex items-center space-x-2 md:space-x-5">
+            <Link to="/search" className="p-2 transition-colors text-gray-700 hover:text-ruby">
               <Search size={20} />
             </Link>
 
             <Link 
               to="/notifications"
-              className={`p-2 transition-colors relative group cursor-pointer flex items-center justify-center ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}
+              className="p-2 transition-colors relative group cursor-pointer flex items-center justify-center text-gray-700 hover:text-ruby"
             >
               <Bell size={20} />
               {unreadCount > 0 && (
@@ -116,7 +108,7 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
               )}
             </Link>
             
-            <Link to="/wishlist" className={`p-2 transition-colors relative group ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
+            <Link to="/wishlist" className="p-2 transition-colors relative group text-gray-700 hover:text-ruby">
               <Heart size={20} />
               {wishlistItems.length > 0 && (
                 <span className="absolute top-1 right-1 bg-ruby text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white pointer-events-none z-10">
@@ -125,7 +117,7 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
               )}
             </Link>
 
-            <Link to="/cart" className={`p-2 transition-colors relative group ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
+            <Link to="/cart" className="p-2 transition-colors relative group text-gray-700 hover:text-ruby">
               <ShoppingBag size={20} />
               {itemCount > 0 && (
                 <span className="absolute top-1 right-1 bg-ruby text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white pointer-events-none z-10">
@@ -137,9 +129,9 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
             <div className="h-4 w-px bg-gray-200 hidden md:block"></div>
 
             {user ? (
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-3">
                 {isAdmin && (
-                  <Link to="/admin" className={`p-2 transition-colors ${isSolid ? 'text-gray-600 hover:text-ruby' : 'text-white/80 hover:text-white'}`}>
+                  <Link to="/admin" className="p-2 transition-colors text-gray-700 hover:text-ruby">
                     <Settings size={20} className="animate-spin-slow" />
                   </Link>
                 )}
@@ -154,11 +146,7 @@ export default function Navbar({ solid = false }: { solid?: boolean }) {
             ) : (
               <Link 
                 to="/login" 
-                className={`text-[10px] font-bold uppercase tracking-widest px-6 py-2.5 rounded-full transition-all ${
-                  isSolid 
-                    ? 'bg-black text-white hover:bg-ruby' 
-                    : 'bg-white text-black hover:bg-ruby hover:text-white'
-                }`}
+                className="text-[10px] font-bold uppercase tracking-widest px-6 py-2.5 rounded-full transition-all bg-black text-white hover:bg-ruby"
               >
                 Login
               </Link>

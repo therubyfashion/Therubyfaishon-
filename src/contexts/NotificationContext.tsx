@@ -170,6 +170,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       await supabase
         .from('notifications')
         .update({ is_read: true })
+        .eq('is_read', false)
         .or(`user_id.eq.${targetUserId},user_id.is.null`);
     } catch (error) {
       console.error("Error marking all as read:", error);

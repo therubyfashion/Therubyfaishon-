@@ -230,7 +230,7 @@ export default function Addresses() {
 
   return (
     <div className="min-h-screen bg-[#FAFAFA] pt-24 pb-32 px-4">
-      <div className="max-w-2xl mx-auto space-y-8">
+      <div className="max-w-7xl mx-auto space-y-8">
         {/* Header */}
         <div className="flex items-center justify-between px-2">
           <div className="flex items-center gap-4">

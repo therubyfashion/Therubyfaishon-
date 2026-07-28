@@ -178,14 +178,17 @@ export default function Cart() {
         </div>
       </div>
 
-      <div className="max-w-2xl mx-auto px-4 pt-8 sm:pt-12 space-y-8 sm:space-y-10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 sm:pt-12 space-y-8 sm:space-y-10">
         <div className="space-y-1 sm:space-y-2">
           <h1 className="text-3xl sm:text-4xl font-serif font-bold text-[#1A2C54]">Shopping Cart</h1>
           <p className="text-xs sm:text-sm text-gray-400 font-medium">{itemCount} items in your cart</p>
         </div>
 
-        {/* Items List */}
-        <div className="space-y-6">
+        <div className="lg:grid lg:grid-cols-3 lg:gap-8 space-y-8 lg:space-y-0 items-start">
+          {/* Left Column: Items & Promo */}
+          <div className="lg:col-span-2 space-y-8">
+            {/* Items List */}
+            <div className="space-y-6">
           <AnimatePresence mode="popLayout">
             {items.map((item) => (
               <motion.div 
@@ -317,8 +320,11 @@ export default function Cart() {
           </div>
         </div>
 
-        {/* Order Summary */}
-        <div className="bg-white border border-gray-100 rounded-[2rem] p-8 sm:p-10 space-y-8 shadow-sm">
+          </div>
+
+          {/* Right Column: Order Summary */}
+          <div className="lg:col-span-1">
+            <div className="bg-white border border-gray-100 rounded-[2rem] p-8 sm:p-10 space-y-8 shadow-sm sticky top-28">
           <h2 className="text-xl sm:text-2xl font-serif font-bold text-[#1A2C54]">Order Summary</h2>
           
           <div className="space-y-4">
@@ -381,5 +387,7 @@ export default function Cart() {
         </div>
       </div>
     </div>
+  </div>
+</div>
   );
 }

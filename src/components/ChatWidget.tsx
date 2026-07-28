@@ -5,12 +5,7 @@ import {
   Paperclip, User, Check, CheckCheck, Smile,
   MoreVertical, Phone, Video, Minimize2, Maximize2
 } from 'lucide-react';
-import { 
-  collection, addDoc, query, orderBy, 
-  onSnapshot, doc, updateDoc, serverTimestamp,
-  setDoc, getDoc, where, limit
-} from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 
@@ -18,18 +13,19 @@ interface Message {
   id: string;
   text: string;
   senderId: string;
+  senderRole?: string;
   createdAt: any;
   image?: string;
   type?: 'text' | 'image';
 }
 
 export default function ChatWidget() {
-  const { user, isAdmin } = useAuth();
+  const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -43,50 +39,167 @@ export default function ChatWidget() {
     return () => window.removeEventListener('open-ruby-chat', handleOpenChat);
   }, []);
 
+  const currentUserId = user?.id || user?.uid;
+
+  // Initialize or fetch chat ID for user
   useEffect(() => {
-    if (!user || !isOpen) return;
+    if (!currentUserId) return;
 
-    const chatId = user.uid;
-    const q = query(
-      collection(db, 'chats', chatId, 'messages'),
-      orderBy('createdAt', 'asc')
-    );
+    let isMounted = true;
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Message[];
-      setMessages(msgs);
-      
-      // Reset unread count for user when chat is open safely using merge
-      setDoc(doc(db, 'chats', chatId), {
-        unreadCountUser: 0
-      }, { merge: true }).catch(() => {});
-    }, (error) => {
-      console.error("Chat Messages listener error:", error);
-    });
+    const initChat = async () => {
+      try {
+        const { data: existingChats, error } = await supabase
+          .from('chats')
+          .select('id')
+          .eq('user_id', currentUserId)
+          .order('created_at', { ascending: false })
+          .limit(1);
 
-    return () => unsubscribe();
-  }, [user, isOpen, isAdmin]);
-
-  useEffect(() => {
-    if (!user) return;
-
-    const chatId = user.uid;
-    const unsubscribe = onSnapshot(doc(db, 'chats', chatId), (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        if (!isOpen) {
-          setUnreadCount(data.unreadCountUser || 0);
+        if (error) {
+          console.error("Error fetching user chat:", error);
+          return;
         }
-      }
-    }, (error) => {
-      console.error("Chat Status listener error:", error);
-    });
 
-    return () => unsubscribe();
-  }, [user, isOpen, isAdmin]);
+        if (existingChats && existingChats.length > 0) {
+          if (isMounted) setActiveChatId(existingChats[0].id);
+        }
+      } catch (err) {
+        console.error("Chat init error:", err);
+      }
+    };
+
+    initChat();
+
+    return () => { isMounted = false; };
+  }, [currentUserId]);
+
+  // Load messages & subscribe in real-time when activeChatId is set
+  useEffect(() => {
+    if (!currentUserId || !activeChatId) return;
+
+    let isMounted = true;
+
+    const fetchMessages = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('chat_messages')
+          .select('*')
+          .eq('chat_id', activeChatId)
+          .order('created_at', { ascending: true });
+
+        if (error) {
+          console.error("Error loading chat messages:", error);
+          return;
+        }
+
+        if (data && isMounted) {
+          const msgs: Message[] = data.map((m: any) => {
+            const isImg = m.message?.startsWith('data:image/') || m.message?.startsWith('http://') || m.message?.startsWith('https://');
+            return {
+              id: m.id,
+              text: m.message,
+              senderId: m.sender_id,
+              senderRole: m.sender_role,
+              createdAt: m.created_at,
+              type: isImg ? 'image' : 'text',
+              image: isImg ? m.message : undefined
+            };
+          });
+          setMessages(msgs);
+        }
+
+        // If chat widget is open, mark admin messages as read
+        if (isOpen) {
+          await supabase
+            .from('chat_messages')
+            .update({ is_read: true })
+            .eq('chat_id', activeChatId)
+            .eq('sender_role', 'admin')
+            .eq('is_read', false);
+
+          if (isMounted) setUnreadCount(0);
+        }
+      } catch (err) {
+        console.error("Error fetching messages:", err);
+      }
+    };
+
+    fetchMessages();
+
+    // Real-time subscription to chat_messages for current chat
+    const channel = supabase
+      .channel(`user_chat_msgs_${activeChatId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `chat_id=eq.${activeChatId}`
+        },
+        (payload) => {
+          const m = payload.new;
+          if (!m) return;
+
+          const isImg = m.message?.startsWith('data:image/') || m.message?.startsWith('http://') || m.message?.startsWith('https://');
+
+          setMessages((prev) => {
+            if (prev.some((item) => item.id === m.id)) return prev;
+            return [
+              ...prev,
+              {
+                id: m.id,
+                text: m.message,
+                senderId: m.sender_id,
+                senderRole: m.sender_role,
+                createdAt: m.created_at,
+                type: isImg ? 'image' : 'text',
+                image: isImg ? m.message : undefined
+              }
+            ];
+          });
+
+          if (m.sender_role === 'admin') {
+            if (isOpen) {
+              supabase
+                .from('chat_messages')
+                .update({ is_read: true })
+                .eq('id', m.id)
+                .then(() => {});
+            } else {
+              setUnreadCount((prev) => prev + 1);
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, [currentUserId, activeChatId, isOpen]);
+
+  // Fetch unread count when widget is closed
+  useEffect(() => {
+    if (!currentUserId || !activeChatId || isOpen) return;
+
+    const fetchUnread = async () => {
+      const { count } = await supabase
+        .from('chat_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('chat_id', activeChatId)
+        .eq('sender_role', 'admin')
+        .eq('is_read', false);
+
+      if (typeof count === 'number') {
+        setUnreadCount(count);
+      }
+    };
+
+    fetchUnread();
+  }, [currentUserId, activeChatId, isOpen]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -94,46 +207,83 @@ export default function ChatWidget() {
     }
   }, [messages]);
 
+  const getOrCreateChatId = async (): Promise<string | null> => {
+    if (!currentUserId) return null;
+    if (activeChatId) return activeChatId;
+
+    const { data: existingChats } = await supabase
+      .from('chats')
+      .select('id')
+      .eq('user_id', currentUserId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (existingChats && existingChats.length > 0) {
+      const existingId = existingChats[0].id;
+      setActiveChatId(existingId);
+      return existingId;
+    }
+
+    const nowIso = new Date().toISOString();
+    const { data: newChat, error } = await supabase
+      .from('chats')
+      .insert({
+        user_id: currentUserId,
+        status: 'open',
+        last_message: 'Chat started',
+        last_message_at: nowIso,
+        created_at: nowIso
+      })
+      .select('id')
+      .single();
+
+    if (error || !newChat) {
+      console.error("Error creating chat in Supabase:", error);
+      toast.error("Failed to start chat");
+      return null;
+    }
+
+    setActiveChatId(newChat.id);
+    return newChat.id;
+  };
+
   const handleSendMessage = async (e?: React.FormEvent, imageUrl?: string) => {
     if (e) e.preventDefault();
     if (!user || (!message.trim() && !imageUrl)) return;
 
-    const chatId = user.uid;
     const text = message.trim();
+    const messageContent = imageUrl || text;
     setMessage('');
 
     try {
-      // Ensure chat document exists
-      const chatRef = doc(db, 'chats', chatId);
-      const chatDoc = await getDoc(chatRef);
-      
-      if (!chatDoc.exists()) {
-        await setDoc(chatRef, {
-          userId: user.uid,
-          userName: user.displayName || 'Anonymous',
-          userEmail: user.email,
-          lastMessage: imageUrl ? 'Sent an image' : text,
-          lastMessageAt: serverTimestamp(),
-          unreadCountAdmin: 1,
-          unreadCountUser: 0,
-          status: 'active',
-          createdAt: serverTimestamp()
-        });
-      } else {
-        await setDoc(chatRef, {
-          lastMessage: imageUrl ? 'Sent an image' : text,
-          lastMessageAt: serverTimestamp(),
-          unreadCountAdmin: (chatDoc.data()?.unreadCountAdmin || 0) + 1
-        }, { merge: true });
-      }
+      const chatIdToUse = await getOrCreateChatId();
+      if (!chatIdToUse) return;
 
-      await addDoc(collection(db, 'chats', chatId, 'messages'), {
-        text: text || '',
-        image: imageUrl || null,
-        type: imageUrl ? 'image' : 'text',
-        senderId: user.uid,
-        createdAt: serverTimestamp()
-      });
+      const nowIso = new Date().toISOString();
+
+      // Insert message into chat_messages
+      const { error: msgErr } = await supabase
+        .from('chat_messages')
+        .insert({
+          chat_id: chatIdToUse,
+          sender_id: currentUserId,
+          sender_role: 'user',
+          message: messageContent,
+          is_read: false,
+          created_at: nowIso
+        });
+
+      if (msgErr) throw msgErr;
+
+      // Update chats table
+      await supabase
+        .from('chats')
+        .update({
+          last_message: imageUrl ? 'Sent an image' : text,
+          last_message_at: nowIso,
+          status: 'open'
+        })
+        .eq('id', chatIdToUse);
 
     } catch (error) {
       console.error("Error sending message:", error);
@@ -220,37 +370,40 @@ export default function ChatWidget() {
                     </p>
                   </div>
 
-                  {messages.map((msg) => (
-                    <div 
-                      key={msg.id}
-                      className={`flex ${msg.senderId === user.uid ? 'justify-end' : 'justify-start'}`}
-                    >
-                      <div className={`max-w-[80%] space-y-1 ${msg.senderId === user.uid ? 'items-end' : 'items-start'}`}>
-                        <div className={`p-3 rounded-2xl text-sm shadow-sm ${
-                          msg.senderId === user.uid 
-                            ? 'bg-ruby text-white rounded-tr-none' 
-                            : 'bg-white text-[#1A2C54] border border-gray-100 rounded-tl-none'
-                        }`}>
-                          {msg.type === 'image' ? (
-                            <img 
-                              src={msg.image} 
-                              alt="Sent image" 
-                              className="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-all"
-                              onClick={() => window.open(msg.image, '_blank')}
-                            />
-                          ) : (
-                            <p className="leading-relaxed">{msg.text}</p>
-                          )}
-                        </div>
-                        <div className={`flex items-center space-x-1 px-1 ${msg.senderId === user.uid ? 'justify-end' : 'justify-start'}`}>
-                          <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">
-                            {msg.createdAt && typeof msg.createdAt.toDate === 'function' ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
-                          </span>
-                          {msg.senderId === user.uid && <CheckCheck size={10} className="text-ruby" />}
+                  {messages.map((msg) => {
+                    const isUserMsg = msg.senderRole === 'user' || msg.senderId === currentUserId;
+                    return (
+                      <div 
+                        key={msg.id}
+                        className={`flex ${isUserMsg ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div className={`max-w-[80%] space-y-1 ${isUserMsg ? 'items-end' : 'items-start'}`}>
+                          <div className={`p-3 rounded-2xl text-sm shadow-sm ${
+                            isUserMsg 
+                              ? 'bg-ruby text-white rounded-tr-none' 
+                              : 'bg-white text-[#1A2C54] border border-gray-100 rounded-tl-none'
+                          }`}>
+                            {msg.type === 'image' && msg.image ? (
+                              <img 
+                                src={msg.image} 
+                                alt="Sent image" 
+                                className="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-all"
+                                onClick={() => window.open(msg.image, '_blank')}
+                              />
+                            ) : (
+                              <p className="leading-relaxed">{msg.text}</p>
+                            )}
+                          </div>
+                          <div className={`flex items-center space-x-1 px-1 ${isUserMsg ? 'justify-end' : 'justify-start'}`}>
+                            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">
+                              {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
+                            </span>
+                            {isUserMsg && <CheckCheck size={10} className="text-ruby" />}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* Input */}

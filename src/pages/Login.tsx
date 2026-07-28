@@ -329,7 +329,7 @@ export default function Login() {
 
       if (!isVerified && sUser.email !== 'admin@theruby.com') {
         toast.error("Please verify your email before logging in.");
-        navigate(`/verify-prompt?email=${encodeURIComponent(sUser.email || '')}&uid=${sUser.id}`);
+        navigate(`/verify-prompt?email=${encodeURIComponent(sUser.email || '')}&uid=${sUser.id}`, { replace: true });
         return;
       }
 
@@ -361,9 +361,9 @@ export default function Login() {
 
       // Role-based routing
       if (userRole === 'admin' || sUser.email === 'admin@theruby.com' || sUser.email === 'mdsagaransari65670@gmail.com') {
-        navigate('/admin');
+        navigate('/admin', { replace: true });
       } else {
-        navigate('/');
+        navigate('/', { replace: true });
       }
     } catch (error: any) {
       console.error("Login error:", error);

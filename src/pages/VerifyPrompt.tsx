@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { Mail, ArrowRight, ArrowLeft, RefreshCw, LogOut, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function VerifyPrompt() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { refreshProfile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [storeSettings, setStoreSettings] = useState<any>(null);
@@ -15,6 +17,9 @@ export default function VerifyPrompt() {
   const [uid, setUid] = useState('');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [urlMessage, setUrlMessage] = useState<string | null>(null);
+
+  const hasNavigatedRef = useRef(false);
+  const authSubRef = useRef<any>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -43,8 +48,17 @@ export default function VerifyPrompt() {
     };
     fetchSettings();
 
+    const cleanupSub = () => {
+      if (authSubRef.current) {
+        authSubRef.current.unsubscribe();
+        authSubRef.current = null;
+      }
+    };
+
     // Check if user is already verified and has active session
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (hasNavigatedRef.current) return;
+
       if (session?.user) {
         const { data: profileData } = await supabase
           .from('profiles')
@@ -52,18 +66,27 @@ export default function VerifyPrompt() {
           .eq('id', session.user.id)
           .maybeSingle();
         
-        if (profileData?.is_verified) {
-          navigate('/');
+        if (profileData?.is_verified && !hasNavigatedRef.current) {
+          hasNavigatedRef.current = true;
+          cleanupSub();
+          await refreshProfile();
+          navigate('/', { replace: true });
         }
       } else {
-        if (!emailParam && !uidParam) {
-          navigate('/signup');
+        if (!emailParam && !uidParam && !hasNavigatedRef.current) {
+          hasNavigatedRef.current = true;
+          cleanupSub();
+          navigate('/signup', { replace: true });
         }
       }
     });
 
-    return () => subscription.unsubscribe();
-  }, [location, navigate]);
+    authSubRef.current = subscription;
+
+    return () => {
+      cleanupSub();
+    };
+  }, [location, navigate, refreshProfile]);
 
   const handleOtpChange = (index: number, value: string) => {
     if (value.length > 1) value = value.slice(-1);
@@ -111,6 +134,15 @@ export default function VerifyPrompt() {
         return;
       }
 
+      if (hasNavigatedRef.current) return;
+
+      // Immediately stop active auth state listeners & mark navigated
+      if (authSubRef.current) {
+        authSubRef.current.unsubscribe();
+        authSubRef.current = null;
+      }
+      hasNavigatedRef.current = true;
+
       let activeUid = uid;
       let firstName = 'Gorgeous';
       let userEmail = email;
@@ -139,8 +171,11 @@ export default function VerifyPrompt() {
         console.error("Failed to update Supabase verification state:", supabaseErr);
       }
 
-        // Send Welcome Email
-        const welcomeHtml = `
+      // Immediately update local AuthContext profile state before navigating
+      await refreshProfile();
+
+      // Send Welcome Email (non-blocking)
+      const welcomeHtml = `
           <!DOCTYPE html>
           <html>
           <head>
@@ -195,44 +230,44 @@ export default function VerifyPrompt() {
           </html>
         `;
 
-        await fetch('/api/send-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: userEmail,
-            fromName: currentSettings?.storeName || 'The Ruby',
-            subject: `Welcome to the Family, ${firstName}! ✨`,
-            html: welcomeHtml
-          })
-        });
+      fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: userEmail,
+          fromName: currentSettings?.storeName || 'The Ruby',
+          subject: `Welcome to the Family, ${firstName}! ✨`,
+          html: welcomeHtml
+        })
+      }).catch(err => console.error("Welcome email error:", err));
 
-        toast.success("Account Created Successfully 🎉", { position: 'bottom-center', duration: 5000 });
+      toast.success("Account Created Successfully 🎉", { position: 'bottom-center', duration: 5000 });
 
-        // Trigger Welcome Push Notification (Delayed to allow OneSignal to sync)
-        setTimeout(() => {
-          try {
-            fetch('/api/send-user-push', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                userId: activeUid,
-                title: `Welcome to the Family! ✨`,
-                body: `Hi ${firstName}, we're so glad you're here!`,
-                url: '/'
-              })
-            });
-          } catch (e) {
-            console.error("Welcome push error:", e);
-          }
-        }, 3000); // 3-second delay
-
-        const { data: { session: currentSession } } = await supabase.auth.getSession();
-        if (currentSession) {
-          navigate('/');
-        } else {
-          toast.success("Account verified successfully! Please sign in to explore. ✨", { position: 'bottom-center', duration: 5000 });
-          navigate('/login');
+      // Trigger Welcome Push Notification (Delayed to allow OneSignal to sync)
+      setTimeout(() => {
+        try {
+          fetch('/api/send-user-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: activeUid,
+              title: `Welcome to the Family! ✨`,
+              body: `Hi ${firstName}, we're so glad you're here!`,
+              url: '/'
+            })
+          });
+        } catch (e) {
+          console.error("Welcome push error:", e);
         }
+      }, 3000);
+
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (currentSession) {
+        navigate('/', { replace: true });
+      } else {
+        toast.success("Account verified successfully! Please sign in to explore. ✨", { position: 'bottom-center', duration: 5000 });
+        navigate('/login', { replace: true });
+      }
     } catch (error: any) {
       console.error("Verification error:", error);
       toast.error("Failed to verify code.");

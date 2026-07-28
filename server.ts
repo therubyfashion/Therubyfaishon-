@@ -635,6 +635,10 @@ export const TEMPLATES: Record<string, { title: string; body: string }> = {
     title: '🔄 Return Request Approved',
     body: 'Your return request for order #{{orderId}} has been approved. We will arrange pickup.'
   },
+  'return_rejected': {
+    title: '❌ Return Request Rejected',
+    body: 'Your return request for order #{{orderId}} was rejected. Reason: {{reason}}'
+  },
   'refund_processed': {
     title: '💰 Refund Processed',
     body: 'Refund for order #{{orderId}} has been processed. It will reflect in your account soon.'
@@ -1335,6 +1339,48 @@ export const NotificationService = {
         console.warn("[NotificationService] Admin lookup warning:", dbErr.message);
       }
 
+      // 2. Save in-app notification entries specifically for admin user IDs in Supabase
+      try {
+        const textCheck = `${title} ${body}`.toLowerCase();
+        const isOtp = textCheck.includes('otp') || textCheck.includes('verification code') || textCheck.includes('passcode');
+        if (!isOtp) {
+          const supabase = getSupabaseAdmin();
+          const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin');
+          if (admins && admins.length > 0) {
+            const oneMinuteAgo = new Date(Date.now() - 60000).toISOString();
+            for (const adminUser of admins) {
+              const { data: existingAdmin } = await supabase
+                .from('notifications')
+                .select('id')
+                .eq('user_id', adminUser.id)
+                .eq('title', title)
+                .gte('created_at', oneMinuteAgo)
+                .limit(1);
+
+              if (!existingAdmin || existingAdmin.length === 0) {
+                const { error: insErr } = await supabase.from('notifications').insert({
+                  user_id: adminUser.id,
+                  title,
+                  body,
+                  type: 'alert',
+                  icon_type: 'shield',
+                  link: url || '/admin?tab=orders',
+                  is_read: false,
+                  created_at: new Date().toISOString()
+                });
+                if (insErr) {
+                  console.error("❌ [NotificationService] Failed to insert admin notification into Supabase:", insErr.message);
+                } else {
+                  console.log(`✅ [NotificationService] Saved admin in-app notification in Supabase for ${adminUser.id}:`, title);
+                }
+              }
+            }
+          }
+        }
+      } catch (inAppErr: any) {
+        console.warn("⚠️ [NotificationService] In-app admin notification insert warning:", inAppErr.message);
+      }
+
       let resultStatus = "success";
       let msgId: string | null = null;
 
@@ -1360,32 +1406,6 @@ export const NotificationService = {
       }
 
       await this.log(title, body, "admin", resultStatus, msgId, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
-
-      // Save in-app notification entries specifically for admin user IDs
-      try {
-        const textCheck = `${title} ${body}`.toLowerCase();
-        const isOtp = textCheck.includes('otp') || textCheck.includes('verification code') || textCheck.includes('passcode');
-        if (!isOtp) {
-          const supabase = getSupabaseAdmin();
-          const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin');
-          if (admins && admins.length > 0) {
-            for (const adminUser of admins) {
-              await supabase.from('notifications').insert({
-                user_id: adminUser.id,
-                title,
-                body,
-                type: 'alert',
-                icon_type: 'shield',
-                link: url || '/admin?tab=orders',
-                is_read: false,
-                created_at: new Date().toISOString()
-              });
-            }
-          }
-        }
-      } catch (inAppErr: any) {
-        console.warn("⚠️ [NotificationService] In-app admin notification insert warning:", inAppErr.message);
-      }
 
       return { success: true, status: resultStatus, notificationId: msgId };
     } catch (err: any) {
@@ -1447,6 +1467,46 @@ export const NotificationService = {
         return { success: false, error: "userId is required" };
       }
 
+      // 1. Lookup user in Supabase profiles table to get exact Supabase UUID & push subscription id
+      let targetSupabaseUUID: string | null = null;
+      let onesignalId: string | null = null;
+      let userEmail: string = "";
+
+      try {
+        const supabase = getSupabaseAdmin();
+        const strUserId = String(userId).trim();
+
+        // Direct lookup by profile id (Supabase UUID)
+        const { data: userProfile } = await supabase
+          .from('profiles')
+          .select('id, onesignal_id, email')
+          .eq('id', strUserId)
+          .maybeSingle();
+
+        if (userProfile?.id) {
+          targetSupabaseUUID = userProfile.id;
+          onesignalId = userProfile.onesignal_id || null;
+          userEmail = userProfile.email || "";
+        } else {
+          // Fallback lookup by email
+          const { data: emailProfile } = await supabase
+            .from('profiles')
+            .select('id, onesignal_id, email')
+            .eq('email', strUserId.toLowerCase())
+            .maybeSingle();
+
+          if (emailProfile?.id) {
+            targetSupabaseUUID = emailProfile.id;
+            onesignalId = emailProfile.onesignal_id || null;
+            userEmail = emailProfile.email || "";
+          } else if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(strUserId)) {
+            targetSupabaseUUID = strUserId;
+          }
+        }
+      } catch (dbErr: any) {
+        console.warn("[NotificationService] User lookup error:", dbErr.message);
+      }
+
       // Check idempotency to prevent duplicate triggers within short time window
       const isDup = await isNotificationDuplicate(userId, title, body, { ...options, templateKey: inferredTemplateKey, orderId: inferredOrderId });
       if (isDup.duplicate) {
@@ -1454,112 +1514,34 @@ export const NotificationService = {
         return { success: true, status: "duplicate_skipped", message: isDup.reason };
       }
 
-      console.log(`[NotificationService] Preparing customer notification to User ${userId}: "${title}"`);
+      console.log(`[NotificationService] Preparing customer notification to User ${targetSupabaseUUID || userId}: "${title}"`);
 
-      let onesignalId = null;
-      let userEmail = "";
-       try {
-         const supabase = getSupabaseAdmin();
-         const { data: userProfile } = await supabase
-           .from('profiles')
-           .select('onesignal_id, email')
-           .eq('id', String(userId))
-           .maybeSingle();
+      // 2. ALWAYS Save in-app notification entry for customer in Supabase FIRST
+      try {
+        const textCheck = `${title} ${body}`.toLowerCase();
+        const isOtp = textCheck.includes('otp') || textCheck.includes('verification code') || textCheck.includes('passcode');
+        const isAdmin = textCheck.includes('new order received') || textCheck.includes('low stock') || textCheck.includes('admin alert');
 
-         if (userProfile) {
-           onesignalId = userProfile.onesignal_id || null;
-           userEmail = userProfile.email || "";
-         } else {
-           // Fallback query by email if userId is an email address
-           const { data: emailProfile } = await supabase
-             .from('profiles')
-             .select('onesignal_id, email')
-             .eq('email', String(userId))
-             .maybeSingle();
-           if (emailProfile) {
-             onesignalId = emailProfile.onesignal_id || null;
-             userEmail = emailProfile.email || "";
-           }
-         }
-       } catch (dbErr: any) {
-         console.warn("[NotificationService] User lookup error:", dbErr.message);
-       }
- 
-       const notification: any = {
-         android_group: "group_" + String(title || "default").replace(/[^a-zA-Z0-9]/g, ""),
-         contents: { en: body },
-         headings: { en: title },
-         url: url,
-         android_accent_color: "A11B35",
-         android_led_color: "A11B35",
-         android_visibility: 1
-       };
- 
-       if (imageUrl) {
-         notification.big_picture = imageUrl;
-         notification.chrome_web_image = imageUrl;
-         notification.firefox_icon = imageUrl;
-         notification.ios_attachments = { id1: imageUrl };
-       }
- 
-       if (buttons && Array.isArray(buttons)) {
-         notification.buttons = buttons;
-       }
- 
-       // DIRECT SUBSCRIPTION TARGETING STRATEGY:
-       // Target purely by subscription ID saved in profiles.onesignal_id.
-       // Never use include_aliases or external_id since client-side OneSignal.login is not registered.
-       if (onesignalId) {
-         if (String(onesignalId).startsWith('simulated_push_')) {
-           console.log(`[NotificationService] Simulating push to simulated device: ${onesignalId}`);
-           await this.log(title, body, userEmail || userId, "simulated", null, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
-           return { success: true, status: "simulated" };
-         }
-         notification.include_subscription_ids = [onesignalId];
-       } else {
-         console.warn(`[NotificationService] User ${userId} has no onesignal_id in profiles. Skipping push dispatch.`);
-         await this.log(title, body, userEmail || userId, "skipped_no_subscription", null, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
-         return { success: true, status: "skipped_no_subscription", message: "User not subscribed to push notifications (no onesignal_id in profiles)." };
-       }
- 
-       const response = await this.send(notification);
-       const responseData = response?.data;
-       const msgId = responseData?.id || null;
-       
-       let resultStatus = "success";
-       if (hasInvalidIdsError(responseData)) {
-         resultStatus = "failed";
-       } else if (responseData?.errors && Array.isArray(responseData.errors)) {
-         const errorMsg = responseData.errors.join(', ');
-         if (errorMsg.includes("not subscribed") || errorMsg.includes("not found") || errorMsg.includes("players are not subscribed")) {
-           resultStatus = "warning";
-         }
-       }
- 
-        await this.log(title, body, userEmail || userId, resultStatus, msgId, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
+        const finalUserId = targetSupabaseUUID || (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(userId)) ? String(userId) : null);
 
-        // Save in-app notification entry for customer in Supabase
-        try {
-          const textCheck = `${title} ${body}`.toLowerCase();
-          const isOtp = textCheck.includes('otp') || textCheck.includes('verification code') || textCheck.includes('passcode');
-          const isAdmin = textCheck.includes('new order received') || textCheck.includes('low stock') || textCheck.includes('admin alert');
+        if (!isOtp && !isAdmin && finalUserId && finalUserId !== 'admin') {
+          const supabase = getSupabaseAdmin();
+          const oneMinuteAgo = new Date(Date.now() - 60000).toISOString();
+          
+          // Deduplication check
+          const { data: existing } = await supabase
+            .from('notifications')
+            .select('id')
+            .eq('user_id', finalUserId)
+            .eq('title', title)
+            .gte('created_at', oneMinuteAgo)
+            .limit(1);
 
-          if (!isOtp && !isAdmin && userId && userId !== 'admin') {
-            const supabase = getSupabaseAdmin();
-            const oneMinuteAgo = new Date(Date.now() - 60000).toISOString();
-            
-            // Deduplication check
-            const { data: existing } = await supabase
+          if (!existing || existing.length === 0) {
+            const { data: inserted, error: insErr } = await supabase
               .from('notifications')
-              .select('id')
-              .eq('user_id', String(userId))
-              .eq('title', title)
-              .gte('created_at', oneMinuteAgo)
-              .limit(1);
-
-            if (!existing || existing.length === 0) {
-              await supabase.from('notifications').insert({
-                user_id: String(userId),
+              .insert({
+                user_id: finalUserId,
                 title,
                 body,
                 type: 'order',
@@ -1567,25 +1549,85 @@ export const NotificationService = {
                 link: url || '/notifications',
                 is_read: false,
                 created_at: new Date().toISOString()
-              });
-            }
-          }
-        } catch (inAppErr: any) {
-          console.warn("⚠️ [NotificationService] Customer in-app notification insert warning:", inAppErr.message);
-        }
+              })
+              .select();
 
-        return { success: true, status: resultStatus, notificationId: msgId };
-     } catch (err: any) {
-       console.error(`❌ [NotificationService] sendCustomer failed:`, err.message);
-       const errLower = String(err.message || '').toLowerCase();
-       let finalStatus = "failed";
-       if (errLower.includes("not subscribed") || errLower.includes("players are not subscribed") || errLower.includes("not found")) {
-         finalStatus = "warning";
-       }
-       await this.log(title, body, userId, finalStatus, null, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
-       return { success: false, error: err.message };
-     }
-   }
+            if (insErr) {
+              console.error("❌ [NotificationService] Supabase notification insert failed:", insErr.message);
+            } else {
+              console.log(`✅ [NotificationService] Saved customer in-app notification in Supabase for user ${finalUserId}:`, title);
+            }
+          } else {
+            console.log(`ℹ️ [NotificationService] Skipped duplicate in-app notification row in Supabase for user ${finalUserId}`);
+          }
+        }
+      } catch (inAppErr: any) {
+        console.warn("⚠️ [NotificationService] Customer in-app notification insert warning:", inAppErr.message);
+      }
+
+      // 3. Dispatch push notification via OneSignal if user has active subscription ID
+      if (!onesignalId) {
+        console.warn(`[NotificationService] User ${userId} has no onesignal_id in profiles. Push skipped, in-app notification saved.`);
+        await this.log(title, body, userEmail || userId, "skipped_no_subscription", null, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
+        return { success: true, status: "skipped_no_subscription", message: "Push skipped (no onesignal_id in profiles). In-app notification saved." };
+      }
+
+      if (String(onesignalId).startsWith('simulated_push_')) {
+        console.log(`[NotificationService] Simulating push to simulated device: ${onesignalId}`);
+        await this.log(title, body, userEmail || userId, "simulated", null, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
+        return { success: true, status: "simulated" };
+      }
+
+      const notification: any = {
+        android_group: "group_" + String(title || "default").replace(/[^a-zA-Z0-9]/g, ""),
+        contents: { en: body },
+        headings: { en: title },
+        url: url,
+        android_accent_color: "A11B35",
+        android_led_color: "A11B35",
+        android_visibility: 1,
+        include_subscription_ids: [onesignalId]
+      };
+
+      if (imageUrl) {
+        notification.big_picture = imageUrl;
+        notification.chrome_web_image = imageUrl;
+        notification.firefox_icon = imageUrl;
+        notification.ios_attachments = { id1: imageUrl };
+      }
+
+      if (buttons && Array.isArray(buttons)) {
+        notification.buttons = buttons;
+      }
+
+      const response = await this.send(notification);
+      const responseData = response?.data;
+      const msgId = responseData?.id || null;
+      
+      let resultStatus = "success";
+      if (hasInvalidIdsError(responseData)) {
+        resultStatus = "failed";
+      } else if (responseData?.errors && Array.isArray(responseData.errors)) {
+        const errorMsg = responseData.errors.join(', ');
+        if (errorMsg.includes("not subscribed") || errorMsg.includes("not found") || errorMsg.includes("players are not subscribed")) {
+          resultStatus = "warning";
+        }
+      }
+
+      await this.log(title, body, userEmail || userId, resultStatus, msgId, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
+
+      return { success: true, status: resultStatus, notificationId: msgId };
+    } catch (err: any) {
+      console.error(`❌ [NotificationService] sendCustomer failed:`, err.message);
+      const errLower = String(err.message || '').toLowerCase();
+      let finalStatus = "failed";
+      if (errLower.includes("not subscribed") || errLower.includes("players are not subscribed") || errLower.includes("not found")) {
+        finalStatus = "warning";
+      }
+      await this.log(title, body, userId, finalStatus, null, { templateKey: inferredTemplateKey, orderId: inferredOrderId });
+      return { success: false, error: err.message };
+    }
+  }
 };
 
 // Automatic Background Retry Loop for Queued Pushes
@@ -1753,6 +1795,43 @@ async function acquireNotificationLock(orderId: string, lockType: string): Promi
     }
   }
   return true;
+}
+
+async function processOrderDeliveryLoyaltyPoints(orderId: string) {
+  try {
+    let orderData: any = null;
+    if (db) {
+      const docSnap = await db.collection('orders').doc(orderId).get();
+      if (docSnap.exists) orderData = docSnap.data();
+    } else if (clientDb && isClientDbReady) {
+      const docSnap = await cGetDoc(cDoc(clientDb, 'orders', orderId));
+      if (docSnap.exists()) orderData = docSnap.data();
+    }
+    if (!orderData || !orderData.userId || orderData.loyaltyPointsCredited) return;
+
+    const totalAmount = Number(orderData.totalAmount || orderData.total || 0);
+    if (totalAmount <= 0) return;
+
+    const pointsEarned = Math.floor(totalAmount / 10);
+    if (pointsEarned <= 0) return;
+
+    if (db) {
+      const userRef = db.collection('users').doc(orderData.userId);
+      const userSnap = await userRef.get();
+      const currentPoints = Number((userSnap.data() || {}).loyaltyPoints || 0);
+      await userRef.set({ loyaltyPoints: currentPoints + pointsEarned }, { merge: true });
+      await db.collection('orders').doc(orderId).set({ loyaltyPointsCredited: true, pointsEarned }, { merge: true });
+    } else if (clientDb && isClientDbReady) {
+      const userRef = cDoc(clientDb, 'users', orderData.userId);
+      const userSnap = await cGetDoc(userRef);
+      const currentPoints = Number((userSnap.data() || {}).loyaltyPoints || 0);
+      await cSetDoc(userRef, { loyaltyPoints: currentPoints + pointsEarned }, { merge: true });
+      await cSetDoc(cDoc(clientDb, 'orders', orderId), { loyaltyPointsCredited: true, pointsEarned }, { merge: true });
+    }
+    console.log(`🎁 [loyalty] Credited ${pointsEarned} loyalty points to user ${orderData.userId} for order ${orderId}`);
+  } catch (err: any) {
+    console.error("[loyalty] Error in processOrderDeliveryLoyaltyPoints:", err.message);
+  }
 }
 
 let isPushServiceInitialized = false;
@@ -1945,6 +2024,8 @@ async function initializeAutoPushes() {
                     await sendCustomerNotification(order.userId, "Rate Your Purchase ⭐", "Share your experience with the product.");
                   }
                 }
+                // Automatically calculate & credit loyalty points when order is delivered: ₹10 = 1 point
+                processOrderDeliveryLoyaltyPoints(orderId).catch(err => console.error("[loyalty] Error processing delivery loyalty points:", err));
                 break;
               case 'Cancelled':
                 if (await acquireNotificationLock(humanReadableOrderId, 'status_Cancelled_admin')) {
@@ -2066,6 +2147,573 @@ process.on('uncaughtException', (err) => {
   console.error('🔥 Uncaught Exception:', err);
 });
 
+// ============================================================================
+// THE RUBY FASHION - BRANDED TRANSACTIONAL EMAIL TEMPLATES
+// Primary Brand Color: Deep Red/Maroon (#A11B35)
+// Verified Sender Domain: support@therubyfashion.shop
+// Layout: Inline CSS Table-based structure for Gmail/Outlook compatibility
+// ============================================================================
+
+export function renderBaseEmailLayout({
+  title,
+  preheader = '',
+  contentHtml,
+  baseHost = 'https://therubyfashion.shop'
+}: {
+  title: string;
+  preheader?: string;
+  contentHtml: string;
+  baseHost?: string;
+}): string {
+  const currentYear = new Date().getFullYear();
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #F8F9FA; font-family: Arial, Helvetica, sans-serif; -webkit-font-smoothing: antialiased; color: #222222; width: 100% !important;">
+  ${preheader ? `<div style="display:none;font-size:1px;color:#F8F9FA;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;">${preheader}</div>` : ''}
+  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #F8F9FA; padding: 25px 10px;">
+    <tr>
+      <td align="center">
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #E2E8F0; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+          
+          <!-- Branded Header -->
+          <tr>
+            <td align="center" style="background-color: #A11B35; padding: 28px 20px; text-align: center;">
+              <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td align="center">
+                    <span style="font-family: Arial, Helvetica, sans-serif; font-size: 24px; font-weight: 900; letter-spacing: 3px; color: #ffffff; text-transform: uppercase; text-decoration: none;">THE RUBY FASHION</span>
+                    <div style="font-size: 9px; font-weight: 700; letter-spacing: 4px; color: #FFD1D9; text-transform: uppercase; margin-top: 4px;">COUTURE &amp; STYLES</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          
+          <!-- Accent Color Bar -->
+          <tr>
+            <td height="5" style="background-color: #7A1226; font-size: 0; line-height: 0;">&nbsp;</td>
+          </tr>
+
+          <!-- Main Content Section -->
+          <tr>
+            <td style="padding: 32px 28px; background-color: #ffffff; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333333;">
+              ${contentHtml}
+            </td>
+          </tr>
+
+          <!-- Footer Section -->
+          <tr>
+            <td style="background-color: #FAF8F8; padding: 26px 24px; text-align: center; border-top: 1px solid #EAEAEA; font-size: 12px; color: #666666; line-height: 1.5; font-family: Arial, Helvetica, sans-serif;">
+              <p style="margin: 0 0 6px 0; font-weight: bold; color: #A11B35; font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px;">The Ruby Fashion</p>
+              <p style="margin: 0 0 10px 0; color: #555555; font-size: 12px;">Need assistance? Contact our support team at <a href="mailto:support@therubyfashion.shop" style="color: #A11B35; text-decoration: underline; font-weight: bold;">support@therubyfashion.shop</a></p>
+              <p style="margin: 0 0 12px 0; color: #888888; font-size: 11px; font-style: italic;">This is an automated email, please do not reply directly to this message.</p>
+              <div style="border-top: 1px solid #E2E2E2; margin: 14px 0; font-size: 0; line-height: 0;">&nbsp;</div>
+              <p style="margin: 0; color: #999999; font-size: 11px;">&copy; ${currentYear} The Ruby Fashion. All rights reserved.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+// 1. Order Confirmation (Customer)
+export function getTemplateOrderConfirmation(data: {
+  customerName?: string;
+  orderId: string;
+  items?: Array<{ name: string; size?: string; qty: number; price: number }>;
+  subtotal?: number;
+  discount?: number;
+  shipping?: number;
+  total?: number;
+  deliveryAddress?: { name?: string; street?: string; city?: string; state?: string; pincode?: string; phone?: string };
+  trackingUrl?: string;
+  baseHost?: string;
+}): { subject: string; html: string } {
+  const customerName = data.customerName || 'Valued Customer';
+  const orderId = data.orderId || 'N/A';
+  const items = data.items || [];
+  const subtotal = Number(data.subtotal || 0);
+  const discount = Number(data.discount || 0);
+  const shipping = Number(data.shipping || 0);
+  const total = Number(data.total || (subtotal - discount + shipping));
+  const deliveryAddress = data.deliveryAddress;
+  const trackLink = data.trackingUrl || `${data.baseHost || 'https://therubyfashion.shop'}/track/${orderId}`;
+
+  const itemsRows = items.length > 0 ? items.map(item => `
+    <tr style="border-bottom: 1px solid #EEEEEE; font-size: 13px;">
+      <td style="padding: 12px 10px; font-weight: bold; color: #222222; text-align: left;">${item.name}</td>
+      <td style="padding: 12px 10px; text-align: center; color: #666666;">${item.size || 'Standard'}</td>
+      <td style="padding: 12px 10px; text-align: center; color: #666666;">${item.qty || 1}</td>
+      <td style="padding: 12px 10px; text-align: right; font-weight: bold; color: #222222;">₹${Number(item.price).toLocaleString('en-IN')}</td>
+    </tr>
+  `).join('') : `
+    <tr style="border-bottom: 1px solid #EEEEEE; font-size: 13px;">
+      <td colspan="4" style="padding: 12px 10px; text-align: center; color: #666666;">Clothing items order #${orderId}</td>
+    </tr>
+  `;
+
+  const addressBlock = deliveryAddress ? `
+    <div style="background-color: #F8F9FA; border: 1px solid #EAEAEA; border-radius: 6px; padding: 16px; margin-top: 20px;">
+      <p style="margin: 0 0 6px 0; font-size: 12px; font-weight: bold; color: #A11B35; text-transform: uppercase; letter-spacing: 1px;">Delivery Address</p>
+      <p style="margin: 0; font-size: 13px; color: #333333; line-height: 1.5;">
+        <strong>${deliveryAddress.name || customerName}</strong><br>
+        ${deliveryAddress.street ? `${deliveryAddress.street}<br>` : ''}
+        ${deliveryAddress.city || ''}${deliveryAddress.state ? `, ${deliveryAddress.state}` : ''} ${deliveryAddress.pincode ? `- ${deliveryAddress.pincode}` : ''}<br>
+        ${deliveryAddress.phone ? `Phone: ${deliveryAddress.phone}` : ''}
+      </p>
+    </div>
+  ` : '';
+
+  const content = `
+    <div style="text-align: center; margin-bottom: 24px;">
+      <div style="display: inline-block; background-color: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">
+        Order Confirmed
+      </div>
+      <h2 style="margin: 0 0 6px 0; font-size: 22px; color: #111111; font-weight: 800;">Thank You for Your Order!</h2>
+      <p style="margin: 0; color: #666666; font-size: 14px;">Hi <strong>${customerName}</strong>, we've received your order and are getting it ready with care.</p>
+    </div>
+
+    <!-- Prominent Order Number Box -->
+    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #FFF5F7; border: 1.5px solid #FCD34D; border-left: 5px solid #A11B35; border-radius: 6px; margin-bottom: 24px;">
+      <tr>
+        <td style="padding: 16px 20px;">
+          <table border="0" cellpadding="0" cellspacing="0" width="100%">
+            <tr>
+              <td>
+                <span style="font-size: 11px; font-weight: bold; color: #7A1226; text-transform: uppercase; letter-spacing: 1px;">Order ID</span><br>
+                <span style="font-size: 20px; font-weight: 900; color: #A11B35;">#${orderId}</span>
+              </td>
+              <td align="right">
+                <a href="${trackLink}" style="background-color: #A11B35; color: #ffffff; padding: 10px 18px; font-size: 12px; font-weight: bold; border-radius: 4px; text-decoration: none; display: inline-block;">Track Order</a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <!-- Items Table -->
+    <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: bold; color: #111111; text-transform: uppercase; letter-spacing: 0.5px;">Order Items</p>
+    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse; margin-bottom: 20px; border: 1px solid #EEEEEE;">
+      <thead>
+        <tr style="background-color: #F8F8F8; border-bottom: 2px solid #E5E5E5; font-size: 11px; color: #555555; text-transform: uppercase;">
+          <th style="padding: 10px; text-align: left;">Item Description</th>
+          <th style="padding: 10px; text-align: center;">Size</th>
+          <th style="padding: 10px; text-align: center;">Qty</th>
+          <th style="padding: 10px; text-align: right;">Price</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemsRows}
+      </tbody>
+    </table>
+
+    <!-- Order Breakdown -->
+    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 20px;">
+      <tr>
+        <td width="40%">&nbsp;</td>
+        <td width="60%">
+          <table border="0" cellpadding="6" cellspacing="0" width="100%" style="font-size: 13px; color: #444444;">
+            <tr>
+              <td style="text-align: left;">Subtotal:</td>
+              <td style="text-align: right; font-weight: bold;">₹${subtotal.toLocaleString('en-IN')}</td>
+            </tr>
+            ${discount > 0 ? `
+            <tr>
+              <td style="text-align: left; color: #059669;">Discount:</td>
+              <td style="text-align: right; font-weight: bold; color: #059669;">-₹${discount.toLocaleString('en-IN')}</td>
+            </tr>
+            ` : ''}
+            <tr>
+              <td style="text-align: left;">Shipping:</td>
+              <td style="text-align: right; font-weight: bold;">${shipping === 0 ? '<span style="color:#059669;">FREE</span>' : `₹${shipping.toLocaleString('en-IN')}`}</td>
+            </tr>
+            <tr style="border-top: 2px solid #222222; font-size: 15px;">
+              <td style="text-align: left; padding-top: 8px; font-weight: bold; color: #111111;">Grand Total:</td>
+              <td style="text-align: right; padding-top: 8px; font-weight: 900; color: #A11B35;">₹${total.toLocaleString('en-IN')}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    ${addressBlock}
+
+    <div style="text-align: center; margin-top: 28px;">
+      <a href="${trackLink}" style="background-color: #A11B35; color: #ffffff; padding: 14px 36px; font-size: 14px; font-weight: bold; border-radius: 6px; text-decoration: none; display: inline-block; letter-spacing: 0.5px; box-shadow: 0 4px 10px rgba(161, 27, 53, 0.25);">
+        Track Your Order
+      </a>
+    </div>
+  `;
+
+  return {
+    subject: `Order Confirmed: #${orderId} - The Ruby Fashion`,
+    html: renderBaseEmailLayout({ title: `Order Confirmed #${orderId}`, contentHtml: content, baseHost: data.baseHost })
+  };
+}
+
+// 2. Order Shipped
+export function getTemplateOrderShipped(data: {
+  customerName?: string;
+  orderId: string;
+  trackingNumber?: string;
+  courierName?: string;
+  estimatedDelivery?: string;
+  trackingUrl?: string;
+  baseHost?: string;
+}): { subject: string; html: string } {
+  const customerName = data.customerName || 'Valued Customer';
+  const orderId = data.orderId || 'N/A';
+  const trackingNumber = data.trackingNumber;
+  const courierName = data.courierName;
+  const estimatedDelivery = data.estimatedDelivery;
+  const trackLink = data.trackingUrl || `${data.baseHost || 'https://therubyfashion.shop'}/track/${orderId}`;
+
+  const content = `
+    <div style="text-align: center; margin-bottom: 24px;">
+      <div style="display: inline-block; background-color: #EFF6FF; border: 1px solid #BFDBFE; color: #1E40AF; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">
+        Order Dispatched
+      </div>
+      <h2 style="margin: 0 0 6px 0; font-size: 22px; color: #111111; font-weight: 800;">Your Package is on the Way! 🚚</h2>
+      <p style="margin: 0; color: #666666; font-size: 14px;">Hi <strong>${customerName}</strong>, order <strong>#${orderId}</strong> has been shipped and is heading your way.</p>
+    </div>
+
+    <!-- Tracking Info Box -->
+    <div style="background-color: #FFF5F7; border: 1px solid #FCD34D; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+      <table border="0" cellpadding="6" cellspacing="0" width="100%" style="font-size: 13px; color: #333333;">
+        <tr>
+          <td style="color: #666666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Order ID:</td>
+          <td style="font-weight: bold; color: #A11B35; font-size: 14px;">#${orderId}</td>
+        </tr>
+        ${trackingNumber ? `
+        <tr>
+          <td style="color: #666666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Tracking Number:</td>
+          <td style="font-weight: bold; color: #111111; font-family: monospace; font-size: 14px;">${trackingNumber}</td>
+        </tr>
+        ` : ''}
+        ${courierName ? `
+        <tr>
+          <td style="color: #666666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Courier Partner:</td>
+          <td style="font-weight: bold; color: #111111;">${courierName}</td>
+        </tr>
+        ` : ''}
+        ${estimatedDelivery ? `
+        <tr>
+          <td style="color: #666666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Estimated Delivery:</td>
+          <td style="font-weight: bold; color: #059669; font-size: 14px;">${estimatedDelivery}</td>
+        </tr>
+        ` : ''}
+      </table>
+    </div>
+
+    <div style="text-align: center; margin-top: 28px;">
+      <a href="${trackLink}" style="background-color: #A11B35; color: #ffffff; padding: 14px 36px; font-size: 14px; font-weight: bold; border-radius: 6px; text-decoration: none; display: inline-block; letter-spacing: 0.5px; box-shadow: 0 4px 10px rgba(161, 27, 53, 0.25);">
+        Track Order
+      </a>
+    </div>
+  `;
+
+  return {
+    subject: `Your Order #${orderId} Has Been Shipped! - The Ruby Fashion`,
+    html: renderBaseEmailLayout({ title: `Order #${orderId} Shipped`, contentHtml: content, baseHost: data.baseHost })
+  };
+}
+
+// 3. Out for Delivery
+export function getTemplateOutForDelivery(data: {
+  customerName?: string;
+  orderId: string;
+  deliveryAgentName?: string;
+  deliveryAgentPhone?: string;
+  trackingUrl?: string;
+  baseHost?: string;
+}): { subject: string; html: string } {
+  const customerName = data.customerName || 'Valued Customer';
+  const orderId = data.orderId || 'N/A';
+  const deliveryAgentName = data.deliveryAgentName;
+  const deliveryAgentPhone = data.deliveryAgentPhone;
+  const trackLink = data.trackingUrl || `${data.baseHost || 'https://therubyfashion.shop'}/track/${orderId}`;
+
+  const content = `
+    <div style="text-align: center; margin-bottom: 24px;">
+      <div style="display: inline-block; background-color: #FEF3C7; border: 1px solid #FDE68A; color: #92400E; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">
+        Arriving Today
+      </div>
+      <h2 style="margin: 0 0 6px 0; font-size: 22px; color: #111111; font-weight: 800;">Out for Delivery! 📍</h2>
+      <p style="margin: 0; color: #666666; font-size: 14px;">Hi <strong>${customerName}</strong>, order <strong>#${orderId}</strong> is out for delivery and will be delivered to your address today.</p>
+    </div>
+
+    <div style="background-color: #FFF5F7; border-left: 5px solid #A11B35; border-radius: 6px; padding: 18px 20px; margin-bottom: 24px;">
+      <p style="margin: 0 0 6px 0; font-size: 13px; font-weight: bold; color: #A11B35;">Please ensure someone is available at your delivery address to receive the parcel.</p>
+      ${deliveryAgentName ? `
+        <p style="margin: 6px 0 0 0; font-size: 12px; color: #444444;">
+          Delivery Executive: <strong>${deliveryAgentName}</strong> ${deliveryAgentPhone ? `(${deliveryAgentPhone})` : ''}
+        </p>
+      ` : ''}
+    </div>
+
+    <div style="text-align: center; margin-top: 28px;">
+      <a href="${trackLink}" style="background-color: #A11B35; color: #ffffff; padding: 14px 36px; font-size: 14px; font-weight: bold; border-radius: 6px; text-decoration: none; display: inline-block; letter-spacing: 0.5px; box-shadow: 0 4px 10px rgba(161, 27, 53, 0.25);">
+        Track Live Delivery
+      </a>
+    </div>
+  `;
+
+  return {
+    subject: `Out for Delivery: Order #${orderId} Arriving Today! - The Ruby Fashion`,
+    html: renderBaseEmailLayout({ title: `Order #${orderId} Out For Delivery`, contentHtml: content, baseHost: data.baseHost })
+  };
+}
+
+// 4. Order Delivered
+export function getTemplateOrderDelivered(data: {
+  customerName?: string;
+  orderId: string;
+  deliveryDate?: string;
+  reviewUrl?: string;
+  baseHost?: string;
+}): { subject: string; html: string } {
+  const customerName = data.customerName || 'Valued Customer';
+  const orderId = data.orderId || 'N/A';
+  const deliveryDate = data.deliveryDate;
+  const rateLink = data.reviewUrl || `${data.baseHost || 'https://therubyfashion.shop'}/account`;
+
+  const content = `
+    <div style="text-align: center; margin-bottom: 24px;">
+      <div style="display: inline-block; background-color: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">
+        Delivered
+      </div>
+      <h2 style="margin: 0 0 6px 0; font-size: 22px; color: #111111; font-weight: 800;">Order Delivered Successfully! 🎁</h2>
+      <p style="margin: 0; color: #666666; font-size: 14px;">Hi <strong>${customerName}</strong>, your order <strong>#${orderId}</strong> was delivered ${deliveryDate ? `on ${deliveryDate}` : 'today'}. Thank you for shopping with us!</p>
+    </div>
+
+    <div style="background-color: #F8F9FA; border: 1px solid #EAEAEA; border-radius: 8px; padding: 22px; text-align: center; margin-bottom: 24px;">
+      <p style="margin: 0 0 8px 0; font-size: 15px; font-weight: bold; color: #111111;">How was your experience with The Ruby Fashion?</p>
+      <p style="margin: 0 0 16px 0; font-size: 13px; color: #666666;">We would love to hear your feedback on your new styles!</p>
+      <a href="${rateLink}" style="background-color: #A11B35; color: #ffffff; padding: 12px 28px; font-size: 13px; font-weight: bold; border-radius: 6px; text-decoration: none; display: inline-block; letter-spacing: 0.5px;">
+        Rate Your Purchase ⭐
+      </a>
+    </div>
+  `;
+
+  return {
+    subject: `Order #${orderId} Delivered - Thank You for Shopping with The Ruby Fashion!`,
+    html: renderBaseEmailLayout({ title: `Order #${orderId} Delivered`, contentHtml: content, baseHost: data.baseHost })
+  };
+}
+
+// 5. Return Updates
+export function getTemplateReturnUpdate(data: {
+  customerName?: string;
+  orderId: string;
+  returnStatus: 'Approved' | 'Rejected' | 'Refunded' | string;
+  rejectionReason?: string;
+  refundAmount?: number;
+  baseHost?: string;
+}): { subject: string; html: string } {
+  const customerName = data.customerName || 'Valued Customer';
+  const orderId = data.orderId || 'N/A';
+  const returnStatus = data.returnStatus || 'Updated';
+  const rejectionReason = data.rejectionReason;
+  const refundAmount = data.refundAmount;
+
+  const statusLower = String(returnStatus).toLowerCase();
+  const isApproved = statusLower.includes('approve');
+  const isRejected = statusLower.includes('reject') || statusLower.includes('declin');
+  const isRefunded = statusLower.includes('refund');
+
+  let badgeBg = '#EFF6FF';
+  let badgeColor = '#1E40AF';
+  let statusTitle = `Return Update: ${returnStatus}`;
+
+  if (isApproved) {
+    badgeBg = '#ECFDF5';
+    badgeColor = '#065F46';
+    statusTitle = 'Return Request Approved 🔄';
+  } else if (isRejected) {
+    badgeBg = '#FEF2F2';
+    badgeColor = '#991B1B';
+    statusTitle = 'Return Request Declined ❌';
+  } else if (isRefunded) {
+    badgeBg = '#F0FDFA';
+    badgeColor = '#115E59';
+    statusTitle = 'Refund Processed 💰';
+  }
+
+  const content = `
+    <div style="text-align: center; margin-bottom: 24px;">
+      <div style="display: inline-block; background-color: ${badgeBg}; color: ${badgeColor}; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">
+        Return Status: ${returnStatus}
+      </div>
+      <h2 style="margin: 0 0 6px 0; font-size: 22px; color: #111111; font-weight: 800;">${statusTitle}</h2>
+      <p style="margin: 0; color: #666666; font-size: 14px;">Hi <strong>${customerName}</strong>, here is an update regarding return request for order <strong>#${orderId}</strong>.</p>
+    </div>
+
+    ${isApproved ? `
+      <div style="background-color: #ECFDF5; border: 1px solid #A7F3D0; border-radius: 8px; padding: 20px; margin-bottom: 20px; color: #065F46; font-size: 13px; line-height: 1.6;">
+        <strong>Return Approved:</strong> Our courier partner will visit your delivery address within 24-48 hours to collect the item. Please keep the original tags and package intact.
+      </div>
+    ` : ''}
+
+    ${isRejected ? `
+      <div style="background-color: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 8px; padding: 20px; margin-bottom: 20px; color: #991B1B; font-size: 13px; line-height: 1.6;">
+        <strong>Return Declined:</strong> Unfortunately, your return request could not be accepted.<br>
+        ${rejectionReason ? `<p style="margin: 8px 0 0 0; font-weight: bold; color: #7F1D1D;">Reason: ${rejectionReason}</p>` : ''}
+      </div>
+    ` : ''}
+
+    ${isRefunded ? `
+      <div style="background-color: #F0FDFA; border: 1px solid #99F6E4; border-radius: 8px; padding: 20px; margin-bottom: 20px; color: #115E59; font-size: 13px; line-height: 1.6;">
+        <strong>Refund Processed:</strong> ${refundAmount ? `An amount of <strong>₹${Number(refundAmount).toLocaleString('en-IN')}</strong>` : 'Your refund'} has been processed and credited to your original payment source (3-5 business days).
+      </div>
+    ` : ''}
+
+    <div style="text-align: center; margin-top: 24px;">
+      <a href="${data.baseHost || 'https://therubyfashion.shop'}/account" style="background-color: #A11B35; color: #ffffff; padding: 12px 28px; font-size: 13px; font-weight: bold; border-radius: 6px; text-decoration: none; display: inline-block;">
+        View My Account
+      </a>
+    </div>
+  `;
+
+  return {
+    subject: `Return Request Status: ${returnStatus} (Order #${orderId}) - The Ruby Fashion`,
+    html: renderBaseEmailLayout({ title: `Return Status #${orderId}`, contentHtml: content, baseHost: data.baseHost })
+  };
+}
+
+// 6. Admin: New Order Received
+export function getTemplateAdminNewOrder(data: {
+  orderId: string;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  total: number;
+  items?: Array<{ name: string; size?: string; qty: number; price: number }>;
+  shippingAddress?: any;
+  baseHost?: string;
+}): { subject: string; html: string } {
+  const orderId = data.orderId || 'N/A';
+  const customerName = data.customerName || 'Customer';
+  const customerEmail = data.customerEmail;
+  const customerPhone = data.customerPhone;
+  const total = Number(data.total || 0);
+  const items = data.items || [];
+  const shippingAddress = data.shippingAddress;
+  const adminUrl = `${data.baseHost || 'https://therubyfashion.shop'}/admin`;
+
+  const itemsRows = items.length > 0 ? items.map(item => `
+    <tr style="border-bottom: 1px solid #EEEEEE; font-size: 13px;">
+      <td style="padding: 10px; font-weight: bold; color: #222222; text-align: left;">${item.name}</td>
+      <td style="padding: 10px; text-align: center; color: #666666;">${item.size || 'Standard'}</td>
+      <td style="padding: 10px; text-align: center; color: #666666;">${item.qty || 1}</td>
+      <td style="padding: 10px; text-align: right; font-weight: bold; color: #222222;">₹${Number(item.price).toLocaleString('en-IN')}</td>
+    </tr>
+  `).join('') : '';
+
+  const content = `
+    <div style="text-align: center; margin-bottom: 24px;">
+      <div style="display: inline-block; background-color: #FEF3C7; border: 1px solid #FDE68A; color: #92400E; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">
+        New Order Alert
+      </div>
+      <h2 style="margin: 0 0 6px 0; font-size: 22px; color: #111111; font-weight: 800;">New Order Received! 🛒</h2>
+      <p style="margin: 0; color: #666666; font-size: 14px;">Order <strong>#${orderId}</strong> has just been placed on The Ruby Fashion.</p>
+    </div>
+
+    <!-- Customer Details Card -->
+    <div style="background-color: #F8F9FA; border: 1px solid #EAEAEA; border-radius: 8px; padding: 18px; margin-bottom: 20px;">
+      <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: bold; color: #A11B35; text-transform: uppercase; letter-spacing: 1px;">Customer Information</p>
+      <p style="margin: 0; font-size: 13px; color: #333333; line-height: 1.5;">
+        <strong>Name:</strong> ${customerName}<br>
+        ${customerEmail ? `<strong>Email:</strong> ${customerEmail}<br>` : ''}
+        ${customerPhone ? `<strong>Phone:</strong> ${customerPhone}<br>` : ''}
+        ${shippingAddress ? `<strong>Address:</strong> ${typeof shippingAddress === 'string' ? shippingAddress : `${shippingAddress.street || ''}, ${shippingAddress.city || ''} ${shippingAddress.pincode || ''}`}` : ''}
+      </p>
+    </div>
+
+    <!-- Items Table -->
+    ${items.length > 0 ? `
+    <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: bold; color: #111111; text-transform: uppercase; letter-spacing: 0.5px;">Ordered Items</p>
+    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse; margin-bottom: 20px; border: 1px solid #EEEEEE;">
+      <thead>
+        <tr style="background-color: #F8F8F8; border-bottom: 2px solid #E5E5E5; font-size: 11px; color: #555555; text-transform: uppercase;">
+          <th style="padding: 8px 10px; text-align: left;">Item</th>
+          <th style="padding: 8px 10px; text-align: center;">Size</th>
+          <th style="padding: 8px 10px; text-align: center;">Qty</th>
+          <th style="padding: 8px 10px; text-align: right;">Price</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemsRows}
+      </tbody>
+    </table>
+    ` : ''}
+
+    <div style="background-color: #FFF5F7; border-left: 5px solid #A11B35; border-radius: 6px; padding: 16px; margin-bottom: 24px; text-align: right;">
+      <span style="font-size: 13px; color: #666666;">Total Amount:</span>
+      <span style="font-size: 22px; font-weight: 900; color: #A11B35; margin-left: 10px;">₹${total.toLocaleString('en-IN')}</span>
+    </div>
+
+    <div style="text-align: center; margin-top: 24px;">
+      <a href="${adminUrl}" style="background-color: #A11B35; color: #ffffff; padding: 14px 36px; font-size: 14px; font-weight: bold; border-radius: 6px; text-decoration: none; display: inline-block; letter-spacing: 0.5px; box-shadow: 0 4px 10px rgba(161, 27, 53, 0.25);">
+        View in Admin Panel
+      </a>
+    </div>
+  `;
+
+  return {
+    subject: `🛒 New Order Alert: #${orderId} (₹${total.toLocaleString('en-IN')}) - The Ruby Fashion Admin`,
+    html: renderBaseEmailLayout({ title: `Admin: New Order #${orderId}`, contentHtml: content, baseHost: data.baseHost })
+  };
+}
+
+// 7. Welcome / OTP Email
+export function getTemplateWelcomeOtp(data: {
+  customerName?: string;
+  otp: string;
+  title?: string;
+  purpose?: string;
+  baseHost?: string;
+}): { subject: string; html: string } {
+  const customerName = data.customerName || 'Valued Customer';
+  const otp = data.otp || '------';
+  const title = data.title || 'Verification Code';
+  const purpose = data.purpose || 'email verification or password reset';
+
+  const content = `
+    <div style="text-align: center; margin-bottom: 24px;">
+      <h2 style="margin: 0 0 8px 0; font-size: 22px; color: #111111; font-weight: 800;">Welcome to The Ruby Fashion! ✨</h2>
+      <p style="margin: 0; color: #666666; font-size: 14px;">Hi <strong>${customerName}</strong>, please use the verification code below for ${purpose}.</p>
+    </div>
+
+    <!-- OTP Code Card -->
+    <div style="background-color: #FFF5F7; border: 2px dashed #A11B35; border-radius: 8px; padding: 24px; text-align: center; margin: 24px 0;">
+      <p style="margin: 0 0 8px 0; font-size: 11px; font-weight: bold; color: #7A1226; text-transform: uppercase; letter-spacing: 2px;">Your Security Code</p>
+      <div style="font-size: 38px; font-weight: 900; letter-spacing: 10px; color: #A11B35; font-family: monospace, Courier, sans-serif; padding: 8px 0;">
+        ${otp}
+      </div>
+      <p style="margin: 8px 0 0 0; font-size: 11px; color: #777777;">This code is valid for 10 minutes. Please do not share it with anyone.</p>
+    </div>
+
+    <p style="font-size: 13px; color: #555555; text-align: center; margin-top: 20px;">
+      If you did not request this verification code, you can safely disregard this message.
+    </p>
+  `;
+
+  return {
+    subject: `${otp} is your ${title} - The Ruby Fashion`,
+    html: renderBaseEmailLayout({ title: title, contentHtml: content, baseHost: data.baseHost })
+  };
+}
+
 // HTML Beautifier and Link Optimizer for The Ruby brand emails (Spam prevention & high-end design)
 function enhanceAndSanitizeEmailHtml(
   html: string, 
@@ -2075,7 +2723,7 @@ function enhanceAndSanitizeEmailHtml(
 ): string {
   let processedHtml = html || "";
 
-  // 1. Convert relative paths starting with / to absolute URLs using the active baseHost info
+  // 1. Convert relative paths starting with / to absolute URLs using active baseHost
   if (baseHost) {
     const isLocalhost = baseHost.includes('localhost') || baseHost.includes('127.0.0.1');
     if (!isLocalhost) {
@@ -2083,94 +2731,19 @@ function enhanceAndSanitizeEmailHtml(
     }
   }
 
-  // 2. Format the logo URL
-  let resolvedLogo = "";
-  const effectiveLogo = storeLogo || "/logo.png";
-  if (effectiveLogo) {
-    if (effectiveLogo.startsWith('http')) {
-      resolvedLogo = effectiveLogo;
-    } else if (baseHost && !baseHost.includes('localhost') && !baseHost.includes('127.0.0.1')) {
-      resolvedLogo = `${baseHost}${effectiveLogo.startsWith('/') ? '' : '/'}${effectiveLogo}`;
-    } else {
-      resolvedLogo = "https://images.unsplash.com/photo-1541336032412-2048a678540d?w=120&auto=format&fit=crop&q=80";
-    }
-  }
-
-  // 3. Complete layout detection (avoid nesting multiple standard head/body boundaries)
+  // 2. Complete layout detection (avoid nesting multiple standard head/body boundaries)
   const isFullLayout = /<!DOCTYPE|<html|<\/head>|<\/body>|background-color.*#000000|background-color.*#1A1A1A/i.test(processedHtml);
 
   if (isFullLayout) {
     return processedHtml;
   }
 
-  // 4. Wrapping simple text / simple div emails in a beautiful high-fashion template
-  const currentYear = new Date().getFullYear();
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>${storeName}</title>
-    </head>
-    <body style="margin: 0; padding: 0; background-color: #FAF9F6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #1C1917;">
-      <table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed; background-color: #FAF9F6;">
-        <tr>
-          <td align="center" style="padding: 40px 10px 60px 10px;">
-            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 32px; overflow: hidden; box-shadow: 0 20px 50px rgba(26, 44, 84, 0.08); border: 1px solid #E5E5E0;">
-              
-              <!-- Luxury High-Fashion Header -->
-              <tr>
-                <td align="center" style="padding: 45px 40px; background-color: #1A2C54; border-bottom: 5px solid #E11D48;">
-                  ${resolvedLogo ? 
-                    `<img src="${resolvedLogo}" alt="${storeName}" style="max-height: 52px; display: block; filter: brightness(0) invert(1);" referrerPolicy="no-referrer">` : 
-                    `<div style="text-align: center;">
-                      <span style="display: inline-block; font-size: 28px; font-weight: 900; letter-spacing: 6px; color: #ffffff; text-transform: uppercase;">THE <span style="color: #E11D48; border-bottom: 2px solid #E11D48; padding-bottom: 2px;">RUBY</span></span>
-                      <div style="margin-top: 8px; font-size: 10px; font-weight: 700; letter-spacing: 8px; color: #FDA4AF; text-transform: uppercase; padding-left: 8px;">PREMIUM FASHION</div>
-                     </div>`
-                  }
-                </td>
-              </tr>
-              
-              <!-- Accent Ribbon -->
-              <tr>
-                <td height="4" style="background-color: #E11D48; line-height: 4px; font-size: 4px;">&nbsp;</td>
-              </tr>
-
-              <!-- Main Card Content -->
-              <tr>
-                <td style="padding: 50px 45px 35px 45px; text-align: left; background-color: #ffffff;">
-                  <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 15px; line-height: 1.65; color: #27272A;">
-                    ${processedHtml}
-                  </div>
-                </td>
-              </tr>
-
-              <!-- Luxury Deep Navy Footer Section -->
-              <tr>
-                <td style="padding: 45px; background-color: #1A2C54; text-align: center;">
-                  <span style="font-size: 16px; font-weight: 950; letter-spacing: 5px; color: #ffffff; text-transform: uppercase;">THE RUBY</span>
-                  <p style="margin: 5px 0 0 0; color: #FDA4AF; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 3px;">Premium Couture &amp; Styles</p>
-                  
-                  <div style="margin: 25px 0; border-top: 1px solid rgba(255, 255, 255, 0.1); height: 1px; font-size: 1px; line-height: 1px;">&nbsp;</div>
-                  
-                  <p style="margin: 0; color: #94A3B8; font-size: 12px; line-height: 1.65; font-weight: 400;">
-                    <strong>The Ruby Showroom &amp; Luxury Atelier</strong><br/>
-                    12 Rue de la Paix, Paris, France &bull; DLF Emporio, Vasant Kunj, New Delhi, India
-                  </p>
-                  <p style="margin: 15px 0 0 0; color: #64748B; font-size: 11px; line-height: 1.6; font-weight: 400;">
-                    You are receiving this automated security or service communication as a verified customer of The Ruby Co. If you believe this was received in error, please report it to our customer relations desk.
-                  </p>
-                  <p style="margin: 25px 0 0 0; color: #475569; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;">&copy; ${currentYear} ${storeName}. All rights reserved.</p>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    </body>
-    </html>
-  `;
+  // Wrap in official brand layout with #A11B35 primary color
+  return renderBaseEmailLayout({
+    title: storeName || 'The Ruby Fashion',
+    contentHtml: processedHtml,
+    baseHost
+  });
 }
 
 // Unified direct email sending helper for custom backend flows
@@ -3071,6 +3644,22 @@ async function startServer() {
       }
 
       console.log(`🔑 OTP ${otp} generated and stored securely on backend for ${cleanEmail} (expires: ${expiresAt})`);
+
+      const requestBaseHost = `${req.protocol}://${req.get('host')}`.replace(/^http:/i, 'https:');
+      const { subject: otpSubject, html: otpHtml } = getTemplateWelcomeOtp({
+        otp,
+        purpose: 'email verification',
+        baseHost: requestBaseHost
+      });
+
+      sendEmailDirect({
+        to: cleanEmail,
+        subject: otpSubject,
+        html: otpHtml,
+        fromName: "The Ruby Fashion",
+        baseHost: requestBaseHost
+      }).catch(err => console.warn("Failed to dispatch send-otp email:", err.message));
+
       res.json({
         status: "ok",
         otp: otp
@@ -3900,9 +4489,55 @@ async function startServer() {
   });
 
   app.post("/api/send-email", async (req, res) => {
-    const { to, subject, html, from, fromName: providedFromName, replyTo } = req.body;
+    let { to, subject, html, from, fromName: providedFromName, replyTo, templateKey, template, templateData } = req.body;
     
     try {
+      const requestBaseHost = `${req.protocol}://${req.get('host')}`.replace(/^http:/i, 'https:');
+      const selectedTemplateKey = (templateKey || template || '').toString().toLowerCase();
+
+      if (selectedTemplateKey) {
+        const data = { ...req.body, ...templateData, baseHost: requestBaseHost };
+        let generated: { subject: string; html: string } | null = null;
+        switch (selectedTemplateKey) {
+          case 'order_confirmation':
+          case 'order_placed':
+          case 'order_confirmed':
+            generated = getTemplateOrderConfirmation(data);
+            break;
+          case 'order_shipped':
+          case 'shipped':
+            generated = getTemplateOrderShipped(data);
+            break;
+          case 'out_for_delivery':
+            generated = getTemplateOutForDelivery(data);
+            break;
+          case 'order_delivered':
+          case 'delivered':
+            generated = getTemplateOrderDelivered(data);
+            break;
+          case 'return_update':
+          case 'return_approved':
+          case 'return_rejected':
+          case 'return_refunded':
+            generated = getTemplateReturnUpdate(data);
+            break;
+          case 'admin_new_order':
+          case 'admin_order':
+            generated = getTemplateAdminNewOrder(data);
+            break;
+          case 'welcome_otp':
+          case 'welcome':
+          case 'otp':
+            generated = getTemplateWelcomeOtp(data);
+            break;
+        }
+
+        if (generated) {
+          if (!subject) subject = generated.subject;
+          html = generated.html;
+        }
+      }
+
       // 1. Fetch Latest Settings (Caching handles performance resiliently)
       const effectiveSettings = await resilientGetSettings();
 
@@ -3950,7 +4585,6 @@ async function startServer() {
       const formattedFrom = `"${fromName}" <${finalFromEmail}>`;
 
       // Sanitize and Beautify the HTML content globally to keep brand styling outstanding and prevent spam folder routing
-      const requestBaseHost = `${req.protocol}://${req.get('host')}`.replace(/^http:/i, 'https:');
       const finalHtml = enhanceAndSanitizeEmailHtml(
         html,
         fromName,
@@ -4276,6 +4910,77 @@ async function startServer() {
       
       if (!userId) {
         return res.status(400).json({ error: "OneSignal error: userId is required for targeted push." });
+      }
+
+      // Handle broadcast push to all subscribed users
+      if (userId === 'broadcast') {
+        console.log(`OneSignal: Broadcasting notification to all subscribers: "${title}"`);
+        
+        // 1. Send OneSignal push using included_segments: ['All']
+        const broadcastNotification: any = {
+          contents: {
+            en: body || "Check out our new products!"
+          },
+          headings: {
+            en: title || "✨ New Arrival!"
+          },
+          url: url || '/',
+          included_segments: ['All'],
+          android_group: "group_broadcast_products"
+        };
+
+        let pushResponseData: any = null;
+        try {
+          const response = await sendOneSignalNotification(broadcastNotification);
+          pushResponseData = response?.data;
+          console.log(`OneSignal broadcast response:`, pushResponseData);
+        } catch (pushErr: any) {
+          console.warn("OneSignal broadcast push warning:", pushErr.message);
+        }
+
+        // 2. Fetch all users where role = 'user' from Supabase profiles, then insert one row per user into notifications table
+        try {
+          const supabase = getSupabaseAdmin();
+          const { data: users, error: userErr } = await supabase
+            .from('profiles')
+            .select('id, role');
+
+          if (userErr) {
+            console.error("❌ Failed to fetch users for broadcast notification:", userErr.message);
+          } else if (users && users.length > 0) {
+            // Filter users where role is 'user', null, or default/customer
+            const targetUsers = users.filter((u: any) => u.role === 'user' || !u.role || u.role === 'customer');
+            if (targetUsers.length > 0) {
+              const rowsToInsert = targetUsers.map((u: any) => ({
+                user_id: u.id,
+                title: title || '✨ New Arrival!',
+                body: body || 'Check out our new product',
+                type: 'alert',
+                link: url || '/',
+                is_read: false,
+                created_at: new Date().toISOString()
+              }));
+
+              const { error: insErr } = await supabase
+                .from('notifications')
+                .insert(rowsToInsert);
+
+              if (insErr) {
+                console.error("❌ Failed to insert broadcast notifications into Supabase:", insErr.message);
+              } else {
+                console.log(`✅ Successfully inserted ${rowsToInsert.length} broadcast in-app notifications into Supabase.`);
+              }
+            }
+          }
+        } catch (dbErr: any) {
+          console.error("❌ Broadcast DB error:", dbErr.message);
+        }
+
+        return res.json({ 
+          success: true, 
+          broadcast: true, 
+          id: pushResponseData?.id || 'broadcast-msg-ok' 
+        });
       }
 
       // Read user profile from Supabase to find their direct device registration ID if synced
@@ -4758,6 +5463,155 @@ async function startServer() {
         error: err.message,
         logs
       });
+    }
+  });
+
+  // Loyalty points delivery processing function
+  async function processOrderDeliveryLoyaltyPoints(orderIdOrDbId: string) {
+    try {
+      const supabase = getSupabaseAdmin();
+      if (!supabase) return { success: false, reason: "Supabase admin client not available" };
+
+      // Find order in Supabase
+      let { data: order, error } = await supabase
+        .from('orders')
+        .select('*')
+        .or(`id.eq.${orderIdOrDbId},order_number.eq.${orderIdOrDbId}`)
+        .maybeSingle();
+
+      if (error || !order) {
+        console.warn(`[loyalty] Order not found for delivery points processing: ${orderIdOrDbId}`);
+        return { success: false, reason: "Order not found" };
+      }
+
+      const userId = order.user_id || order.userId;
+      if (!userId || userId === 'guest') {
+        console.log(`[loyalty] Skipping points for guest order: ${order.order_number || order.id}`);
+        return { success: false, reason: "Guest user order" };
+      }
+
+      // Check if points were already credited
+      if (order.points_earned && Number(order.points_earned) > 0) {
+        console.log(`[loyalty] Points already credited for order #${order.order_number || order.id}`);
+        return { success: true, alreadyCredited: true, pointsEarned: Number(order.points_earned) };
+      }
+
+      const orderNum = order.order_number || order.orderId || order.id;
+      const cleanOrderNum = String(orderNum).replace(/^#/, '');
+
+      // Check loyalty_points_log to prevent duplicate credit
+      const { data: existingLog } = await supabase
+        .from('loyalty_points_log')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('type', 'earned')
+        .ilike('description', `%${cleanOrderNum}%`)
+        .maybeSingle();
+
+      if (existingLog) {
+        console.log(`[loyalty] Points log already exists for order #${cleanOrderNum}`);
+        return { success: true, alreadyCredited: true };
+      }
+
+      // Calculate points: ₹10 spent = 1 point
+      const totalAmount = Number(order.total || order.subtotal || 0);
+      const pointsEarned = Math.floor(totalAmount / 10);
+
+      if (pointsEarned <= 0) {
+        return { success: true, pointsEarned: 0 };
+      }
+
+      // 1. Get current user profile loyalty_points
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('loyalty_points')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const currentPoints = Number(profile?.loyalty_points || 0);
+      const newTotalPoints = currentPoints + pointsEarned;
+
+      // 2. Update profiles.loyalty_points
+      await supabase
+        .from('profiles')
+        .update({ loyalty_points: newTotalPoints })
+        .eq('id', userId);
+
+      // 3. Insert row into loyalty_points_log
+      await supabase
+        .from('loyalty_points_log')
+        .insert({
+          user_id: userId,
+          points: pointsEarned,
+          type: 'earned',
+          description: `Earned from order #${cleanOrderNum}`,
+          created_at: new Date().toISOString()
+        });
+
+      // 4. Update orders.points_earned
+      await supabase
+        .from('orders')
+        .update({ points_earned: pointsEarned })
+        .eq('id', order.id);
+
+      console.log(`[loyalty] Credited ${pointsEarned} points to user ${userId} for order #${cleanOrderNum}`);
+      return { success: true, pointsEarned, newTotalPoints };
+    } catch (err: any) {
+      console.error("[loyalty] Error processing order delivery loyalty points:", err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  // API endpoint: Credit delivery loyalty points
+  app.post("/api/loyalty/credit-delivery-points", async (req, res) => {
+    try {
+      const { orderId } = req.body;
+      if (!orderId) return res.status(400).json({ error: "orderId is required" });
+      const result = await processOrderDeliveryLoyaltyPoints(orderId);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // API endpoint: Grant bonus points (Admin action)
+  app.post("/api/loyalty/grant-bonus-points", async (req, res) => {
+    try {
+      const { userId, points, reason } = req.body;
+      if (!userId || !points) return res.status(400).json({ error: "userId and points are required" });
+      const supabase = getSupabaseAdmin();
+      if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
+
+      const numPoints = Number(points);
+      if (isNaN(numPoints) || numPoints <= 0) return res.status(400).json({ error: "Invalid points value" });
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('loyalty_points')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const currentPoints = Number(profile?.loyalty_points || 0);
+      const newBalance = currentPoints + numPoints;
+
+      await supabase
+        .from('profiles')
+        .update({ loyalty_points: newBalance })
+        .eq('id', userId);
+
+      await supabase
+        .from('loyalty_points_log')
+        .insert({
+          user_id: userId,
+          points: numPoints,
+          type: 'bonus',
+          description: reason || 'Admin bonus points',
+          created_at: new Date().toISOString()
+        });
+
+      return res.json({ success: true, newTotalPoints: newBalance, pointsGranted: numPoints });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
     }
   });
 

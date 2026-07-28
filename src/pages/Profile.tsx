@@ -24,7 +24,8 @@ import {
   Calendar,
   MessageCircle,
   MapPin,
-  Tag
+  Tag,
+  Sparkles
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -47,6 +48,31 @@ export default function Profile() {
   });
 
   const [recentlyViewed, setRecentlyViewed] = React.useState<any[]>([]);
+  const [loyaltyLogs, setLoyaltyLogs] = React.useState<any[]>([]);
+  const [loadingLogs, setLoadingLogs] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!user?.uid) return;
+    const fetchLogs = async () => {
+      setLoadingLogs(true);
+      try {
+        const { data, error } = await supabase
+          .from('loyalty_points_log')
+          .select('*')
+          .eq('user_id', user.uid)
+          .order('created_at', { ascending: false });
+
+        if (!error && data) {
+          setLoyaltyLogs(data);
+        }
+      } catch (e) {
+        console.error("Failed to fetch loyalty logs:", e);
+      } finally {
+        setLoadingLogs(false);
+      }
+    };
+    fetchLogs();
+  }, [user?.uid]);
   const uploadPromiseRef = React.useRef<Promise<string> | null>(null);
   const [notificationStatus, setNotificationStatus] = React.useState<string>('default');
 
@@ -446,7 +472,7 @@ export default function Profile() {
 
   return (
     <div className="min-h-screen bg-[#FAFAFA] pt-12 pb-24 px-4">
-      <div className="max-w-2xl mx-auto space-y-8">
+      <div className="max-w-7xl mx-auto space-y-8">
         {/* Page Title */}
         <div className="flex items-center justify-between px-2">
           <h1 className="text-3xl font-serif font-bold text-[#1A2C54]">Profile</h1>
@@ -618,6 +644,73 @@ export default function Profile() {
         </AnimatePresence>
 
         <div className="space-y-8">
+          {/* Loyalty Points Card & History */}
+          <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-50 space-y-6">
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold shadow-sm">
+                  <Sparkles size={20} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-[#1A2C54]">Loyalty Rewards Balance</h3>
+                  <p className="text-[10px] text-gray-400 font-medium">Earn ₹10 spent = 1 point • 100 points = ₹10 discount</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-2xl font-black text-amber-600 font-syne">{profile?.loyaltyPoints || 0}</span>
+                <span className="text-xs font-bold text-gray-400 ml-1">pts</span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400 px-1">Points Activity History</h4>
+              
+              {loadingLogs ? (
+                <div className="p-4 text-center text-xs text-gray-400 font-medium">Loading history...</div>
+              ) : loyaltyLogs.length > 0 ? (
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {loyaltyLogs.map((log) => {
+                    const isEarned = log.type === 'earned' || log.type === 'bonus';
+                    return (
+                      <div key={log.id} className="p-3.5 bg-gray-50/80 rounded-2xl flex items-center justify-between text-xs border border-gray-100/50">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={cn(
+                            "w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-sm",
+                            log.type === 'earned' ? "bg-emerald-100 text-emerald-700" :
+                            log.type === 'bonus' ? "bg-purple-100 text-purple-700" :
+                            "bg-rose-100 text-rose-700"
+                          )}>
+                            {isEarned ? '+' : '-'}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-bold text-[#1A2C54] truncate">
+                              {log.description || (log.type === 'earned' ? 'Order Earnings' : log.type === 'bonus' ? 'Bonus Points Granted' : 'Redeemed at Checkout')}
+                            </p>
+                            <p className="text-[10px] text-gray-400 font-medium">
+                              {new Date(log.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                        </div>
+                        <span className={cn(
+                          "font-black text-sm shrink-0 ml-2 font-syne",
+                          isEarned ? "text-emerald-600" : "text-rose-600"
+                        )}>
+                          {isEarned ? `+${log.points}` : `-${log.points}`} pts
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-6 text-center bg-gray-50/60 rounded-2xl border border-dashed border-gray-200/80 space-y-1">
+                  <Sparkles size={22} className="text-amber-400 mx-auto mb-1" />
+                  <p className="text-xs font-bold text-gray-600">No loyalty transactions yet</p>
+                  <p className="text-[10px] text-gray-400 font-medium">Points will appear here when you earn or redeem them!</p>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Contact Info */}
           <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-50 space-y-4">
             <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400 px-2">Contact Information</h3>

@@ -112,7 +112,7 @@ export default function Search() {
 
   return (
     <div className="min-h-screen bg-white pt-2 pb-20 px-4">
-      <div className="max-w-2xl mx-auto space-y-4">
+      <div className="max-w-7xl mx-auto space-y-6 px-4 sm:px-6 lg:px-8">
         <div className="space-y-3">
           <h1 className="text-2xl font-serif font-bold text-[#1A2C54]">Search <span className="text-ruby italic">The Ruby Fashion</span></h1>
           <div className="relative group">
@@ -159,9 +159,10 @@ export default function Search() {
               </div>
             </div>
           ) : filteredProducts.length > 0 ? (
-            <div className="grid grid-cols-1 gap-4">
+            <div className="space-y-4">
               <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">{filteredProducts.length} Results found</h2>
-              <AnimatePresence mode="popLayout">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <AnimatePresence mode="popLayout">
                 {filteredProducts.map((product) => (
                   <motion.div
                     key={product.id}
@@ -198,6 +199,7 @@ export default function Search() {
                   </motion.div>
                 ))}
               </AnimatePresence>
+              </div>
             </div>
           ) : (
             <div className="text-center py-20 space-y-4">

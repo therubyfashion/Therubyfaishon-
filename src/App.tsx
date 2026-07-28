@@ -10,6 +10,7 @@ import { CartProvider } from './contexts/CartContext';
 import { WishlistProvider } from './contexts/WishlistContext';
 import Footer from './components/Footer';
 import BottomNav from './components/BottomNav';
+import Navbar from './components/Navbar';
 import ChatWidget from './components/ChatWidget';
 import SplashScreen from './components/SplashScreen';
 import PageLoader from './components/PageLoader';
@@ -135,7 +136,7 @@ function AppContent() {
     const isPublicPath = publicPaths.includes(location.pathname) || location.pathname.startsWith('/product/') || location.pathname.startsWith('/track/');
     
     if (user && profile && !profile.isVerified && !isPublicPath) {
-      navigate(`/verify-prompt?email=${encodeURIComponent(user.email || '')}&uid=${user.uid}`);
+      navigate(`/verify-prompt?email=${encodeURIComponent(user.email || '')}&uid=${user.uid}`, { replace: true });
     }
   }, [user, profile, location.pathname, authLoading, navigate]);
 
@@ -546,6 +547,7 @@ function AppContent() {
         {showSplash && <SplashScreen />}
       </AnimatePresence>
       <ScrollToTop />
+      {!isAdminPath && <Navbar />}
 
       <main className="flex-grow">
         <Suspense fallback={<PageLoader variant="minimal" message="Gathering Collections" />}>
