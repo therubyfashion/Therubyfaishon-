@@ -70,11 +70,18 @@ export default function AddressManager() {
   };
 
   useEffect(() => {
-    fetchAddresses();
+    if (user) {
+      fetchAddresses();
+    } else {
+      setLoading(false);
+    }
   }, [user]);
 
   const fetchAddresses = async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     try {
       const { data, error } = await supabase
         .from('addresses')
@@ -87,7 +94,9 @@ export default function AddressManager() {
         return;
       }
 
-      const fetched = (data || []).map(deserializeAddress);
+      const fetched = (data || [])
+        .map(deserializeAddress)
+        .filter(a => a && a.id && !String(a.id).startsWith('addr_default_') && a.id !== '1' && a.id !== '2' && a.name !== 'Priya Sharma' && a.name !== 'Rajesh Sharma');
       setAddresses(fetched);
     } catch (error) {
       console.error("Error fetching addresses:", error);

@@ -8,8 +8,7 @@ import {
   ChevronRight, ArrowUpRight, TrendingUp, DollarSign, Award, Percent, Compass
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { collection, query, onSnapshot, where, orderBy, limit, Timestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // Supported Indian Cities with High-Precision Coordinates
@@ -88,13 +87,12 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
   }, []);
 
   // Map individual session nodes to designated Indian cities
-  const normalizeVisitorToIndia = (docId: string, data: any): Visitor => {
+  const normalizeVisitorToIndia = (data: any): Visitor => {
+    const docId = data.session_id || 'sess';
     let resolvedCity = data.city || '';
-    let resolvedCountry = data.country || '';
-    let lat = data.lat;
-    let lng = data.lng;
+    let lat = 28.6139;
+    let lng = 77.2090;
 
-    // Check if the city is one of the supported ones (case insensitive)
     const matchedCity = SUPPORTED_CITIES.find(
       c => c.name.toLowerCase() === resolvedCity.toLowerCase()
     );
@@ -104,7 +102,6 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
       lat = matchedCity.lat;
       lng = matchedCity.lng;
     } else {
-      // Deterministically seed a city based on document ID so markers are persistent across updates
       let hash = 0;
       for (let i = 0; i < docId.length; i++) {
         hash = docId.charCodeAt(i) + ((hash << 5) - hash);
@@ -116,116 +113,120 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
       lng = seedCity.lng;
     }
 
-    // Default clean values for session duration parameters
-    const browsers = ['Chrome', 'Safari', 'Firefox', 'Edge'];
-    const devices = ['Android', 'iPhone', 'Desktop', 'iPad'];
-    
-    let hashVal = 0;
-    for (let i = 0; i < docId.length; i++) hashVal += docId.charCodeAt(i);
-    
-    const browser = data.browser || browsers[hashVal % browsers.length];
-    const device = data.device || devices[(hashVal + 1) % devices.length];
-    
-    // Simulate smart shopping cart value if navigating cart pages
-    let cartValue = data.cartValue || 0;
-    if (data.path?.includes('/cart') || data.path?.includes('/checkout')) {
-      cartValue = 1299 + ((hashVal * 150) % 4500);
-    }
-
     return {
       id: docId,
-      sessionId: data.sessionId || docId,
+      sessionId: docId,
       city: resolvedCity,
-      country: 'India',
-      lat: lat,
-      lng: lng,
-      path: data.path || '/',
-      lastSeen: data.lastSeen,
-      startTime: data.startTime || new Date(Date.now() - 300000).toISOString(),
-      userEmail: data.userEmail || null,
-      browser,
-      device,
-      activeProduct: data.activeProduct || null,
-      cartValue
+      country: data.country || 'India',
+      lat,
+      lng,
+      path: data.page || '/',
+      lastSeen: data.last_seen,
+      startTime: data.created_at || data.last_seen || new Date().toISOString(),
+      userEmail: data.user_id || null,
+      browser: 'Browser',
+      device: data.device || 'Desktop',
+      activeProduct: data.product_viewed || null,
+      cartValue: Number(data.cart_value) || 0
     };
   };
 
-  // 1. Live Firestore Sync for active visitors in last 5 minutes
+  // 1. Live Supabase Sync for active visitors in last 5 minutes
   useEffect(() => {
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    const q = query(
-      collection(db, 'active_sessions'),
-      limit(150)
-    );
+    const fetchAndSubscribeSessions = async () => {
+      const loadActiveSessions = async () => {
+        try {
+          const fiveMinsAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+          const { data, error } = await supabase
+            .from('active_sessions')
+            .select('*')
+            .gt('last_seen', fiveMinsAgo);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      // Filter out stale visitors client-side to be Firestore Quota and Index friendly
-      const visitorsList: Visitor[] = [];
-      snapshot.docs.forEach(doc => {
-        const data = doc.data();
-        let isRecent = false;
-        if (data.lastSeen) {
-          const lastSeenDate = data.lastSeen.toDate ? data.lastSeen.toDate() : new Date(data.lastSeen);
-          if (Date.now() - lastSeenDate.getTime() < 5 * 60 * 1000) {
-            isRecent = true;
+          if (error) {
+            console.error("Error fetching active sessions from Supabase:", error);
+            setError(error.message || "Unable to load live data");
+            setActiveVisitors([]);
+          } else {
+            setError(null);
+            const visitorsList = (data || []).map(normalizeVisitorToIndia);
+            setActiveVisitors(visitorsList);
           }
-        } else {
-          isRecent = true; // Fallback for real-time latency
+        } catch (err: any) {
+          console.error("Active sessions fetch error:", err);
+          setError("Unable to load live data");
+          setActiveVisitors([]);
+        } finally {
+          setLoading(false);
         }
+      };
 
-        if (isRecent) {
-          visitorsList.push(normalizeVisitorToIndia(doc.id, data));
-        }
-      });
+      await loadActiveSessions();
 
-      setError(null);
-      setActiveVisitors(visitorsList);
-      setLoading(false);
-    }, (error) => {
-      console.error("Quota limit / onSnapshot error in LiveView active sessions:", error);
-      setError(error.message || "Unable to load live data");
-      setActiveVisitors([]);
-      setLoading(false);
-    });
+      const channel = supabase
+        .channel('active_sessions_live_view')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'active_sessions' }, () => {
+          loadActiveSessions();
+        })
+        .subscribe();
 
-    return () => unsubscribe();
+      const timer = setInterval(loadActiveSessions, 15000);
+
+      return () => {
+        supabase.removeChannel(channel);
+        clearInterval(timer);
+      };
+    };
+
+    fetchAndSubscribeSessions();
   }, []);
 
-  // 2. Real-time Sales and Orders for Today
+  // 2. Real-time Sales and Orders for Today from Supabase
   useEffect(() => {
-    const q = query(
-      collection(db, 'orders'),
-      limit(200)
-    );
+    const fetchAndSubscribeOrders = async () => {
+      const loadOrders = async () => {
+        try {
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
+          const { data, error } = await supabase
+            .from('orders')
+            .select('*')
+            .gte('created_at', todayStart.toISOString())
+            .order('created_at', { ascending: false });
 
-      const ordersList: any[] = [];
-      snapshot.docs.forEach(doc => {
-        const data = doc.data();
-        let dateVal: Date;
-        if (data.createdAt?.toDate) {
-          dateVal = data.createdAt.toDate();
-        } else {
-          dateVal = new Date(data.createdAt || Date.now());
+          if (!error && data) {
+            const ordersList = data.map((ord: any) => ({
+              id: ord.id,
+              ...ord,
+              parsedDate: new Date(ord.created_at || Date.now()),
+              total: ord.total_amount || ord.total || 0,
+              deliveryCity: ord.shipping_address?.city || ord.deliveryCity || ord.city || 'Delhi'
+            }));
+            setTodayOrders(ordersList);
+          } else {
+            setTodayOrders([]);
+          }
+        } catch (err) {
+          console.warn("Orders fetch error:", err);
+          setTodayOrders([]);
         }
+      };
 
-        if (dateVal.getTime() >= todayStart.getTime()) {
-          ordersList.push({ id: doc.id, ...data, parsedDate: dateVal });
-        }
-      });
+      await loadOrders();
 
-      // Sort by date descending
-      ordersList.sort((a, b) => b.parsedDate.getTime() - a.parsedDate.getTime());
-      setTodayOrders(ordersList);
-    }, (error) => {
-      console.warn("Orders live sync error:", error);
-      setTodayOrders([]);
-    });
+      const channel = supabase
+        .channel('orders_live_view')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+          loadOrders();
+        })
+        .subscribe();
 
-    return () => unsubscribe();
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    };
+
+    fetchAndSubscribeOrders();
   }, []);
 
   // 3. Dynamic Activity Stream derived from actual session updates and orders
@@ -236,7 +237,7 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
     activeVisitors.forEach(v => {
       const cleanPath = v.path;
       let type: 'view' | 'cart' | 'checkout' | 'wishlist' = 'view';
-      let product = v.activeProduct || 'Ethnic Wear Collection';
+      let product = v.activeProduct || 'Catalog Product';
 
       if (cleanPath.includes('/cart')) {
         type = 'cart';
@@ -258,7 +259,7 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
 
     // Merge in real orders
     todayOrders.forEach(ord => {
-      let prodName = 'Ethnic Kurta Set';
+      let prodName = 'Order Items';
       if (ord.items && ord.items[0]) {
         prodName = ord.items[0].name;
       }
@@ -383,11 +384,6 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
   // Derived Top Locations visitor ranking list
   const topCitiesRank = useMemo(() => {
     const rankCounts: Record<string, number> = {};
-    
-    // Fill all Indian cities with flat fallback of 0 so they always print elegantly
-    CITIES_LIST_PRESET.forEach(city => {
-      rankCounts[city] = 0;
-    });
 
     activeVisitors.forEach(v => {
       if (v.city) {
@@ -395,7 +391,6 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
       }
     });
 
-    // Sort by count descending
     return Object.entries(rankCounts)
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
@@ -404,7 +399,7 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
 
   // Session duration helper
   const getSessionDuration = (startTimeStr?: string) => {
-    if (!startTimeStr) return '1m 15s';
+    if (!startTimeStr) return '0m 0s';
     const start = new Date(startTimeStr).getTime();
     const diff = Math.max(0, Date.now() - start);
     const mins = Math.floor(diff / 60000);
@@ -423,19 +418,16 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
     return hours.map(hr => {
       const timeLabel = hr.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
       const relativeOrders = todayOrders.filter(o => {
-        const ordTime = o.parsedDate ? o.parsedDate.getTime() : new Date(o.createdAt).getTime();
+        const ordTime = o.parsedDate ? o.parsedDate.getTime() : new Date(o.createdAt || o.created_at).getTime();
         return Math.abs(ordTime - hr.getTime()) <= 60 * 60 * 1000;
       });
 
       const revenueVal = relativeOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
-      
-      // Seed minimal stylish baseline so line chart stays beautiful inside zero datasets
-      const safeRevSeed = todayOrders.length === 0 ? (Math.round(Math.abs(Math.sin(hr.getHours())) * 2500) + 1500) : revenueVal;
 
       return {
         time: timeLabel,
-        Revenue: safeRevSeed,
-        Orders: relativeOrders.length || (todayOrders.length === 0 ? Math.floor(safeRevSeed / 1200) : 0),
+        Revenue: revenueVal,
+        Orders: relativeOrders.length,
       };
     });
   }, [todayOrders]);
@@ -804,39 +796,41 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
           </div>
 
           <div className="flex-1 flex flex-col justify-between">
-            <div className="space-y-6">
-              {topCitiesRank.map((city, ind) => {
-                const totalLive = metrics.liveCount || 1;
-                const ratio = city.count / totalLive;
-                const percentVal = Math.max(8, Math.min(100, Math.round(ratio * 100)));
-                
-                // Deterministic visual weights for prettier default displays
-                const weightValues = [45, 32, 18, 12, 5];
-                const displayWeight = city.count > 0 ? percentVal : weightValues[ind];
+            <div className="space-y-6 overflow-y-auto">
+              {topCitiesRank.length === 0 ? (
+                <div className="py-12 text-center text-xs text-neutral-400 font-medium">
+                  No active visitor location data available
+                </div>
+              ) : (
+                topCitiesRank.map((city, ind) => {
+                  const totalLive = metrics.liveCount || 1;
+                  const ratio = city.count / totalLive;
+                  const percentVal = Math.max(8, Math.min(100, Math.round(ratio * 100)));
 
-                return (
-                  <div key={city.name} className="space-y-2">
-                    <div className="flex items-center justify-between text-xs font-semibold">
-                      <span className="flex items-center gap-2 text-neutral-700">
-                        <span className="text-neutral-300 font-mono text-[11px] w-4">0{ind + 1}</span>
-                        <span className="font-bold">{city.name}</span>
-                      </span>
-                      <span className="font-bold text-neutral-900 font-mono">
-                        {city.count > 0 ? `${city.count} Live` : `${weightValues[ind] + 2} visits`}
-                      </span>
+                  return (
+                    <div key={city.name} className="space-y-2">
+                      <div className="flex items-center justify-between text-xs font-semibold">
+                        <span className="flex items-center gap-2 text-neutral-700">
+                          <span className="text-neutral-300 font-mono text-[11px] w-4">0{ind + 1}</span>
+                          <span className="font-bold">{city.name}</span>
+                        </span>
+                        <span className="font-bold text-neutral-900 font-mono">
+                          {city.count} Live
+                        </span>
+                      </div>
+                      
+                      <div className="h-2 bg-neutral-50 rounded-full overflow-hidden border border-neutral-100/50">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: `${percentVal}%` }}
+                          transition={{ duration: 0.8, ease: 'easeOut' }}
+                          className="h-full bg-neutral-900 rounded-full"
+                        />
+                      </div>
                     </div>
-                    
-                    <div className="h-2 bg-neutral-50 rounded-full overflow-hidden border border-neutral-100/50">
-                      <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: `${displayWeight}%` }}
-                        transition={{ duration: 0.8, ease: 'easeOut' }}
-                        className="h-full bg-neutral-900 rounded-full"
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
 
             <div className="bg-neutral-50 rounded-2xl p-4 border border-neutral-100/80 mt-6 shrink-0 space-y-1">
@@ -845,7 +839,9 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
                 Active Core Market
               </div>
               <p className="text-xs text-neutral-500 leading-relaxed font-sans">
-                Delhi and Mumbai represent the core dynamic retail drivers of current digital traffic over the past hour.
+                {activeVisitors.length > 0 
+                  ? `Real-time activity detected across ${topCitiesRank.length} city locations.` 
+                  : 'Awaiting incoming visitor activity.'}
               </p>
             </div>
           </div>
@@ -862,11 +858,11 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
             
             <div className="space-y-4">
               {[
-                { label: 'Visitors', value: metrics.liveCount || 4, percent: 100, color: 'bg-neutral-900 text-white' },
-                { label: 'Product Views', value: Math.max(1, activeVisitors.filter(v => v.path.includes('/product') || v.activeProduct).length) || 3, percent: 75, color: 'bg-neutral-800 text-neutral-100' },
-                { label: 'Add To Cart', value: metrics.activeCarts || 2, percent: 42, color: 'bg-neutral-700 text-neutral-200' },
-                { label: 'Checkout', value: metrics.checkoutCount || 1, percent: 25, color: 'bg-neutral-600 text-neutral-300' },
-                { label: 'Orders', value: metrics.ordersTodayCount || todayOrders.length || 1, percent: 12, color: 'bg-emerald-500 text-white' }
+                { label: 'Visitors', value: metrics.liveCount, percent: metrics.liveCount > 0 ? 100 : 0, color: 'bg-neutral-900 text-white' },
+                { label: 'Product Views', value: activeVisitors.filter(v => v.path.includes('/product') || v.activeProduct).length, percent: metrics.liveCount > 0 ? Math.round((activeVisitors.filter(v => v.path.includes('/product') || v.activeProduct).length / metrics.liveCount) * 100) : 0, color: 'bg-neutral-800 text-neutral-100' },
+                { label: 'Add To Cart', value: metrics.activeCarts, percent: metrics.liveCount > 0 ? Math.round((metrics.activeCarts / metrics.liveCount) * 100) : 0, color: 'bg-neutral-700 text-neutral-200' },
+                { label: 'Checkout', value: metrics.checkoutCount, percent: metrics.liveCount > 0 ? Math.round((metrics.checkoutCount / metrics.liveCount) * 100) : 0, color: 'bg-neutral-600 text-neutral-300' },
+                { label: 'Orders', value: metrics.ordersTodayCount, percent: metrics.liveCount > 0 ? Math.round((metrics.ordersTodayCount / metrics.liveCount) * 100) : 0, color: 'bg-emerald-500 text-white' }
               ].map((tier, idx) => (
                 <div key={tier.label} className="relative">
                   <div className={cn("rounded-2xl p-3.5 flex items-center justify-between border border-neutral-200/20 shadow-sm relative overflow-hidden", tier.color)}>
@@ -880,7 +876,7 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
                     </div>
 
                     <div className="flex items-center gap-3 z-10 text-xs font-bold font-mono">
-                      <span>{tier.value > 0 ? tier.value : tier.percent}%</span>
+                      <span>{tier.value}</span>
                       <span className="text-[10px] opacity-75 font-normal">({tier.percent}%)</span>
                     </div>
 
@@ -896,7 +892,7 @@ export default function LiveView({ totalSales, totalOrders, totalSessions, dateR
             </div>
 
             <div className="text-[11px] text-neutral-400 font-medium text-center italic shrink-0 pt-2">
-              Based on active and completed interactions recorded in Firestore.
+              Based on active sessions recorded in real-time.
             </div>
 
           </div>

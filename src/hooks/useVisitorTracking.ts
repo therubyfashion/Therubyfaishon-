@@ -1,14 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useLocation } from 'react-router-dom';
-import { db } from '../firebase';
-import { doc, setDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { supabase } from '../supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useCart } from '../contexts/CartContext';
 
 export const useVisitorTracking = () => {
   const location = useLocation();
   const socketRef = useRef<Socket | null>(null);
   const { user } = useAuth();
+  const { total: cartTotal } = useCart();
 
   useEffect(() => {
     // Connect to Socket.io (Keep for socket-based events if needed)
@@ -24,11 +25,11 @@ export const useVisitorTracking = () => {
   }, []);
 
   useEffect(() => {
-    // Generate or get session ID
-    let sessionId = sessionStorage.getItem('visitor_session_id');
+    // Generate or get session ID using localStorage
+    let sessionId = localStorage.getItem('visitor_session_id');
     if (!sessionId) {
-      sessionId = Math.random().toString(36).substring(2, 15);
-      sessionStorage.setItem('visitor_session_id', sessionId);
+      sessionId = 'sess_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString(36);
+      localStorage.setItem('visitor_session_id', sessionId);
     }
 
     const track = async () => {
@@ -41,15 +42,15 @@ export const useVisitorTracking = () => {
             const res = await fetch('https://ipapi.co/json/');
             const data = await res.json();
             locationData = {
-              city: data.city || 'Unknown',
-              country: data.country_name || 'Online',
-              lat: data.latitude || 0,
-              lng: data.longitude || 0,
+              city: data.city || 'Delhi',
+              country: data.country_name || 'India',
+              lat: data.latitude || 28.6139,
+              lng: data.longitude || 77.2090,
               region: data.region || ''
             };
             sessionStorage.setItem('visitor_location', JSON.stringify(locationData));
           } catch (e) {
-            locationData = { city: 'Online', country: 'Store', lat: 20, lng: 77 }; // Default India-ish for demo
+            locationData = { city: 'Delhi', country: 'India', lat: 28.6139, lng: 77.2090 };
           }
         }
 
@@ -78,34 +79,51 @@ export const useVisitorTracking = () => {
         if (location.pathname.startsWith('/product/')) {
           const parts = location.pathname.split('/');
           if (parts[2]) {
-            // Capitalize and format product slug or ID for presentation
             activeProduct = decodeURIComponent(parts[2]).replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
           }
         }
 
-        const trackingData = {
-          id: sessionId,
-          sessionId,
-          userId: user?.uid || null,
-          userEmail: user?.email || null,
-          path: location.pathname,
-          lastSeen: serverTimestamp(),
-          startTime: sessionStorage.getItem('session_start_time') || new Date().toISOString(),
-          browser: getBrowser(),
-          device: getDevice(),
-          activeProduct: activeProduct || null,
-          ...locationData
-        };
-
+        const startTime = sessionStorage.getItem('session_start_time') || new Date().toISOString();
         if (!sessionStorage.getItem('session_start_time')) {
-          sessionStorage.setItem('session_start_time', trackingData.startTime);
+          sessionStorage.setItem('session_start_time', startTime);
         }
 
-        // 1. Send via Socket (for immediate server-side side-effects)
-        socketRef.current?.emit('visitor_tracking', trackingData);
+        const trackingData = {
+          session_id: sessionId,
+          user_id: user?.id || (user as any)?.uid || null,
+          page: location.pathname,
+          city: locationData.city || 'Delhi',
+          country: locationData.country || 'India',
+          device: getDevice(),
+          cart_value: Number(cartTotal) || 0,
+          product_viewed: activeProduct || null,
+          last_seen: new Date().toISOString(),
+          created_at: startTime
+        };
 
-        // 2. Direct Firestore update for robust Admin view
-        await setDoc(doc(db, 'active_sessions', sessionId), trackingData, { merge: true });
+        // Send via Socket
+        socketRef.current?.emit('visitor_tracking', {
+          id: sessionId,
+          sessionId,
+          path: location.pathname,
+          ...trackingData
+        });
+
+        // Insert or Upsert into Supabase active_sessions table
+        const { error: upsertErr } = await supabase
+          .from('active_sessions')
+          .upsert(trackingData, { onConflict: 'session_id' });
+
+        if (upsertErr) {
+          console.warn("Supabase active_sessions upsert warning:", upsertErr.message);
+        }
+
+        // Clean up stale sessions (> 10 mins)
+        const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+        await supabase
+          .from('active_sessions')
+          .delete()
+          .lt('last_seen', tenMinsAgo);
 
       } catch (e) {
         console.error("Tracking failed", e);
@@ -114,10 +132,9 @@ export const useVisitorTracking = () => {
 
     track();
     
-    // Heartbeat every 30 seconds
-    const heartbeat = setInterval(track, 30000);
+    // Heartbeat every 20 seconds
+    const heartbeat = setInterval(track, 20000);
 
-    // Initial setup on navigation
     if (socketRef.current) {
       if (socketRef.current.connected) {
         track();
@@ -130,15 +147,26 @@ export const useVisitorTracking = () => {
       clearInterval(heartbeat);
       socketRef.current?.off('connect', track);
     };
-  }, [location.pathname, user]);
+  }, [location.pathname, user, cartTotal]);
 
-  // Clean up session on tab close (optional, but good for accuracy)
+  // Clean up session on tab close/unload
   useEffect(() => {
     const handleUnload = () => {
-      const sessionId = sessionStorage.getItem('visitor_session_id');
+      const sessionId = localStorage.getItem('visitor_session_id');
       if (sessionId) {
-        // Note: Navigator.sendBeacon or deleteDoc might not finish on unmount/unload
-        // but we rely on the Admin view filtering by lastSeen for accuracy.
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        if (supabaseUrl && supabaseKey) {
+          const url = `${supabaseUrl}/rest/v1/active_sessions?session_id=eq.${sessionId}`;
+          fetch(url, {
+            method: 'DELETE',
+            headers: {
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`
+            },
+            keepalive: true
+          }).catch(() => {});
+        }
       }
     };
     window.addEventListener('beforeunload', handleUnload);

@@ -22,27 +22,6 @@ const STEPS = [
   { id: 4, label: 'Payment' }
 ];
 
-const MOCK_ADDRESSES = [
-  {
-    id: '1',
-    type: 'Home',
-    name: 'Priya Sharma',
-    email: 'priya.sharma@example.com',
-    isDefault: true,
-    address: 'Flat 402, Sunshine Apartments, Bandra West, Mumbai — 400050',
-    number: '+91 98765 43210'
-  },
-  {
-    id: '2',
-    type: 'Office',
-    name: 'Office',
-    email: 'office@company.com',
-    isDefault: false,
-    address: 'Level 8, One BKC Tower, Bandra Kurla Complex, Mumbai — 400051',
-    number: '+91 98765 43210'
-  }
-];
-
 export default function Checkout() {
   const { items, total, itemCount, appliedPromo, clearCart } = useCart();
   const { user } = useAuth();
@@ -147,7 +126,10 @@ export default function Checkout() {
         try {
           const cached = localStorage.getItem('user_addresses');
           if (cached) {
-            guestAddresses = JSON.parse(cached);
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed)) {
+              guestAddresses = parsed.filter(a => a && a.id && !String(a.id).startsWith('addr_default_') && a.id !== '1' && a.id !== '2' && a.name !== 'Priya Sharma' && a.name !== 'Rajesh Sharma');
+            }
           }
         } catch (err) {
           console.error(err);
@@ -202,35 +184,8 @@ export default function Checkout() {
           };
         });
 
-        // If still empty, provide realistic default Indian addresses for convenience
-        if (fetchedAddresses.length === 0) {
-          fetchedAddresses = [
-            {
-              id: 'addr_default_1',
-              name: user.displayName || 'Rajesh Sharma',
-              number: '9876543210',
-              address: '402, Royal Palace, Boring Road',
-              landmark: 'Near Panchmukhi Mandir',
-              state: 'Bihar',
-              city: 'Patna',
-              pincode: '800001',
-              label: 'Home',
-              isDefault: true
-            },
-            {
-              id: 'addr_default_2',
-              name: user.displayName || 'Rajesh Sharma',
-              number: '9876543210',
-              address: 'A-12, Sector 5, Noida',
-              landmark: 'Near Metro Station',
-              state: 'Uttar Pradesh',
-              city: 'Noida',
-              pincode: '201301',
-              label: 'Office',
-              isDefault: false
-            }
-          ];
-        }
+        // Filter out any default dummy addresses if present
+        fetchedAddresses = fetchedAddresses.filter(a => a && a.id && !String(a.id).startsWith('addr_default_') && a.id !== '1' && a.id !== '2' && a.name !== 'Priya Sharma' && a.name !== 'Rajesh Sharma');
 
         setAddresses(fetchedAddresses);
         if (fetchedAddresses.length > 0 && !selectedAddress) {
@@ -271,7 +226,12 @@ export default function Checkout() {
   }, [currentStep]);
 
   useEffect(() => {
-    localStorage.setItem('user_addresses', JSON.stringify(addresses));
+    const validAddresses = addresses.filter(a => a && a.id && !String(a.id).startsWith('addr_default_') && a.id !== '1' && a.id !== '2' && a.name !== 'Priya Sharma' && a.name !== 'Rajesh Sharma');
+    if (validAddresses.length > 0) {
+      localStorage.setItem('user_addresses', JSON.stringify(validAddresses));
+    } else {
+      localStorage.removeItem('user_addresses');
+    }
   }, [addresses]);
 
   useEffect(() => {

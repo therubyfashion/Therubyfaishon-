@@ -2816,21 +2816,35 @@ export default function AdminDashboard() {
     setChartData(data.length > 0 ? data : chartDataSample);
   };
 
-  // Real-time listener for live sessions
+  // Real-time listener for live sessions using Supabase active_sessions
   useEffect(() => {
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    const q = query(
-      collection(db, 'active_sessions'),
-      where('lastSeen', '>=', Timestamp.fromDate(fiveMinutesAgo))
-    );
+    const fetchLiveSessions = async () => {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const { data, error } = await supabase
+        .from('active_sessions')
+        .select('*')
+        .gt('last_seen', fiveMinutesAgo);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setLiveSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      console.error("Live sessions listener error:", error);
-    });
+      if (!error && data) {
+        setLiveSessions(data);
+      }
+    };
 
-    return () => unsubscribe();
+    fetchLiveSessions();
+
+    const channel = supabase
+      .channel('admin_live_sessions')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'active_sessions' }, () => {
+        fetchLiveSessions();
+      })
+      .subscribe();
+
+    const timer = setInterval(fetchLiveSessions, 15000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(timer);
+    };
   }, []);
 
   // Real-time listener for customer chats in Supabase
@@ -3052,7 +3066,7 @@ export default function AdminDashboard() {
         safeGetDocs(collection(db, 'settings')),
         safeGetDocs(query(collection(db, 'reviews'), orderBy('createdAt', 'desc'), limit(100))),
         safeGetDocs(query(collection(db, 'carts'), orderBy('updatedAt', 'desc'), limit(100))),
-        safeGetDocs(query(collection(db, 'active_sessions'), limit(100))),
+        supabase.from('active_sessions').select('*').limit(100),
         supabase.from('promotions').select('*').order('priority', { ascending: true }),
         safeGetDocs(query(collection(db, 'analytics_daily'), orderBy('date', 'desc'), limit(365)))
       ]);
