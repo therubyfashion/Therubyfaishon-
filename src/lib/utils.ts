@@ -1,8 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-
-import { collection, getDocs, query, limit } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -13,16 +11,15 @@ export const syncToGoogleSheets = async (orderData: any) => {
   let scriptUrl = '';
   let apiKey = '';
   
-  // 1. Try to fetch from Firestore settings FIRST
+  // 1. Try to fetch from Supabase settings FIRST
   try {
-    const settingsSnap = await getDocs(query(collection(db, 'settings'), limit(1)));
-    if (!settingsSnap.empty) {
-      const data = settingsSnap.docs[0].data();
-      scriptUrl = (data.googleSheetUrl || '').trim();
-      apiKey = data.googleSheetApiKey || '';
+    const { data: setts } = await supabase.from('settings').select('*').limit(1);
+    if (setts && setts.length > 0) {
+      scriptUrl = (setts[0].google_sheet_url || setts[0].googleSheetUrl || '').trim();
+      apiKey = setts[0].google_sheet_api_key || setts[0].googleSheetApiKey || '';
     }
   } catch (e) {
-    console.warn('Failed to fetch Google Sheet settings from Firestore:', e);
+    console.warn('Failed to fetch Google Sheet settings from Supabase:', e);
   }
 
   // 2. Fallback to env var if Firestore is empty

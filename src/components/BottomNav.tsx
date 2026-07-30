@@ -1,7 +1,6 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, Grid, Search, ShoppingBag, User, Bell } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Home, Grid, Search, ShoppingBag, User } from 'lucide-react';
 import { useCart } from '../contexts/CartContext';
 import { useNotifications } from '../contexts/NotificationContext';
 
@@ -50,13 +49,6 @@ export default function BottomNav() {
                   <span className="absolute -top-1.5 -right-1.5 bg-ruby text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full ring-2 ring-white">
                     {item.count}
                   </span>
-                )}
-                {isActive && (
-                  <motion.div
-                    layoutId="bottomNavIndicator"
-                    className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-1 h-1 bg-ruby rounded-full"
-                    transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                  />
                 )}
               </div>
               <span className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${isActive ? 'opacity-100' : 'opacity-0'} transition-opacity duration-300`}>

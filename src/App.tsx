@@ -1,8 +1,6 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
-import { collection, getDocs, query, limit, doc, updateDoc } from 'firebase/firestore';
-import { db } from './firebase';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SettingsProvider, useSettings } from './contexts/SettingsContext';
 import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
@@ -87,7 +85,6 @@ function AppContent() {
   const navigate = useNavigate();
   const isAdminPath = location.pathname.startsWith('/admin');
   const [showSplash, setShowSplash] = useState(true);
-  const [quotaExceeded, setQuotaExceeded] = useState(false);
 
   // Clear old stale caches to ensure fresh data from Supabase
   useEffect(() => {
@@ -111,17 +108,6 @@ function AppContent() {
   useEffect(() => {
     trackPixelEvent('PageView');
   }, [location.pathname]);
-
-  // Listen to firestore quota exceeded events
-  useEffect(() => {
-    const handleQuotaExceeded = () => {
-      setQuotaExceeded(true);
-    };
-    window.addEventListener('firestore-quota-exceeded', handleQuotaExceeded);
-    return () => {
-      window.removeEventListener('firestore-quota-exceeded', handleQuotaExceeded);
-    };
-  }, []);
 
   const { user, profile, isAdmin, loading: authLoading } = useAuth();
   const { settings, loading: settingsLoading } = useSettings();

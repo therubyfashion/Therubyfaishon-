@@ -7,8 +7,6 @@ import {
   Shirt, Smartphone, Watch, Laptop, ShoppingCart, Gem, Utensils, ToyBrick,
   Plus, ThumbsUp, ThumbsDown, X, Camera, Image as ImageIcon
 } from 'lucide-react';
-import { collection, getDocs, query, where, limit, orderBy, addDoc, doc, updateDoc, increment, serverTimestamp, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
 import { supabase } from '../supabase';
 import { Product, Category } from '../types';
 import ProductCard from '../components/ProductCard';
@@ -223,6 +221,51 @@ export default function Home() {
         setProductsLoaded(true);
         cacheAndSave('trendingProducts', trendingData);
         cacheAndSave('popularProducts', popularData);
+        // Fetch reviews
+        try {
+          const { data: revData } = await supabase.from('reviews').select('*').order('created_at', { ascending: false });
+          if (revData) {
+            const formattedRevs = revData.map((a: any) => ({
+              id: a.id,
+              name: a.user_name || a.name || 'Anonymous User',
+              initials: (a.user_name || a.name || 'U').charAt(0).toUpperCase(),
+              color: a.color || '#5a4fcf',
+              rating: a.rating || 5,
+              text: a.comment || a.text || '',
+              tag: a.tag || 'Fabric',
+              image: a.image || null,
+              date: new Date(a.created_at || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+              likes: a.likes || 0,
+              dislikes: a.dislikes || 0,
+              createdAt: a.created_at
+            }));
+            setReviews(formattedRevs);
+            cacheAndSave('reviews', formattedRevs);
+          }
+        } catch (e) {
+          console.warn("Error fetching reviews:", e);
+        }
+
+        // Fetch settings
+        try {
+          const { data: settsData } = await supabase.from('settings').select('*').limit(1);
+          if (settsData && settsData.length > 0) {
+            const rawSettings = settsData[0];
+            promoConfigData = {
+              promoEnabled: rawSettings.promo_enabled ?? rawSettings.promoEnabled ?? false,
+              promoType: rawSettings.promo_type ?? rawSettings.promoType ?? 'timer',
+              promoMessage: rawSettings.promo_message ?? rawSettings.promoMessage ?? '🔥 Mega Sale Ends In:',
+              promoEndDate: rawSettings.promo_end_date ?? rawSettings.promoEndDate ?? '',
+              promoScrolling: rawSettings.promo_scrolling ?? rawSettings.promoScrolling ?? false,
+              promoBgColor: rawSettings.promo_bg_color ?? rawSettings.promoBgColor ?? '#A11B35',
+              promoTextColor: rawSettings.promo_text_color ?? rawSettings.promoTextColor ?? '#FFFFFF',
+            };
+            setPromoConfig(promoConfigData);
+            cacheAndSave('promoConfig', promoConfigData);
+          }
+        } catch (e) {
+          console.warn("Error fetching settings:", e);
+        }
       } catch (error) {
         console.warn("Error loading home data from Supabase:", error);
         setCategoriesLoaded(true);
@@ -239,50 +282,12 @@ export default function Home() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => { fetchHomeSupabaseData(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'banners' }, () => { fetchHomeSupabaseData(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => { fetchHomeSupabaseData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews' }, () => { fetchHomeSupabaseData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => { fetchHomeSupabaseData(); })
       .subscribe();
-
-    // Keep settings and reviews on Firestore as per Phase 1 instructions (leaving other components intact)
-    // 3. Real-time Reviews listener
-    const unsubscribeReviews = onSnapshot(collection(db, 'fabric_reviews'), (snapshot) => {
-      const firestoreReviews = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      firestoreReviews.sort((a, b) => {
-        const dateA = a.createdAt ? (a.createdAt.toDate ? a.createdAt.toDate() : new Date(a.createdAt)) : new Date(0);
-        const dateB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt)) : new Date(0);
-        return dateB.getTime() - dateA.getTime();
-      });
-      finalReviews = firestoreReviews;
-      setReviews(firestoreReviews);
-      cacheAndSave('reviews', firestoreReviews);
-    }, (error) => {
-      console.warn("Reviews real-time snapshot error:", error);
-    });
-
-    // 4. Real-time Settings listener (Promo Config)
-    const unsubscribeSettings = onSnapshot(collection(db, 'settings'), (snapshot) => {
-      if (!snapshot.empty) {
-        const rawSettings = snapshot.docs[0].data();
-        promoConfigData = {
-          promoEnabled: rawSettings.promoEnabled ?? false,
-          promoType: rawSettings.promoType ?? 'timer',
-          promoMessage: rawSettings.promoMessage ?? '🔥 Mega Sale Ends In:',
-          promoEndDate: rawSettings.promoEndDate ?? '',
-          promoScrolling: rawSettings.promoScrolling ?? false,
-          promoBgColor: rawSettings.promoBgColor ?? '#A11B35',
-          promoTextColor: rawSettings.promoTextColor ?? '#FFFFFF',
-        };
-        setPromoConfig(promoConfigData);
-        cacheAndSave('promoConfig', promoConfigData);
-      } else {
-        setPromoConfig({ promoEnabled: false, promoMessage: "Welcome to The Ruby Ethnic Wear Store! 🎉" });
-      }
-    }, (error) => {
-      console.warn("Settings real-time snapshot error:", error);
-    });
 
     return () => {
       supabase.removeChannel(homeChannel);
-      unsubscribeReviews();
-      unsubscribeSettings();
     };
   }, []);
 
@@ -314,7 +319,21 @@ export default function Home() {
       const colors = ['#5a4fcf', '#d85a30', '#0f6e56', '#993c1d', '#185fa5'];
       const randomColor = colors[Math.floor(Math.random() * colors.length)];
       
-      const reviewData = {
+      const { data: inserted, error } = await supabase.from('reviews').insert([{
+        user_name: profile?.displayName || user?.displayName || 'Anonymous User',
+        color: randomColor,
+        rating: newReview.rating,
+        comment: newReview.text,
+        tag: newReview.tag || 'Fabric',
+        image: newReview.image || null,
+        likes: 0,
+        dislikes: 0,
+        user_id: user.uid,
+        created_at: new Date().toISOString()
+      }]).select().single();
+      
+      const newId = inserted ? inserted.id : 'rev_' + Date.now();
+      const optimisticReview = { 
         name: profile?.displayName || user?.displayName || 'Anonymous User',
         initials: (profile?.displayName || user?.displayName || 'U').charAt(0).toUpperCase(),
         color: randomColor,
@@ -326,15 +345,7 @@ export default function Home() {
         likes: 0,
         dislikes: 0,
         userId: user.uid,
-        createdAt: serverTimestamp()
-      };
-
-      const docRef = await addDoc(collection(db, 'fabric_reviews'), reviewData);
-      
-      // Update local state with optimistic data (converting serverTimestamp to ISO for sorting if needed, but here we just prepend)
-      const optimisticReview = { 
-        ...reviewData, 
-        id: docRef.id, 
+        id: newId, 
         createdAt: new Date().toISOString() 
       };
       
@@ -364,10 +375,10 @@ export default function Home() {
     }));
     
     try {
-      const reviewRef = doc(db, 'fabric_reviews', id);
-      await updateDoc(reviewRef, {
-        [isLike ? 'likes' : 'dislikes']: increment(1)
-      });
+      const currentReviewItem = reviews.find(r => r.id === id);
+      const field = isLike ? 'likes' : 'dislikes';
+      const count = ((currentReviewItem as any)?.[field] || 0) + 1;
+      await supabase.from('reviews').update({ [field]: count }).eq('id', id);
     } catch (error) {
       console.error("Error updating reaction:", error);
     }
@@ -385,12 +396,12 @@ export default function Home() {
     e.preventDefault();
     if (email) {
       try {
-        // Save to Firestore
-        await addDoc(collection(db, 'newsletter'), {
+        // Save to Supabase
+        await supabase.from('newsletter').insert([{
           email,
-          createdAt: new Date().toISOString(),
-          userId: user?.uid || 'guest'
-        });
+          created_at: new Date().toISOString(),
+          user_id: user?.uid || 'guest'
+        }]);
 
         // Tag in OneSignal
         if (Capacitor.isNativePlatform()) {

@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { collection, getDocs, query, limit } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 
 interface SettingsContextType {
   settings: any | null;
@@ -39,32 +38,17 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const q = query(collection(db, 'settings'), limit(1));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
+        const { data } = await supabase.from('settings').select('*').limit(1);
+        if (data && data.length > 0) {
           setSettings({
             ...DEFAULT_CLIENT_SETTINGS,
-            ...querySnapshot.docs[0].data()
+            ...data[0]
           });
         } else {
           setSettings(DEFAULT_CLIENT_SETTINGS);
         }
       } catch (error: any) {
-        const errMsg = String(error?.message || error || '').toLowerCase();
-        const isQuota = error.code === 'resource-exhausted' || 
-                        errMsg.includes('quota exceeded') || 
-                        errMsg.includes('quota-exceeded') || 
-                        errMsg.includes('resource-exhausted') ||
-                        errMsg.includes('free daily read units per project');
-        
-        if (isQuota) {
-          console.warn("Firestore Quota exceeded. Using local defaults.");
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('firestore-quota-exceeded'));
-          }
-        } else {
-          console.error("Error fetching settings:", error);
-        }
+        console.error("Error fetching settings from Supabase:", error);
         setSettings(DEFAULT_CLIENT_SETTINGS);
       } finally {
         setLoading(false);

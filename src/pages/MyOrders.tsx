@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, orderBy, updateDoc, doc } from 'firebase/firestore';
-import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { ShoppingBag, AlertTriangle, TrendingUp, Package, ChevronRight, Search, RotateCcw, X, Check, XCircle, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';

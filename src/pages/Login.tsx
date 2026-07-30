@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../supabase';
-import { db } from '../firebase';
-import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { sendNotification } from '../lib/notifications';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
@@ -272,9 +270,9 @@ export default function Login() {
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, 'settings'));
-        if (!querySnapshot.empty) {
-          setStoreSettings(querySnapshot.docs[0].data());
+        const { data } = await supabase.from('settings').select('*').limit(1);
+        if (data && data.length > 0) {
+          setStoreSettings(data[0]);
         }
       } catch (error) {
         console.error("Error fetching settings:", error);

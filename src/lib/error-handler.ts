@@ -7,35 +7,22 @@ export enum OperationType {
   WRITE = 'write',
 }
 
-export interface FirestoreErrorInfo {
+export interface DatabaseErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
   authInfo: Record<string, any>;
 }
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+export function handleDatabaseError(error: unknown, operationType: OperationType, path: string | null) {
   const errorMessage = error instanceof Error ? error.message : String(error);
-  
-  if (typeof window !== 'undefined') {
-    const lowerMsg = errorMessage.toLowerCase();
-    if (
-      lowerMsg.includes('quota exceeded') ||
-      lowerMsg.includes('quota-exceeded') ||
-      lowerMsg.includes('resource-exhausted') ||
-      (error as any)?.code === 'resource-exhausted' ||
-      errorMessage.includes('Free daily read units per project')
-    ) {
-      window.dispatchEvent(new CustomEvent('firestore-quota-exceeded'));
-    }
-  }
 
-  const errInfo: FirestoreErrorInfo = {
+  const errInfo: DatabaseErrorInfo = {
     error: errorMessage,
     authInfo: {},
     operationType,
     path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  };
+  console.error('Database Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }

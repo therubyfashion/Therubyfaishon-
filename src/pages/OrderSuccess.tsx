@@ -8,8 +8,6 @@ import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../firebase';
-import { doc, setDoc, addDoc, collection, query, where, getDocs, updateDoc } from 'firebase/firestore';
 import { generateInvoice } from '../utils/invoiceGenerator';
 import { io } from 'socket.io-client';
 import { supabase } from '../supabase';

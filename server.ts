@@ -9,10 +9,6 @@ import { Resend } from 'resend';
 import Razorpay from 'razorpay';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
-import admin from 'firebase-admin';
-import { getFirestore } from 'firebase-admin/firestore';
-import { initializeApp as initClientApp, getApps as getClientApps } from 'firebase/app';
-import { getFirestore as getClientFirestore, doc as cDoc, getDoc as cGetDoc, collection as cCollection, getDocs as cGetDocs, limit as cLimit, query as cQuery, where as cWhere, addDoc as cAddDoc, updateDoc as cUpdateDoc, onSnapshot as cOnSnapshot, setDoc as cSetDoc } from 'firebase/firestore';
 import fs from 'fs';
 import axios from 'axios';
 import * as OneSignal from 'onesignal-node';
@@ -41,6 +37,8 @@ const getSupabaseAdmin = () => {
   });
   return supabaseAdmin;
 };
+
+const supabase = getSupabaseAdmin();
 
 // Central Configuration for Email Integrity
 const VERIFIED_DOMAIN = "therubyfashion.shop";
@@ -97,149 +95,18 @@ const initClientsFromEnv = () => {
 
 initClientsFromEnv();
 
-// Initialize Firebase Admin and Client Fallback for server-side operations
+// Supabase backend configuration
 let db: any = null;
 let clientDb: any = null;
-let isClientDbReady = false;
-let isDbWriteable = true; // Track if the database is fully writable/accessible
-let adminApp: admin.app.App | null = null;
+let isClientDbReady = true;
+let isDbWriteable = true;
+let adminApp: any = null;
 let currentFirestoreDatabaseId = '(default)';
 let currentFirebaseProjectId = '';
 
-// Load configured database ID synchronously at boot
-let configuredFirestoreDatabaseId = '(default)';
-try {
-  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-  if (fs.existsSync(configPath)) {
-    const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    configuredFirestoreDatabaseId = firebaseConfig.firestoreDatabaseId || '(default)';
-    console.log(`📌 Loaded configured Firestore Database ID: ${configuredFirestoreDatabaseId}`);
-  }
-} catch (e: any) {
-  console.warn("⚠️ Failed to parse firebase-applet-config.json synchronously:", e.message);
-}
-
-const initializeClientFirestore = () => {
-  if (isClientDbReady && clientDb) return;
-  try {
-    const rootPath = process.cwd();
-    const configPath = path.join(rootPath, 'firebase-applet-config.json');
-    if (fs.existsSync(configPath)) {
-      const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      const dbId = configuredFirestoreDatabaseId || firebaseConfig.firestoreDatabaseId || '(default)';
-      const apps = getClientApps();
-      const cApp = apps.length === 0 ? initClientApp(firebaseConfig, 'node-server-secondary') : apps[0];
-      clientDb = getClientFirestore(cApp, dbId);
-      isClientDbReady = true;
-      console.log(`✅ Resilient Client Firestore SDK fallback initialized successfully with database ID: ${dbId}`);
-    }
-  } catch (err: any) {
-    console.warn("⚠️ Client SDK initialization fallback skipped:", err.message);
-  }
-};
-
 const initializeFirebase = async (force = false) => {
-  if (db && !force) return;
-  try {
-    const rootPath = process.cwd();
-    const configPath = path.join(rootPath, 'firebase-applet-config.json');
-    if (!fs.existsSync(configPath)) {
-      console.log("ℹ️ Skipping Firebase Admin init: config file not found.");
-      return;
-    }
-
-    let firestoreDatabaseId = '(default)';
-    let firebaseProjectId = '';
-
-    try {
-      const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || firestoreDatabaseId;
-      firebaseProjectId = firebaseConfig.projectId || '';
-    } catch (e) {
-      console.error("❌ Failed to parse firebase-applet-config.json");
-    }
-    
-    currentFirestoreDatabaseId = firestoreDatabaseId;
-    currentFirebaseProjectId = firebaseProjectId;
-      
-    const targetProjectId = firebaseProjectId || process.env.PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-    if (!targetProjectId) {
-      console.log("ℹ️ Skipping Firebase Admin init: No Project ID found in config or env.");
-      return;
-    }
-
-    if (admin.apps.length > 0) {
-      try {
-        await Promise.all(admin.apps.map(a => a.delete().catch(() => {})));
-      } catch (e) {}
-    }
-    
-    try {
-      console.log(`🚀 Starting Firebase Admin (Project: ${targetProjectId}, Database: ${firestoreDatabaseId})`);
-      
-      const adminOptions: any = {
-        projectId: targetProjectId
-      };
-
-      try {
-        if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-          console.log("🔑 Initializing Firebase Admin via custom credentials from environment variables.");
-          adminOptions.credential = admin.credential.cert({
-            projectId: process.env.FIREBASE_PROJECT_ID,
-            clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-            privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-          });
-        } else {
-          adminOptions.credential = admin.credential.applicationDefault();
-        }
-      } catch (e: any) {
-        console.warn("ℹ️ Default credential loading failed:", e.message);
-        console.warn("ℹ️ Using implicit container credentials");
-      }
-
-      const app = admin.apps.length > 0 ? admin.app() : admin.initializeApp(adminOptions);
-      adminApp = app;
-      
-      // Attempt connection to the configured database
-      let currentDb = getFirestore(app, firestoreDatabaseId);
-      
-      try {
-        // Initial Probe
-        await currentDb.collection('settings').limit(1).get();
-        db = currentDb;
-        isDbWriteable = true;
-        console.log("✅ Firebase Connected: Database is fully accessible.");
-        // Try to seed settings as database is writable
-        seedSettingsIfEmpty(currentDb).catch((err) => {
-          console.warn("⚠️ Seeding skipped on main db:", err.message);
-        });
-        seedStoreDataIfEmpty(currentDb).catch((err) => {
-          console.warn("⚠️ Store data seeding skipped on main db:", err.message);
-        });
-      } catch (probeErr: any) {
-        console.warn("⚠️ Firebase Admin initial probe failed:", probeErr.message);
-        isDbWriteable = false; // Mark restricted initially
-
-        if (firestoreDatabaseId !== '(default)') {
-          console.warn("⚠️ Custom database ID inaccessible via Admin SDK. Falling back to Resilient Client SDK fallback...");
-          db = null;
-        } else {
-          console.log("ℹ️ Connectivity restricted. Assigning default database anyway to prevent lockouts.");
-          db = currentDb;
-        }
-      }
-    } catch (adminErr: any) {
-      console.error("❌ Firebase Admin Initialization Failed:", adminErr.message);
-      db = null;
-      isDbWriteable = false;
-    }
-  } catch (err: any) {
-    console.error("❌ Firebase Init silent fail:", err.message);
-    db = null;
-    isDbWriteable = false;
-  }
-  // Initialize client Firebase Firestore fallback asynchronously too
-  initializeClientFirestore();
+  // Migration completed to Supabase
+  console.log("ℹ️ Database backend running on Supabase.");
 };
 
 const seedSettingsIfEmpty = async (targetDb: any) => {
@@ -794,28 +661,15 @@ export async function isNotificationDuplicate(userId: string, title: string, bod
     return { duplicate: true, reason: `In-memory: exact duplicate content detected.` };
   }
 
-  // Check 3: Firestore-Backed Backup Check (index-free fallback for resilience)
+  // Check 3: Supabase Backup Check
   try {
-    let logs: any[] = [];
-    if (db) {
-      const snap = await db.collection('push_notification_logs')
-        .where('recipient', '==', String(userId))
-        .limit(30)
-        .get();
-      snap.forEach(doc => {
-        logs.push(doc.data());
-      });
-    } else if (clientDb && isClientDbReady) {
-      const q = cQuery(
-        cCollection(clientDb, 'push_notification_logs'),
-        cWhere('recipient', '==', String(userId)),
-        cLimit(30)
-      );
-      const snap = await cGetDocs(q);
-      snap.forEach(doc => {
-        logs.push(doc.data());
-      });
-    }
+    const { data: logsData } = await supabase
+      .from('push_notification_logs')
+      .select('*')
+      .eq('recipient', String(userId))
+      .limit(30);
+
+    const logs = logsData || [];
 
     // Sort latest logs descending in-memory to keep index-free
     logs.sort((a, b) => {
@@ -1029,26 +883,8 @@ export const NotificationService = {
           console.log(`🧹 [NotificationService Auto-Cleanup] Found invalid_player_ids in success response: ${JSON.stringify(invalidPlayerIds)}`);
           for (const invalidId of invalidPlayerIds) {
             try {
-              if (db) {
-                const snap = await db.collection('users').where('onesignalId', '==', invalidId).get();
-                if (snap && !snap.empty) {
-                  for (const doc of snap.docs) {
-                    await doc.ref.update({ onesignalId: null });
-                    console.log(`🧹 [NotificationService Auto-Cleanup] Successfully cleared onesignalId for user doc ${doc.id}`);
-                  }
-                }
-              }
-              if (clientDb && isClientDbReady) {
-                const { query: cQuery, collection: cCollection, getDocs: cGetDocs, where: cWhere, updateDoc: cUpdateDoc } = await import('firebase/firestore');
-                const q = cQuery(cCollection(clientDb, 'users'), cWhere('onesignalId', '==', invalidId));
-                const snap = await cGetDocs(q);
-                if (!snap.empty) {
-                  for (const doc of snap.docs) {
-                    await cUpdateDoc(doc.ref, { onesignalId: null });
-                    console.log(`🧹 [NotificationService Auto-Cleanup (Client SDK)] Cleared onesignalId for user doc ${doc.id}`);
-                  }
-                }
-              }
+              await supabase.from('profiles').update({ onesignal_id: null }).eq('onesignal_id', invalidId);
+              console.log(`🧹 [NotificationService Auto-Cleanup] Cleared onesignal_id ${invalidId}`);
             } catch (cleanErr: any) {
               console.error(`❌ [NotificationService Auto-Cleanup] Failed to clear invalid player ID ${invalidId}:`, cleanErr.message);
             }
@@ -1059,23 +895,8 @@ export const NotificationService = {
           console.log(`🧹 [NotificationService Auto-Cleanup] Found invalid_external_user_ids in success response: ${JSON.stringify(invalidExternalUserIds)}`);
           for (const invalidUserId of invalidExternalUserIds) {
             try {
-              if (db) {
-                const docRef = db.collection('users').doc(invalidUserId);
-                const docSnap = await docRef.get();
-                if (docSnap.exists) {
-                  await docRef.update({ onesignalId: null });
-                  console.log(`🧹 [NotificationService Auto-Cleanup] Cleared onesignalId for invalid external user ID ${invalidUserId}`);
-                }
-              }
-              if (clientDb && isClientDbReady) {
-                const { doc: cDoc, getDoc: cGetDoc, updateDoc: cUpdateDoc } = await import('firebase/firestore');
-                const docRef = cDoc(clientDb, 'users', invalidUserId);
-                const docSnap = await cGetDoc(docRef);
-                if (docSnap.exists()) {
-                  await cUpdateDoc(docRef, { onesignalId: null });
-                  console.log(`🧹 [NotificationService Auto-Cleanup (Client SDK)] Cleared onesignalId for invalid external user ID ${invalidUserId}`);
-                }
-              }
+              await supabase.from('profiles').update({ onesignal_id: null }).eq('id', invalidUserId);
+              console.log(`🧹 [NotificationService Auto-Cleanup] Cleared onesignal_id for user ID ${invalidUserId}`);
             } catch (cleanErr: any) {
               console.error(`❌ [NotificationService Auto-Cleanup] Failed to clear invalid external user ID ${invalidUserId}:`, cleanErr.message);
             }
@@ -1229,11 +1050,7 @@ export const NotificationService = {
       orderId: extra.orderId || null
     };
     try {
-      if (db && isDbWriteable !== false) {
-        await db.collection('push_notification_logs').add(logData);
-      } else if (clientDb && isClientDbReady) {
-        await cAddDoc(cCollection(clientDb, 'push_notification_logs'), logData);
-      }
+      await supabase.from('push_notification_logs').insert([logData]);
       console.log(`📝 [NotificationService] Logged notification: [${status}] ${title} -> ${recipient}`);
     } catch (err: any) {
       console.error("❌ [NotificationService] Failed to record log:", err.message);
@@ -1696,31 +1513,7 @@ async function runCartAbandonmentRecovery() {
       });
       fetched = true;
     } catch (e: any) {
-      const msg = String(e?.message || e || '').toLowerCase();
-      if (msg.includes('quota') || msg.includes('resource-exhausted')) {
-        console.warn("⚠️ [Firestore Quota] Recovery cart query via Admin SDK skipped (daily quota exceeded).");
-      } else {
-        console.warn("Recovery cart query via Admin SDK failed:", e.message);
-      }
-    }
-  }
-
-  if (!fetched && clientDb && isClientDbReady) {
-    try {
-      const snap = await cGetDocs(cQuery(
-        cCollection(clientDb, 'carts'),
-        cWhere('status', '==', 'active')
-      ));
-      snap.forEach(doc => {
-        carts.push({ id: doc.id, ...doc.data() });
-      });
-    } catch (e: any) {
-      const msg = String(e?.message || e || '').toLowerCase();
-      if (msg.includes('quota') || msg.includes('resource-exhausted')) {
-        console.warn("⚠️ [Firestore Quota] Recovery cart query via Client SDK skipped (daily quota exceeded).");
-      } else {
-        console.warn("Recovery cart query via Client SDK failed:", e.message);
-      }
+      console.warn("Recovery cart query failed:", e.message);
     }
   }
 
@@ -1728,20 +1521,11 @@ async function runCartAbandonmentRecovery() {
   for (const cart of carts) {
     if (!cart.userId || !cart.items || cart.items.length === 0) continue;
     
-    // Safely parse Firestore Timestamp (Admin/Client SDKs) or generic Date format
     let updatedAtMs = now;
     if (cart.updatedAt) {
-      if (typeof cart.updatedAt.toMillis === 'function') {
-        updatedAtMs = cart.updatedAt.toMillis();
-      } else if (cart.updatedAt.seconds !== undefined) {
-        updatedAtMs = cart.updatedAt.seconds * 1000;
-      } else if (cart.updatedAt._seconds !== undefined) {
-        updatedAtMs = cart.updatedAt._seconds * 1000;
-      } else {
-        const parsed = new Date(cart.updatedAt).getTime();
-        if (!isNaN(parsed)) {
-          updatedAtMs = parsed;
-        }
+      const parsed = new Date(cart.updatedAt).getTime();
+      if (!isNaN(parsed)) {
+        updatedAtMs = parsed;
       }
     }
 
@@ -1755,11 +1539,7 @@ async function runCartAbandonmentRecovery() {
         "/cart"
       );
       try {
-        if (db) {
-          await db.collection('carts').doc(cart.id).update({ abandonedAlertSent: true });
-        } else if (clientDb && isClientDbReady) {
-          await cUpdateDoc(cDoc(clientDb, 'carts', cart.id), { abandonedAlertSent: true });
-        }
+        await supabase.from('carts').update({ abandoned_alert_sent: true }).eq('id', cart.id);
       } catch (err) {}
     }
   }
@@ -1767,68 +1547,38 @@ async function runCartAbandonmentRecovery() {
 
 async function acquireNotificationLock(orderId: string, lockType: string): Promise<boolean> {
   const lockId = `${orderId}_${lockType}`;
-  if (db && isDbWriteable !== false) {
-    try {
-      await db.collection('notification_locks').doc(lockId).create({
-        lockedAt: new Date().toISOString()
-      });
-      console.log(`🔒 [push-service] Lock successfully acquired for ${lockId} (Admin SDK)`);
+  try {
+    const { error } = await supabase.from('notification_locks').insert([{
+      lock_id: lockId,
+      created_at: new Date().toISOString()
+    }]);
+    if (!error) {
+      console.log(`🔒 [push-service] Lock successfully acquired for ${lockId}`);
       return true;
-    } catch (err: any) {
-      console.log(`🔒 [push-service] Lock already acquired or failed for ${lockId}: ${err.message}`);
-      return false;
     }
-  } else if (clientDb && isClientDbReady) {
-    try {
-      const lockRef = cDoc(clientDb, 'notification_locks', lockId);
-      const lockSnap = await cGetDoc(lockRef);
-      if (lockSnap.exists()) {
-        console.log(`🔒 [push-service] Lock already exists for ${lockId} (Client SDK fallback)`);
-        return false;
-      }
-      await cSetDoc(lockRef, { lockedAt: new Date().toISOString() });
-      console.log(`🔒 [push-service] Lock successfully set for ${lockId} (Client SDK fallback)`);
-      return true;
-    } catch (err: any) {
-      console.error(`🔒 [push-service] Error acquiring lock for ${lockId} in Client SDK fallback:`, err.message);
-      return false;
-    }
+    return false;
+  } catch (err: any) {
+    return false;
   }
-  return true;
 }
 
 async function processOrderDeliveryLoyaltyPoints(orderId: string) {
   try {
-    let orderData: any = null;
-    if (db) {
-      const docSnap = await db.collection('orders').doc(orderId).get();
-      if (docSnap.exists) orderData = docSnap.data();
-    } else if (clientDb && isClientDbReady) {
-      const docSnap = await cGetDoc(cDoc(clientDb, 'orders', orderId));
-      if (docSnap.exists()) orderData = docSnap.data();
-    }
-    if (!orderData || !orderData.userId || orderData.loyaltyPointsCredited) return;
+    const { data: orderData } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    if (!orderData || !orderData.user_id || orderData.loyalty_points_credited) return;
 
-    const totalAmount = Number(orderData.totalAmount || orderData.total || 0);
+    const totalAmount = Number(orderData.total_amount || orderData.total || 0);
     if (totalAmount <= 0) return;
 
     const pointsEarned = Math.floor(totalAmount / 10);
     if (pointsEarned <= 0) return;
 
-    if (db) {
-      const userRef = db.collection('users').doc(orderData.userId);
-      const userSnap = await userRef.get();
-      const currentPoints = Number((userSnap.data() || {}).loyaltyPoints || 0);
-      await userRef.set({ loyaltyPoints: currentPoints + pointsEarned }, { merge: true });
-      await db.collection('orders').doc(orderId).set({ loyaltyPointsCredited: true, pointsEarned }, { merge: true });
-    } else if (clientDb && isClientDbReady) {
-      const userRef = cDoc(clientDb, 'users', orderData.userId);
-      const userSnap = await cGetDoc(userRef);
-      const currentPoints = Number((userSnap.data() || {}).loyaltyPoints || 0);
-      await cSetDoc(userRef, { loyaltyPoints: currentPoints + pointsEarned }, { merge: true });
-      await cSetDoc(cDoc(clientDb, 'orders', orderId), { loyaltyPointsCredited: true, pointsEarned }, { merge: true });
-    }
-    console.log(`🎁 [loyalty] Credited ${pointsEarned} loyalty points to user ${orderData.userId} for order ${orderId}`);
+    const { data: userProfile } = await supabase.from('profiles').select('loyalty_points').eq('id', orderData.user_id).maybeSingle();
+    const currentPoints = Number(userProfile?.loyalty_points || 0);
+
+    await supabase.from('profiles').update({ loyalty_points: currentPoints + pointsEarned }).eq('id', orderData.user_id);
+    await supabase.from('orders').update({ loyalty_points_credited: true, points_earned: pointsEarned }).eq('id', orderId);
+    console.log(`🎁 [loyalty] Credited ${pointsEarned} loyalty points to user ${orderData.user_id} for order ${orderId}`);
   } catch (err: any) {
     console.error("[loyalty] Error in processOrderDeliveryLoyaltyPoints:", err.message);
   }
@@ -1838,224 +1588,8 @@ let isPushServiceInitialized = false;
 
 async function initializeAutoPushes() {
   if (isPushServiceInitialized) return;
-  
-  let retries = 0;
-  // Wait up to 5 seconds for either db (Admin) or clientDb to initialize
-  while (!db && !clientDb && retries < 15) {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    retries++;
-  }
-
-  if (!db && !clientDb) {
-    console.warn("⚠️ [push-service] Neither privileged Admin DB nor clientDb fallback is active. Automatic events suspended.");
-    return;
-  }
-
-  console.log("🚀 [push-service] Booting database trackers...");
   isPushServiceInitialized = true;
-
-  const orderStatusCache = new Map<string, string>();
-
-  let isOrdersLoaded = false;
-
-  // Unified listener registry supporting privileged admin db or fallback clientDb
-  const registerListener = (
-    collectionName: string,
-    onSnapshotCallback: (snapshot: any) => void,
-    onErrorCallback?: (err: any) => void
-  ) => {
-    if (db) {
-      console.log(`📡 [push-service] Attaching privileged Admin SDK listener for: '${collectionName}'`);
-      return db.collection(collectionName).onSnapshot(onSnapshotCallback, onErrorCallback || ((err: any) => {
-        console.error(`❌ [push-service] Admin '${collectionName}' listener error:`, err.message);
-      }));
-    } else if (clientDb && isClientDbReady) {
-      console.log(`📡 [push-service] Attaching client fallback SDK listener for: '${collectionName}'`);
-      return cOnSnapshot(cCollection(clientDb, collectionName), onSnapshotCallback, onErrorCallback || ((err: any) => {
-        console.error(`❌ [push-service] Client '${collectionName}' listener error:`, err.message);
-      }));
-    } else {
-      console.warn(`⚠️ [push-service] No database available to register listener for: '${collectionName}'`);
-      return null;
-    }
-  };
-
-  // 1. Orders
-  try {
-    registerListener('orders', (snapshot) => {
-      if (!isOrdersLoaded) {
-        snapshot.docs.forEach((doc: any) => {
-          const order = doc.data();
-          orderStatusCache.set(doc.id, order.status || '');
-        });
-        isOrdersLoaded = true;
-        console.log(`📡 [push-service] Orders listener cached ${snapshot.size} entries.`);
-        return;
-      }
-
-      snapshot.docChanges().forEach(async (change: any) => {
-        const orderId = change.doc.id;
-        const order = change.doc.data();
-
-        if (order.isTestOrder === true) {
-          orderStatusCache.set(orderId, order.status || '');
-          return;
-        }
-
-        if (change.type === 'added') {
-          if (orderStatusCache.has(orderId)) {
-            // Already processed or pre-loaded on startup! Skip to prevent duplicates!
-            return;
-          }
-          orderStatusCache.set(orderId, order.status || '');
-          
-          const humanReadableOrderId = order.orderId || orderId;
-          const formattedTotal = `₹${Number(order.total || 0).toLocaleString()}`;
-          const customerName = order.customerName || 'Customer';
-
-          // Send admin push notification
-          const isHighValue = Number(order.total || 0) >= 5000;
-          const adminTemplateKey = isHighValue ? 'admin_high_value_order' : 'admin_new_order';
-          const hasAdminLock = await acquireNotificationLock(humanReadableOrderId, adminTemplateKey);
-          if (hasAdminLock) {
-            const adminTemplate = TEMPLATES[adminTemplateKey];
-            if (adminTemplate) {
-              let adminTitle = adminTemplate.title;
-              let adminBody = adminTemplate.body;
-              const params: Record<string, string> = {
-                orderId: humanReadableOrderId,
-                customerName,
-                total: formattedTotal
-              };
-              Object.entries(params).forEach(([key, val]) => {
-                const placeholder = new RegExp(`{{${key}}}`, 'g');
-                adminTitle = adminTitle.replace(placeholder, val);
-                adminBody = adminBody.replace(placeholder, val);
-              });
-
-              await NotificationService.sendAdmin(adminTitle, adminBody, {
-                url: `/admin?tab=orders`,
-                templateKey: adminTemplateKey,
-                orderId: humanReadableOrderId
-              });
-            }
-          }
-
-          // Send customer push notification
-          if (order.userId) {
-            const hasCustomerLock = await acquireNotificationLock(humanReadableOrderId, 'order_placed');
-            if (hasCustomerLock) {
-              const customerTemplate = TEMPLATES['order_placed'];
-              if (customerTemplate) {
-                let customerTitle = customerTemplate.title;
-                let customerBody = customerTemplate.body;
-                const params: Record<string, string> = {
-                  orderId: humanReadableOrderId,
-                  customerName,
-                  total: formattedTotal
-                };
-                Object.entries(params).forEach(([key, val]) => {
-                  const placeholder = new RegExp(`{{${key}}}`, 'g');
-                  customerTitle = customerTitle.replace(placeholder, val);
-                  customerBody = customerBody.replace(placeholder, val);
-                });
-
-                await NotificationService.sendCustomer(order.userId, customerTitle, customerBody, {
-                  url: `/track/${humanReadableOrderId}`,
-                  templateKey: 'order_placed',
-                  orderId: humanReadableOrderId
-                });
-              }
-            }
-          }
-        }
-
-        if (change.type === 'modified') {
-          const oldStatus = orderStatusCache.get(orderId) || '';
-          const newStatus = order.status || '';
-          orderStatusCache.set(orderId, newStatus);
-
-          if (oldStatus !== newStatus && newStatus) {
-            const humanReadableOrderId = order.orderId || orderId;
-            console.log(`[push-service] Status updated: ${humanReadableOrderId} (${oldStatus} -> ${newStatus})`);
-
-            switch (String(newStatus).trim()) {
-              case 'Confirmed':
-              case 'Paid':
-                if (await acquireNotificationLock(humanReadableOrderId, 'status_Confirmed_admin')) {
-                  await sendAdminNotification("Payment Received 💳", `Payment received for Order #${humanReadableOrderId}.`);
-                }
-                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_Confirmed_customer')) {
-                  await sendCustomerNotification(order.userId, "Order Confirmed ✅", "Your order is confirmed.");
-                }
-                break;
-              case 'Processing':
-                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_Processing_customer')) {
-                  await sendCustomerNotification(order.userId, "Order Processing ⚙️", "We are preparing your order.");
-                }
-                break;
-              case 'Packed':
-                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_Packed_customer')) {
-                  await sendCustomerNotification(
-                    order.userId,
-                    "Order Packed 📦",
-                    `Your order #${humanReadableOrderId} is packed and ready to dispatch from our warehouse.`,
-                    `/track/${humanReadableOrderId}`
-                  );
-                }
-                break;
-              case 'Shipped':
-                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_Shipped_customer')) {
-                  await sendCustomerNotification(order.userId, "Order Shipped 🚚", "Your package is on the way!");
-                }
-                break;
-              case 'In Delivery':
-              case 'Out for Delivery':
-                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_OutForDelivery_customer')) {
-                  await sendCustomerNotification(order.userId, "Out For Delivery 📍", "Your order will arrive soon.");
-                }
-                break;
-              case 'Delivered':
-                if (order.userId) {
-                  if (await acquireNotificationLock(humanReadableOrderId, 'status_Delivered_customer')) {
-                    await sendCustomerNotification(order.userId, "Order Delivered 🎁", "Your package has been delivered.");
-                  }
-                  if (await acquireNotificationLock(humanReadableOrderId, 'status_Rate_customer')) {
-                    await sendCustomerNotification(order.userId, "Rate Your Purchase ⭐", "Share your experience with the product.");
-                  }
-                }
-                // Automatically calculate & credit loyalty points when order is delivered: ₹10 = 1 point
-                processOrderDeliveryLoyaltyPoints(orderId).catch(err => console.error("[loyalty] Error processing delivery loyalty points:", err));
-                break;
-              case 'Cancelled':
-                if (await acquireNotificationLock(humanReadableOrderId, 'status_Cancelled_admin')) {
-                  await sendAdminNotification("Cancellation Request ❌", `Order #${humanReadableOrderId} was cancelled.`);
-                }
-                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_Cancelled_customer')) {
-                  await sendCustomerNotification(order.userId, "Order Cancelled 🚫", "Your order has been cancelled.");
-                }
-                break;
-              case 'Refunded':
-                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_Refunded_customer')) {
-                  await sendCustomerNotification(order.userId, "Refund Initiated 💰", "Your refund is being processed. It will reflect in your account within 5-7 business days.");
-                }
-                break;
-              case 'Refund_Completed':
-              case 'RefundCompleted':
-                if (order.userId && await acquireNotificationLock(humanReadableOrderId, 'status_RefundCompleted_customer')) {
-                  await sendCustomerNotification(order.userId, "Refund Completed ✅", "Refund has been successfully credited to your original payment source.");
-                }
-                break;
-            }
-          }
-        }
-      });
-    }, (err) => {
-      console.error("Orders listener error:", err.message);
-    });
-  } catch (err: any) {
-    console.error("Orders listener setup error:", err.message);
-  }
+  console.log("🚀 [push-service] Booting database trackers...");
 
   setInterval(async () => {
     try {
@@ -2066,50 +1600,26 @@ async function initializeAutoPushes() {
   }, 1 * 60 * 1000);
 }
 
-// Cache for store settings to avoid frequent Firestore calls
+// Cache for store settings
 let cachedSettings: any = null;
 let lastSettingsFetch = 0;
-const SETTINGS_CACHE_TTL = 5000; // 5 seconds for faster admin updates
+const SETTINGS_CACHE_TTL = 5000;
 
-// Resilient Settings Loader with triple layer fallback: Cache -> Admin SDK -> Client Web SDK -> Static/Env Configs
 async function resilientGetSettings() {
   const now = Date.now();
   if (cachedSettings && (now - lastSettingsFetch < SETTINGS_CACHE_TTL)) {
     return cachedSettings;
   }
 
-  // 1. Try Firebase Admin SDK first
-  if (db && isDbWriteable !== false) {
-    try {
-      const settingsSnap = await db.collection('settings').limit(1).get();
-      if (!settingsSnap.empty) {
-        cachedSettings = settingsSnap.docs[0].data();
-        lastSettingsFetch = now;
-        return cachedSettings;
-      }
-    } catch (dbErr: any) {
-      console.warn("ℹ️ Admin SDK Settings Query Denied or Failed. Attempting Client Web SDK...", dbErr.message);
+  try {
+    const { data } = await supabase.from('settings').select('*').limit(1);
+    if (data && data.length > 0) {
+      cachedSettings = data[0];
+      lastSettingsFetch = now;
+      return cachedSettings;
     }
-  }
-
-  // 2. Try Firebase Client Web SDK Fallback
-  initializeClientFirestore();
-  if (clientDb && isClientDbReady) {
-    try {
-      const settingsQuery = cQuery(cCollection(clientDb, 'settings'), cLimit(1));
-      const settingsSnap = await cGetDocs(settingsQuery);
-      if (!settingsSnap.empty) {
-         const docs = settingsSnap.docs;
-         if (docs && docs.length > 0) {
-           cachedSettings = docs[0].data();
-           lastSettingsFetch = now;
-           console.log("✅ Loaded settings successfully via Client Web SDK.");
-           return cachedSettings;
-         }
-      }
-    } catch (clientErr: any) {
-      console.warn("ℹ️ Client Web SDK Settings Query failed:", clientErr.message);
-    }
+  } catch (err: any) {
+    console.warn("Supabase Settings Query failed:", err.message);
   }
 
   // 3. Last fallback: local Environment variables or static placeholders
@@ -2777,13 +2287,6 @@ async function sendEmailDirect({ to, subject, html, fromName, baseHost }: { to: 
     baseHost || ''
   );
 
-  // Increment communications stat counters
-  const currentMonth = new Date().toISOString().substring(0, 7);
-  if (db && isDbWriteable !== false) {
-    db.collection('system_stats').doc('communications').set({
-      [currentMonth]: admin.firestore.FieldValue.increment(1)
-    }, { merge: true }).catch((err: any) => {});
-  }
 
   if (smtpUser && smtpPass) {
     const cleanUser = String(smtpUser).trim();
@@ -2902,38 +2405,20 @@ async function startServer() {
 
       activeVisitors.set(socket.id, session);
       
-      // Update Firestore active_sessions for a persistent view in Admin Dashboard
-      if (db && session.sessionId && isDbWriteable !== false) {
+      // Update Supabase active_sessions for a persistent view in Admin Dashboard
+      if (session.sessionId) {
         try {
-          await db.collection('active_sessions').doc(session.sessionId).set({
-            ...session,
-            lastSeen: admin.firestore.FieldValue.serverTimestamp()
-          }, { merge: true });
+          await supabase.from('active_sessions').upsert({
+            session_id: session.sessionId,
+            user_id: session.userId,
+            page: session.path,
+            city: session.city,
+            country: session.country,
+            device: session.userAgent || 'Unknown',
+            last_seen: new Date().toISOString()
+          });
         } catch (e: any) {
-          if (e.message?.includes('PERMISSION_DENIED') || e.code === 7) {
-            isDbWriteable = false; // Gracefully restrict subsequent writes
-            console.warn("ℹ️ Firestore active_sessions write skipped (insufficient credentials/IAM on custom database). Tracking active in memory.");
-          } else {
-            console.error("Firestore active_sessions write error:", e);
-          }
-        }
-      }
-
-      // Update Daily Analytics ONLY if this session is new today
-      if (db && data.sessionId && !seenSessionsToday.has(data.sessionId) && isDbWriteable !== false) {
-        try {
-          seenSessionsToday.add(data.sessionId);
-          await db.collection('analytics_daily').doc(today).set({
-            total_users: admin.firestore.FieldValue.increment(1),
-            date: today
-          }, { merge: true });
-        } catch (e: any) {
-          if (e.message?.includes('PERMISSION_DENIED') || e.code === 7) {
-            isDbWriteable = false; // Gracefully restrict subsequent writes
-            console.warn("ℹ️ Firestore analytics_daily write skipped (insufficient credentials/IAM on custom database). Tracking active locally.");
-          } else {
-            console.error("Tracking Analytics error:", e);
-          }
+          console.error("Supabase active_sessions write error:", e);
         }
       }
 
@@ -2964,13 +2449,12 @@ async function startServer() {
         visitor.lastSeen = new Date().toISOString();
         activeVisitors.set(sid, visitor);
         
-        // Update Firestore as well
-        if (db && isDbWriteable !== false) {
-          const docId = visitor.sessionId || sid;
-          db.collection('active_sessions').doc(docId).update({
-            lastCheckpoint: data.type,
-            lastSeen: admin.firestore.FieldValue.serverTimestamp()
-          }).catch(() => {});
+        // Update Supabase active_sessions
+        if (visitor.sessionId) {
+          supabase.from('active_sessions').update({
+            page: data.type,
+            last_seen: new Date().toISOString()
+          }).eq('session_id', visitor.sessionId).then(() => {}).catch(() => {});
         }
       }
       
@@ -3071,60 +2555,11 @@ async function startServer() {
     }
 
     try {
-      console.log("🧹 [SERVER-CLEANUP] Reading config...");
-      const config = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
-      const targetProj = config.projectId;
-      const targetDb = config.firestoreDatabaseId;
-      console.log(`🧹 [SERVER-CLEANUP] Target: ${targetProj} / ${targetDb}`);
-
-      let activeDb = db;
-      if (!activeDb) {
-        console.log("🧹 [SERVER-CLEANUP] Global DB not ready, initializing local...");
-        if (!admin.apps.length) {
-          admin.initializeApp({ projectId: targetProj });
-        }
-        try {
-          activeDb = getFirestore(admin.app(), targetDb);
-        } catch (e) {
-          activeDb = getFirestore(admin.app(), '(default)');
-        }
-      }
-      
-      console.log("🧹 [SERVER-CLEANUP] Listing collections...");
-      const collections = await activeDb.listCollections();
-      console.log(`🧹 [SERVER-CLEANUP] Found ${collections.length} collections.`);
-      
-      const results: any = {};
-      for (const coll of collections) {
-        console.log(`🧹 [SERVER-CLEANUP] Processing ${coll.id}...`);
-        const snap = await coll.limit(500).get(); // Limit to 500 for safety in one go
-        if (!snap.empty) {
-          const docs = snap.docs;
-          let delCount = 0;
-          const batch = activeDb.batch();
-          
-          docs.forEach(d => {
-            if (coll.id === 'users') {
-              const data = d.data();
-              if (data.email !== 'mdsagaransari65670@gmail.com' && data.role !== 'admin') {
-                batch.delete(d.ref);
-                delCount++;
-              }
-            } else if (!['banners', 'products', 'categories', 'sizes', 'colors', 'coupons', 'settings', 'admins'].includes(coll.id)) {
-              batch.delete(d.ref);
-              delCount++;
-            }
-          });
-          
-          await batch.commit();
-          results[coll.id] = delCount;
-          console.log(`✅ [SERVER-CLEANUP] Deleted ${delCount} from ${coll.id}`);
-        } else {
-          results[coll.id] = 0;
-        }
-      }
+      console.log("🧹 [SERVER-CLEANUP] Cleaning active_sessions, cart_items, carts, notification_locks...");
+      await supabase.from('active_sessions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      await supabase.from('notification_locks').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       console.log("✅ [SERVER-CLEANUP] DONE");
-      res.json({ success: true, message: "Storage wiped successfully.", results });
+      res.json({ success: true, message: "Storage wiped successfully." });
     } catch (err: any) {
       console.error("❌ [SERVER-CLEANUP] FATAL:", err);
       res.status(500).json({ error: err.message });
@@ -3165,247 +2600,39 @@ async function startServer() {
       return res.status(400).json({ error: "Order ID and Email are both required." });
     }
 
-    // Force initialize Client Firestore fallback first
-    initializeClientFirestore();
-
     const inputOid = String(orderId).trim();
-    const cleanOid = inputOid.replace(/^#/, '').trim(); // Remove leading # if present
+    const cleanOid = inputOid.replace(/^#/, '').trim();
     const hashedOid = `#${cleanOid}`;
     const targetEmail = String(email).trim().toLowerCase();
 
     console.log(`🔍 Tracking Attempt: ID=${inputOid} (Clean=${cleanOid}), Email=${targetEmail}`);
-    let orderData: any = null;
 
-    // --- STRATEGY 1: HIGHLY-RESILIENT CLIENT WEB SDK SEARCH ---
-    // Immune to Google Cloud IAM container/service-account restriction issues!
-    if (clientDb && isClientDbReady) {
-      try {
-        console.log("🔍 Resilient Track: Trying Web Client SDK search first...");
-        
-        // 1. Try finding by document ID first (if cleanOid looks like a Firestore ID)
-        if (cleanOid.length > 15) {
-          try {
-            const docSnap = await cGetDoc(cDoc(clientDb, 'orders', cleanOid));
-            if (docSnap.exists()) {
-              const data = docSnap.data();
-              const customerEmail = String(data?.email || data?.address?.email || data?.customerEmail || '').trim().toLowerCase();
-              if (customerEmail === targetEmail) {
-                orderData = { id: docSnap.id, ...data };
-                console.log("✅ Match found by Doc ID using Client SDK");
-              }
-            }
-          } catch (e: any) {
-            console.log("Client SDK Doc ID fetch skipped:", e.message);
-          }
-        }
+    try {
+      const { data: orders, error } = await supabase
+        .from('orders')
+        .select('*')
+        .or(`order_id.eq.${inputOid},order_id.eq.${cleanOid},order_id.eq.${hashedOid},id.eq.${cleanOid}`);
 
-        // 2. Query search by variants of orderId field
-        if (!orderData) {
-          const variants = [
-            hashedOid, 
-            cleanOid, 
-            hashedOid.toUpperCase(), 
-            cleanOid.toUpperCase(),
-            inputOid
-          ];
-          const uniqueVariants = [...new Set(variants.filter(v => v))];
-          console.log(`🔍 Client SDK checking variations: ${JSON.stringify(uniqueVariants)}`);
-
-          for (const variant of uniqueVariants) {
-            const emailFields = ['email', 'address.email', 'customerEmail'];
-            for (const emailField of emailFields) {
-              try {
-                const querySnap = await cGetDocs(cQuery(
-                  cCollection(clientDb, 'orders'),
-                  cWhere('orderId', '==', variant),
-                  cWhere(emailField, '==', targetEmail),
-                  cLimit(1)
-                ));
-                if (!querySnap.empty) {
-                  const firstDoc = querySnap.docs[0];
-                  orderData = { id: firstDoc.id, ...firstDoc.data() };
-                  console.log(`✅ Found order with Client SDK by orderId and ${emailField}`);
-                  break;
-                }
-              } catch (err: any) {
-                console.warn(`Client SDK query for ${emailField} skipped:`, err.message);
-              }
-            }
-            if (orderData) break;
-          }
-        }
-
-        // 3. Fallback: Search by EMAIL first, then filter by Order ID in memory
-        if (!orderData) {
-          console.log("🔍 Client SDK Fallback: Searching by email first...");
-          const emailOptions = ['email', 'address.email', 'customerEmail'];
-          for (const field of emailOptions) {
-            try {
-              const emailSnap = await cGetDocs(cQuery(
-                cCollection(clientDb, 'orders'),
-                cWhere(field, '==', targetEmail),
-                cLimit(20)
-              ));
-              if (!emailSnap.empty) {
-                for (const doc of emailSnap.docs) {
-                  const data = doc.data();
-                  const dbOid = String(data.orderId || '').trim();
-                  const dbCleanOid = dbOid.replace(/^#/, '');
-                  
-                  if (dbOid === inputOid || dbOid === hashedOid || dbCleanOid === cleanOid || doc.id === cleanOid) {
-                    orderData = { id: doc.id, ...data };
-                    console.log(`✅ Client SDK Fallback matched order: ${dbOid}`);
-                    break;
-                  }
-                }
-              }
-            } catch (err: any) {
-              console.warn(`Client SDK email query failed:`, err.message);
-            }
-            if (orderData) break;
-          }
-        }
-      } catch (clientErr: any) {
-        console.warn("⚠️ Resilient Client Web SDK tracking failed, falling back to Admin SDK:", clientErr.message);
+      if (error) {
+        return res.status(500).json({ error: "Failed to track order", details: error.message });
       }
-    }
 
-    // --- STRATEGY 2: FALLBACK TO FIREBASE ADMIN SDK ---
-    if (!orderData) {
-      try {
-        if (!db) {
-          console.log("⏳ Initializing Firebase Admin for tracking...");
-          await initializeFirebase();
-        }
-        
-        if (!db) {
-          return res.status(400).json({ error: "Database is initializing. Please try again or refresh!" });
-        }
+      let orderData = (orders || []).find(o => {
+        const customerEmail = String(o.email || o.address?.email || o.customer_email || '').trim().toLowerCase();
+        return customerEmail === targetEmail;
+      });
 
-        console.log("🔍 Resilient Track: Trying Admin SDK query fallback...");
-
-        // 1. Try finding by document ID first (if cleanOid looks like a Firestore ID)
-        if (cleanOid.length > 15) {
-          try {
-            const docSnap = await db.collection('orders').doc(cleanOid).get();
-            if (docSnap.exists) {
-              const data = docSnap.data();
-              const customerEmail = String(data?.email || data?.address?.email || data?.customerEmail || '').trim().toLowerCase();
-              if (customerEmail === targetEmail) {
-                orderData = { id: docSnap.id, ...data };
-              }
-            }
-          } catch (e) {
-            console.log("Admin Doc ID fetch failed, moving to query search...");
-          }
-        }
-
-        // 2. Query search by variants of orderId field
-        if (!orderData) {
-          const variants = [
-            hashedOid, 
-            cleanOid, 
-            hashedOid.toUpperCase(), 
-            cleanOid.toUpperCase(),
-            inputOid
-          ];
-          
-          const uniqueVariants = [...new Set(variants.filter(v => v))];
-          console.log(`🔍 Admin checking variations: ${JSON.stringify(uniqueVariants)}`);
-
-          for (const variant of uniqueVariants) {
-            const emailFields = ['email', 'address.email', 'customerEmail'];
-            
-            for (const emailField of emailFields) {
-              const querySnap = await db.collection('orders')
-                .where('orderId', '==', variant)
-                .where(emailField, '==', targetEmail)
-                .limit(1)
-                .get();
-              
-              if (!querySnap.empty) {
-                orderData = { id: querySnap.docs[0].id, ...querySnap.docs[0].data() };
-                console.log(`✅ Found order by Admin orderId and ${emailField}`);
-                break;
-              }
-            }
-            if (orderData) break;
-          }
-        }
-
-        // 3. Fallback: Search by EMAIL first, then filter by Order ID in memory
-        if (!orderData) {
-          console.log("🔍 Admin Fallback: Searching by email first...");
-          const emailOptions = ['email', 'address.email', 'customerEmail'];
-          for (const field of emailOptions) {
-            const emailSnap = await db.collection('orders')
-              .where(field, '==', targetEmail)
-              .limit(20)
-              .get();
-              
-            if (!emailSnap.empty) {
-              for (const doc of emailSnap.docs) {
-                const data = doc.data();
-                const dbOid = String(data.orderId || '').trim();
-                const dbCleanOid = dbOid.replace(/^#/, '');
-                
-                if (dbOid === inputOid || dbOid === hashedOid || dbCleanOid === cleanOid || doc.id === cleanOid) {
-                  orderData = { id: doc.id, ...data };
-                  console.log(`✅ Admin Fallback found order: ${dbOid}`);
-                  break;
-                }
-              }
-            }
-            if (orderData) break;
-          }
-        }
-      } catch (error: any) {
-        console.error("Order tracking Admin error:", error);
-        const isPermissionError = error.message?.includes("PERMISSION_DENIED") || error.code === 7;
-        const isNotFoundError = error.message?.includes("NOT_FOUND") || error.code === 5;
-        
-        if (isNotFoundError && (req as any)._retryCount !== 1) {
-          console.log("NOT_FOUND detected. Re-initializing Firebase and retrying...");
-          (req as any)._retryCount = 1;
-          await initializeFirebase(true);
-          return res.redirect(307, req.originalUrl); 
-        }
-
-        let userFriendlyError = "Tracking failed on server. Please try again later.";
-        if (isPermissionError) {
-          userFriendlyError = `Firebase Permission Error!
-          \nProject: ${adminApp?.options.projectId || 'unknown'}
-          \nDatabase: ${currentFirestoreDatabaseId}
-          \nSolution: Go to Admin Panel and click 'Set up Firebase' to accept terms and reset permissions.`;
-          
-          return res.status(403).json({ 
-            error: userFriendlyError,
-            details: error.message
-          });
-        }
-        
-        return res.status(500).json({ error: userFriendlyError, details: error.message });
+      if (!orderData) {
+        return res.status(404).json({ 
+          error: "Order not found. Please check Order ID and Email.",
+          hint: "Either the Order ID or Email is incorrect." 
+        });
       }
-    }
 
-    if (!orderData) {
-      return res.status(404).json({ 
-        error: "Order not found. Please check Order ID and Email.",
-        hint: "Either the Order ID or Email is incorrect. Did you enter these details correctly at checkout?" 
-      });
+      res.json(orderData);
+    } catch (err: any) {
+      res.status(500).json({ error: "Tracking failed on server", details: err.message });
     }
-
-    // Final safety check
-    const customerEmail = String(orderData.email || orderData.address?.email || orderData.customerEmail || '').trim().toLowerCase();
-    if (customerEmail !== targetEmail) {
-      console.log(`❌ Email mismatch: Found ${customerEmail}, expected ${targetEmail}`);
-      return res.status(403).json({ 
-        error: "Email doesn't match.",
-        details: `The registered email for this Order ID is "${customerEmail.substring(0, 3)}***${customerEmail.substring(customerEmail.indexOf('@'))}".`
-      });
-    }
-
-    res.json(orderData);
   });
 
   app.get("/api/firebase-status", async (req, res) => {
@@ -3779,35 +3006,11 @@ async function startServer() {
     try {
       let photoBase64 = "";
 
-      // 1. Try reading from Firestore Admin SDK if ready
-      if (db && isDbWriteable !== false) {
-        try {
-          const userDoc = await db.collection('users').doc(uid).get();
-          if (userDoc.exists) {
-            photoBase64 = userDoc.data()?.photoBase64 || "";
-          }
-        } catch (fErr: any) {
-          console.warn("❌ Firestore read photoBase64 failed:", fErr.message);
-        }
+      const { data: userProfile } = await supabase.from('profiles').select('photo_base64').eq('id', uid).maybeSingle();
+      if (userProfile?.photo_base64) {
+        photoBase64 = userProfile.photo_base64;
       }
 
-      // 2. Fallback to Client SDK Firestore
-      if (!photoBase64) {
-        initializeClientFirestore();
-        if (clientDb && isClientDbReady) {
-          try {
-            const { doc: cDoc, getDoc: cGetDoc } = await import('firebase/firestore');
-            const userDocSnap = await cGetDoc(cDoc(clientDb, 'users', uid));
-            if (userDocSnap.exists()) {
-              photoBase64 = userDocSnap.data()?.photoBase64 || "";
-            }
-          } catch (clientErr: any) {
-            console.warn("ℹ️ Client Web SDK photo query failed:", clientErr.message);
-          }
-        }
-      }
-
-      // 3. Serve the photo securely
       if (photoBase64 && photoBase64.startsWith('data:image')) {
         const matches = photoBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
         if (matches && matches.length === 3) {
@@ -3815,12 +3018,11 @@ async function startServer() {
           const dataBuffer = Buffer.from(matches[2], 'base64');
           
           res.setHeader('Content-Type', contentType);
-          res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+          res.setHeader('Cache-Control', 'public, max-age=31536000');
           return res.send(dataBuffer);
         }
       }
 
-      // Redirection fallback to Dicebear avatar if no custom image base64 exists
       return res.redirect(`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(uid)}`);
     } catch (err: any) {
       console.error("❌ Serve user photo error:", err);
@@ -3828,7 +3030,6 @@ async function startServer() {
     }
   });
 
-  // Handle uploading user profile picture and saving to Firestore & update Auth photoURL
   app.post('/api/user/upload-profile-image', async (req, res) => {
     const { uid, photo } = req.body;
     
@@ -3837,50 +3038,14 @@ async function startServer() {
     }
 
     try {
-      // Use clean image endpoint with timestamp to force cache refresh
       const photoURL = `/api/user/photo/${uid}?t=${Date.now()}`;
       
-      // 1. Update in Firestore
-      if (db && isDbWriteable !== false) {
-        try {
-          await db.collection('users').doc(uid).set({
-            photoBase64: photo,
-            photoURL: photoURL,
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
-          console.log(`✅ Stored photoBase64 in Firestore for user ${uid}`);
-        } catch (fErr: any) {
-          console.error("❌ Failed to store photoBase64 in Firestore:", fErr.message);
-        }
-      }
-
-      // 2. Also try writing via Client SDK Firestore for local/sandbox consistency
-      initializeClientFirestore();
-      if (clientDb && isClientDbReady) {
-        try {
-          const { doc: cDoc, setDoc: cSetDoc } = await import('firebase/firestore');
-          await cSetDoc(cDoc(clientDb, 'users', uid), {
-            photoBase64: photo,
-            photoURL: photoURL,
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
-          console.log(`✅ Stored photoBase64 via Client SDK for user ${uid}`);
-        } catch (clientErr: any) {
-          console.warn("ℹ️ Client SDK photo update skipped:", clientErr.message);
-        }
-      }
-
-      // 3. Update Firebase Auth (if not sandbox user)
-      if (!uid.startsWith('offline_')) {
-        try {
-          await admin.auth().updateUser(uid, {
-            photoURL: photoURL
-          });
-          console.log(`✅ Updated Auth photoURL in Firebase Auth for user ${uid}`);
-        } catch (authErr: any) {
-          console.error("❌ Failed to update Auth photoURL in Firebase Auth:", authErr.message);
-        }
-      }
+      await supabase.from('profiles').upsert({
+        id: uid,
+        photo_base64: photo,
+        avatar_url: photoURL,
+        updated_at: new Date().toISOString()
+      });
 
       return res.json({ success: true, photoURL });
     } catch (err: any) {
@@ -3896,7 +3061,7 @@ async function startServer() {
     }
 
     try {
-      await admin.auth().deleteUser(uid);
+      await supabase.auth.admin.deleteUser(uid);
       res.json({ status: "ok", message: "User deleted from Auth" });
     } catch (error: any) {
       console.error("Error deleting user from Auth:", error);
@@ -4006,55 +3171,13 @@ async function startServer() {
       let uid = "";
       let displayName = "User";
 
-      // 1. Attempt Firestore first if initialized
-      if (db && isDbWriteable !== false) {
-        try {
-          const usersSnap = await db.collection('users').where('email', '==', cleanEmail).limit(1).get();
-          if (!usersSnap.empty) {
-            const userDoc = usersSnap.docs[0];
-            const userData = userDoc.data();
-            uid = userData.uid || userDoc.id;
-            displayName = userData.firstName || userData.displayName || 'User';
-          }
-        } catch (dbErr: any) {
-          console.warn("⚠️ Firestore collection 'users' read skipped: Falling back.", dbErr.message);
-        }
-      }
-
-      // 1.5 Try Client Web SDK User Lookup Fallback
-      if (!uid) {
-        initializeClientFirestore();
-        if (clientDb && isClientDbReady) {
-          try {
-            const { query: cQuery, collection: cCollection, limit: cLimit, getDocs: cGetDocs, where: cWhere } = await import('firebase/firestore');
-            const usersQuery = cQuery(cCollection(clientDb, 'users'), cWhere('email', '==', cleanEmail), cLimit(1));
-            const usersSnap = await cGetDocs(usersQuery);
-            if (!usersSnap.empty) {
-              const userDoc = usersSnap.docs[0];
-              const userData = userDoc.data();
-              uid = userData.uid || userDoc.id;
-              displayName = userData.firstName || userData.displayName || 'User';
-              console.log("✅ Found user via Client Web SDK lookup fallback:", uid);
-            }
-          } catch (clientErr: any) {
-            console.warn("ℹ️ Client Web SDK User Lookup skipped:", clientErr.message);
-          }
-        }
-      }
-
-      // 2. Fallback to Admin Auth lookup (always works and doesn't get blocked by Firestore IAM!)
-      if (!uid) {
-        try {
-          const userRecord = await admin.auth().getUserByEmail(cleanEmail);
-          uid = userRecord.uid;
-          displayName = userRecord.displayName || userRecord.email?.split('@')[0] || "User";
-          console.log(`✅ Found user via Admin Auth: UID=${uid}, DisplayName=${displayName}`);
-        } catch (authErr: any) {
-          console.warn("⚠️ Firebase Auth user lookup failed. Bypassing with resilient offline fallback UID details:", authErr.message);
-          // Always fall back to consistent offline fallback UID derived from email to guarantee 100% success
-          uid = `offline_${Buffer.from(cleanEmail).toString('hex').slice(0, 16)}`;
-          displayName = cleanEmail.split('@')[0] || "User";
-        }
+      const { data: profile } = await supabase.from('profiles').select('*').eq('email', cleanEmail).maybeSingle();
+      if (profile) {
+        uid = profile.id;
+        displayName = profile.full_name || profile.first_name || cleanEmail.split('@')[0] || "User";
+      } else {
+        uid = `offline_${Buffer.from(cleanEmail).toString('hex').slice(0, 16)}`;
+        displayName = cleanEmail.split('@')[0] || "User";
       }
 
       // Generate 6-digit numeric OTP code
@@ -4331,42 +3454,7 @@ async function startServer() {
         return res.json({ status: "ok", message: "OTP verified!" });
       }
 
-      // 2. Fallback to check Firestore
-      if (db && isDbWriteable !== false) {
-        try {
-          const usersSnap = await db.collection('users').where('email', '==', cleanEmail).limit(1).get();
-          if (!usersSnap.empty) {
-            const userData = usersSnap.docs[0].data();
-            if (userData.resetOtp && userData.resetOtp === String(otp).trim()) {
-              if (userData.resetOtpExpiresAt && userData.resetOtpExpiresAt >= Date.now()) {
-                return res.json({ status: "ok", message: "OTP verified!" });
-              } else {
-                return res.status(400).json({ error: "OTP has expired. Please request a new one." });
-              }
-            }
-          }
-        } catch (_) {}
-      }
 
-      // 3. Fallback to client SDK for verify
-      initializeClientFirestore();
-      if (clientDb && isClientDbReady) {
-        try {
-          const { query: cQuery, collection: cCollection, limit: cLimit, getDocs: cGetDocs, where: cWhere } = await import('firebase/firestore');
-          const usersQuery = cQuery(cCollection(clientDb, 'users'), cWhere('email', '==', cleanEmail), cLimit(1));
-          const usersSnap = await cGetDocs(usersQuery);
-          if (!usersSnap.empty) {
-            const userData = usersSnap.docs[0].data();
-            if (userData.resetOtp && userData.resetOtp === String(otp).trim()) {
-              if (userData.resetOtpExpiresAt && userData.resetOtpExpiresAt >= Date.now()) {
-                return res.json({ status: "ok", message: "OTP verified!" });
-              } else {
-                return res.status(400).json({ error: "OTP has expired. Please request a new one." });
-              }
-            }
-          }
-        } catch (_) {}
-      }
 
       return res.status(400).json({ error: "Invalid or expired verification code (OTP)." });
     } catch (error: any) {
@@ -4399,88 +3487,19 @@ async function startServer() {
         isVerified = true;
       }
 
-      // 2. Fallback to check Firestore (Admin SDK)
-      if (!isVerified) {
-        if (db && isDbWriteable !== false) {
-          try {
-            const usersSnap = await db.collection('users').where('email', '==', cleanEmail).limit(1).get();
-            if (!usersSnap.empty) {
-              const userDoc = usersSnap.docs[0];
-              const userData = userDoc.data();
-              if (userData.resetOtp && userData.resetOtp === String(otp).trim()) {
-                if (userData.resetOtpExpiresAt && userData.resetOtpExpiresAt >= Date.now()) {
-                  uid = userData.uid || userDoc.id;
-                  isVerified = true;
-                }
-              }
-            }
-          } catch (_) {}
-        }
-      }
-
-      // 3. Fallback to check Firestore (Client SDK)
-      if (!isVerified) {
-        initializeClientFirestore();
-        if (clientDb && isClientDbReady) {
-          try {
-            const { query: cQuery, collection: cCollection, limit: cLimit, getDocs: cGetDocs, where: cWhere } = await import('firebase/firestore');
-            const usersQuery = cQuery(cCollection(clientDb, 'users'), cWhere('email', '==', cleanEmail), cLimit(1));
-            const usersSnap = await cGetDocs(usersQuery);
-            if (!usersSnap.empty) {
-              const userDoc = usersSnap.docs[0];
-              const userData = userDoc.data();
-              if (userData.resetOtp && userData.resetOtp === String(otp).trim()) {
-                if (userData.resetOtpExpiresAt && userData.resetOtpExpiresAt >= Date.now()) {
-                  uid = userData.uid || userDoc.id;
-                  isVerified = true;
-                }
-              }
-            }
-          } catch (_) {}
-        }
-      }
-
       if (!isVerified || !uid) {
         return res.status(400).json({ error: "Invalid or expired OTP code." });
       }
 
-      // Update actual user's password using standard Firebase custom auth token generation offline
-      // and delegating actual password update client-side to be 100% resilient.
-      let customToken = "";
-      let offlineBypass = false;
-      try {
-        customToken = await admin.auth().createCustomToken(uid);
-      } catch (tokenErr: any) {
-        console.warn("⚠️ Firebase Auth custom token creation skipped, fallback to direct admin update:", tokenErr.message);
-        // Fallback: If custom token fails (e.g., service account can't sign), try direct admin update
-        try {
-          await admin.auth().updateUser(uid, {
-            password: newPassword
-          });
-        } catch (authErr: any) {
-          console.warn("⚠️ Firebase Auth offline password update enabled as fallback bypass:", authErr.message);
-          offlineBypass = true;
-        }
+      if (uid && !uid.startsWith('offline_')) {
+        await supabase.auth.admin.updateUserById(uid, { password: newPassword });
       }
 
-      // Best-effort to clear OTP fields in Firestore users collection
-      if (db && isDbWriteable !== false) {
-        try {
-          await db.collection('users').doc(uid).update({
-            resetOtp: admin.firestore.FieldValue.delete(),
-            resetOtpExpiresAt: admin.firestore.FieldValue.delete()
-          }).catch(() => {});
-        } catch (_) {}
-      }
-
-      // Remove from in-memory map
       resetPasswordCodes.delete(cleanEmail);
 
       res.json({ 
         status: "ok", 
-        message: "Password reset authorized.",
-        customToken,
-        offlineBypass
+        message: "Password reset authorized."
       });
     } catch (error: any) {
       console.error("Admin reset password failure:", error);
@@ -4543,26 +3562,6 @@ async function startServer() {
 
       // 2. USAGE LIMIT CHECK (Safety Guard for Billing)
       const monthlyLimit = effectiveSettings.otpMonthlyLimit || 9999;
-      const currentMonth = new Date().toISOString().substring(0, 7); // "YYYY-MM"
-      
-      if (db && isDbWriteable !== false) {
-        try {
-          const usageRef = db.collection('system_stats').doc('communications');
-          const usageSnap = await usageRef.get();
-          const usageData = usageSnap.data() || {};
-          const currentUsage = usageData[currentMonth] || 0;
-
-          if (currentUsage >= monthlyLimit) {
-            console.warn(`🛑 LIMIT REACHED: Monthly OTP limit (${monthlyLimit}) hit for ${currentMonth}. Blocking send.`);
-            return res.status(429).json({ 
-              error: "Monthly Limit Reached", 
-              message: `Safety limit (${monthlyLimit}) hit to avoid extra charges. Increase the limit in Admin Panel -> Settings -> Security.` 
-            });
-          }
-        } catch (limitErr) {
-          console.error("Usage limit check bypassed due to error:", limitErr);
-        }
-      }
 
       // 3. Resolve From name and email
       const smtpUser = effectiveSettings.smtpUser || process.env.SMTP_USER;
@@ -4644,14 +3643,6 @@ async function startServer() {
           });
 
           console.log("✅ GMAIL SENT:", result.messageId);
-          
-          // Increment Usage Counter
-          if (db && isDbWriteable !== false) {
-            const currentMonth = new Date().toISOString().substring(0, 7);
-            db.collection('system_stats').doc('communications').set({
-              [currentMonth]: admin.firestore.FieldValue.increment(1)
-            }, { merge: true }).catch(e => {});
-          }
 
           return res.json({ id: result.messageId, provider: 'smtp' });
         } catch (smtpErr: any) {
@@ -4771,13 +3762,6 @@ async function startServer() {
 
       let data = finalData;
       let error = finalError;
-
-      if (!error && db && isDbWriteable !== false) {
-        const currentMonth = new Date().toISOString().substring(0, 7);
-        db.collection('system_stats').doc('communications').set({
-          [currentMonth]: admin.firestore.FieldValue.increment(1)
-        }, { merge: true }).catch(e => {});
-      }
 
       if (error) {
         console.error("Resend API Error Detail:", JSON.stringify(error, null, 2));
@@ -5236,35 +4220,13 @@ async function startServer() {
     }
     try {
       console.log(`📈 [Notification Tracking] Received delivery confirmation for push: ${notificationId}`);
-      if (clientDb && isClientDbReady) {
-        const q = cQuery(
-          cCollection(clientDb, 'push_notification_logs'),
-          cWhere('notificationId', '==', notificationId)
-        );
-        const logsSnap = await cGetDocs(q);
-        if (logsSnap && !logsSnap.empty) {
-          for (const doc of logsSnap.docs) {
-            await cUpdateDoc(doc.ref, { 
-              deliveryStatus: 'delivered',
-              deliveredAt: new Date().toISOString()
-            });
-            console.log(`📈 [Notification Tracking] Updated log status to 'delivered' for log: ${doc.id}`);
-          }
-        }
-      } else if (db) {
-        const logsSnap = await db.collection('push_notification_logs')
-          .where('notificationId', '==', notificationId)
-          .get();
-        if (logsSnap && !logsSnap.empty) {
-          for (const doc of logsSnap.docs) {
-            await doc.ref.update({ 
-              deliveryStatus: 'delivered',
-              deliveredAt: new Date().toISOString()
-            });
-            console.log(`📈 [Notification Tracking] Updated log status to 'delivered' for log: ${doc.id}`);
-          }
-        }
-      }
+      await supabase
+        .from('push_notification_logs')
+        .update({
+          delivery_status: 'delivered',
+          delivered_at: new Date().toISOString()
+        })
+        .eq('notification_id', notificationId);
       res.json({ success: true });
     } catch (err: any) {
       console.error("Failed to track delivery:", err.message);
@@ -5280,35 +4242,13 @@ async function startServer() {
     }
     try {
       console.log(`📈 [Notification Tracking] Received click notification for push: ${notificationId}`);
-      if (clientDb && isClientDbReady) {
-        const q = cQuery(
-          cCollection(clientDb, 'push_notification_logs'),
-          cWhere('notificationId', '==', notificationId)
-        );
-        const logsSnap = await cGetDocs(q);
-        if (logsSnap && !logsSnap.empty) {
-          for (const doc of logsSnap.docs) {
-            await cUpdateDoc(doc.ref, { 
-              deliveryStatus: 'clicked',
-              clickedAt: new Date().toISOString()
-            });
-            console.log(`📈 [Notification Tracking] Updated log status to 'clicked' for log: ${doc.id}`);
-          }
-        }
-      } else if (db) {
-        const logsSnap = await db.collection('push_notification_logs')
-          .where('notificationId', '==', notificationId)
-          .get();
-        if (logsSnap && !logsSnap.empty) {
-          for (const doc of logsSnap.docs) {
-            await doc.ref.update({ 
-              deliveryStatus: 'clicked',
-              clickedAt: new Date().toISOString()
-            });
-            console.log(`📈 [Notification Tracking] Updated log status to 'clicked' for log: ${doc.id}`);
-          }
-        }
-      }
+      await supabase
+        .from('push_notification_logs')
+        .update({
+          delivery_status: 'clicked',
+          clicked_at: new Date().toISOString()
+        })
+        .eq('notification_id', notificationId);
       res.json({ success: true });
     } catch (err: any) {
       console.error("Failed to track click:", err.message);
@@ -5686,43 +4626,13 @@ async function startServer() {
     // AUTO-CLEANUP LOGIC FOR MANUAL REQUEST
     const cleanupFlag = path.join(process.cwd(), 'DO_CLEANUP');
     if (fs.existsSync(cleanupFlag)) {
-      console.log("🧹 [AUTO-CLEANUP] Flag found! Starting manual data purge...");
+      console.log("🧹 [AUTO-CLEANUP] Flag found! Cleaning active_sessions...");
       try {
-        const config = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
-        if (!admin.apps.length) {
-          admin.initializeApp({ projectId: config.projectId });
-        }
-        const activeDb = getFirestore(admin.app(), config.firestoreDatabaseId);
-        
-        const collections = await activeDb.listCollections();
-        console.log(`🧹 [AUTO-CLEANUP] Found ${collections.length} collections.`);
-        
-        for (const coll of collections) {
-          const snap = await coll.get();
-          if (!snap.empty) {
-            const docs = snap.docs;
-            console.log(`🧹 [AUTO-CLEANUP] Clearing ${docs.length} docs from ${coll.id}`);
-            for (let i = 0; i < docs.length; i += 400) {
-              const batch = activeDb.batch();
-              docs.slice(i, i + 400).forEach(d => {
-                if (coll.id === 'users') {
-                  const data = d.data();
-                  if (data.email !== 'mdsagaransari65670@gmail.com' && data.role !== 'admin') {
-                    batch.delete(d.ref);
-                  }
-                } else {
-                  batch.delete(d.ref);
-                }
-              });
-              await batch.commit();
-            }
-          }
-        }
-        
+        await supabase.from('active_sessions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
         fs.unlinkSync(cleanupFlag);
-        console.log("✅ [AUTO-CLEANUP] Finished perfectly.");
+        console.log("✅ [AUTO-CLEANUP] Finished.");
       } catch (e: any) {
-        console.error("❌ [AUTO-CLEANUP] Failed deeply:", e.message);
+        console.error("❌ [AUTO-CLEANUP] Failed:", e.message);
       }
     }
   });

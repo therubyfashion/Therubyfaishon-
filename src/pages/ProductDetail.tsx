@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
-import { doc, getDoc, collection, addDoc, query, where, onSnapshot, orderBy, serverTimestamp, updateDoc, increment, getDocs, limit } from 'firebase/firestore';
-import { db } from '../firebase';
 import { supabase } from '../supabase';
 import { Product, Review } from '../types';
 import { useCart } from '../contexts/CartContext';
@@ -479,23 +477,10 @@ export default function ProductDetail() {
             }
           }
         } catch (supabaseErr) {
-          console.warn("Supabase fetch failed, trying Firestore next:", supabaseErr);
+          console.warn("Supabase fetch error:", supabaseErr);
         }
 
-        // 2. Try Firestore fallback if Supabase failed
-        if (!data) {
-          try {
-            const docRef = doc(db, 'products', id);
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-              data = { id: docSnap.id, ...docSnap.data() } as Product;
-            }
-          } catch (dbErr) {
-            console.warn("Firestore fallback fetch failed:", dbErr);
-          }
-        }
-
-        // 3. Try Cache fallback if both failed
+        // Cache fallback if Supabase failed
         if (!data) {
           try {
             const cached = localStorage.getItem(cacheKey);
@@ -518,21 +503,21 @@ export default function ProductDetail() {
           if (related.length > 0) {
             setRelatedProducts(related);
           } else {
-            // Fallback related products from Firestore
+            // Related products query via Supabase
             try {
-              const relatedQuery = query(
-                collection(db, 'products'),
-                where('category', '==', data.category),
-                limit(5)
-              );
-              const relatedSnap = await getDocs(relatedQuery);
-              related = relatedSnap.docs
-                .map(doc => ({ id: doc.id, ...doc.data() } as Product))
-                .filter(p => p.id !== id)
-                .slice(0, 4);
-              setRelatedProducts(related);
+              const { data: relData } = await supabase
+                .from('products')
+                .select('*')
+                .eq('category', data.category)
+                .limit(5);
+              if (relData) {
+                const relFormatted = relData
+                  .filter((p: any) => p.id !== id)
+                  .slice(0, 4);
+                setRelatedProducts(relFormatted);
+              }
             } catch (relatedErr) {
-              console.warn("Firestore related products fetch failed:", relatedErr);
+              console.warn("Supabase related products fetch failed:", relatedErr);
             }
           }
 

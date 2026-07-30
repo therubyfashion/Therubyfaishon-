@@ -6,8 +6,6 @@ import { useCart } from '../contexts/CartContext';
 import { useWishlist } from '../contexts/WishlistContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useSettings } from '../contexts/SettingsContext';
-import { db } from '../firebase';
-import { collection, getDocs } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function Navbar({ solid = false }: { solid?: boolean }) {

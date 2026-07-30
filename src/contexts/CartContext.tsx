@@ -1,6 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
-import { db } from '../firebase';
 import { CartItem, Product, Promotion } from '../types';
 import { useSettings } from './SettingsContext';
 import { useAuth } from './AuthContext';

@@ -1,9 +1,7 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { db } from '../firebase';
 import { supabase } from '../supabase';
-import { doc, updateDoc, collection, query, getDocs, where, setDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -151,19 +149,17 @@ export default function Settings() {
       const parsed = stored ? JSON.parse(stored) : { orderUpdates: true, newArrivals: true, couponsAlert: true, newsletter: false };
       parsed[key as string] = newVal;
       localStorage.setItem('ruby_notification_preferences', JSON.stringify(parsed));
+
+      if (user && typeof key === 'string') {
+        try {
+          await supabase.from('profiles').update({ preferences: parsed }).eq('id', user.id);
+        } catch (e) {
+          console.error("Supabase notification preference sync failed");
+        }
+      }
     }
 
     toast.success('Preference updated!');
-
-    if (user && typeof key === 'string' && ['orderUpdates', 'newArrivals', 'couponsAlert', 'newsletter'].includes(key)) {
-      try {
-        await updateDoc(doc(db, 'users', user.uid), {
-          [`notifications.${String(key)}`]: newVal
-        });
-      } catch (e) {
-        console.error("Firebase notification sync failed");
-      }
-    }
   };
 
   const handleLangChange = (lang: string) => {
@@ -232,11 +228,8 @@ export default function Settings() {
         end_date: expiry.toISOString()
       }]);
 
-      const userRef = doc(db, 'users', user.uid);
       const nextPoints = currentPoints - option.cost;
-      await updateDoc(userRef, {
-        loyaltyPoints: nextPoints
-      });
+      await supabase.from('profiles').update({ loyalty_points: nextPoints }).eq('id', user.id);
 
       toast.success(`${option.name} unlocked successfully! Code: ${couponCode} 🎉`, { id: toastId });
       setRefreshCoupons(prev => prev + 1);
