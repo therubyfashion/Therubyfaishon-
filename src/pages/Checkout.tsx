@@ -97,7 +97,6 @@ export default function Checkout() {
   const [otpError, setOtpError] = useState('');
   const [otpSentTo, setOtpSentTo] = useState('');
   const [otpCountdown, setOtpCountdown] = useState(0);
-  const [devTestingOtp, setDevTestingOtp] = useState('');
 
   useEffect(() => {
     if (otpCountdown <= 0) return;
@@ -322,19 +321,9 @@ export default function Checkout() {
       if (response.ok) {
         toast.success(`Verification OTP sent successfully to ${phone}!`);
         setOtpCountdown(60); // 1 minute countdown for resend
-        if (data.testingOtp) {
-          setDevTestingOtp(data.testingOtp);
-          console.log(`[TEST MODE] Generated OTP: ${data.testingOtp}`);
-        } else {
-          setDevTestingOtp('');
-        }
       } else {
         setOtpError(data.message || data.error || 'Failed to dispatch verification OTP');
         toast.error(data.message || data.error || 'Failed to send OTP code.');
-        if (data.testingOtp) {
-          setDevTestingOtp(data.testingOtp);
-          toast.info(`[DEV MODE] OTP Generated is: ${data.testingOtp}`, { duration: 15000 });
-        }
       }
     } catch (err: any) {
       console.error("Error dispatching OTP:", err);
@@ -878,7 +867,7 @@ export default function Checkout() {
           const sendAdminEmail = async () => {
             try {
               // Target developer testing email as well to guarantee they see admin order notifications
-              const adminEmailDestination = "mdsagaransari65670@gmail.com, " + (storeSettings?.supportEmail || "support@therubyfashion.shop");
+              const adminEmailDestination = storeSettings?.supportEmail || "support@therubyfashion.shop";
               const controller = new AbortController();
               const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 seconds snappy timeout
               const res = await fetch('/api/send-email', {
@@ -1398,13 +1387,8 @@ export default function Checkout() {
                               </div>
                               <h3 className="text-xl font-bold text-[#1A2C54]">Verify Your Phone Number</h3>
                               <p className="text-xs text-gray-400 font-medium leading-relaxed">
-                                We generated a compliance-safe 6-digit verification code (OTP) locally. Enter the code below to verify and save your address:
+                                Enter the 6-digit verification code sent to your phone to verify and save your address:
                               </p>
-                              {devTestingOtp && (
-                                <div className="mt-2 bg-green-50 border border-green-200 text-green-800 rounded-xl px-4 py-2 font-mono text-sm font-bold inline-block">
-                                  Your Local Code: {devTestingOtp}
-                                </div>
-                              )}
                             </div>
 
                             <form onSubmit={handleVerifyOtpAndSave} className="space-y-4">

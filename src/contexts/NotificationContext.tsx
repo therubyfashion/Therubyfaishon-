@@ -50,7 +50,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
 
     const targetUserId = user.id || user.uid;
-    const isUserAdmin = (user as any)?.role === 'admin' || user.email === 'mdsagaransari65670@gmail.com';
+    const isUserAdmin = (user as any)?.role === 'admin';
 
     try {
       const { data, error } = await supabase

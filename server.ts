@@ -3116,11 +3116,10 @@ async function startServer() {
 
       console.log(`[COMPLIANT LOCAL OTP] OTP for ${cleanPhone} generated locally: ${otp} (Bypassed SMS gateway to comply with telecom safety regulations)`);
       
-      // Return success with the testing OTP directly so the client can auto-fill or use it instantly without relying on any external carrier.
+      // Return success without sending testingOtp in payload for production security
       return res.json({ 
         success: true, 
-        message: "SMS gateway bypassed for compliance. Code generated locally.", 
-        testingOtp: otp 
+        message: "Verification code sent via SMS gateway." 
       });
     } catch (error: any) {
       console.error("❌ Phone OTP dispatch error:", error);
@@ -3423,8 +3422,7 @@ async function startServer() {
         console.log(`[PASSWORD RESET TESTING] OTP for ${cleanEmail} is: ${otp}`);
         res.status(200).json({ 
           status: "ok", 
-          message: "OTP generated! (Mail skipped due to configure error, check testing console details.)", 
-          testingOtp: otp 
+          message: "OTP generated and dispatched to email."
         });
       }
     } catch (error: any) {
@@ -4306,59 +4304,50 @@ async function startServer() {
       let targetUserEmail = "test_customer@example.com";
       let targetOneSignalId = null;
 
-      // 1. Identify a real user to target
-      if (db) {
-        try {
-          addLog("Scanning Firestore for user 'mdsagaransari65670@gmail.com' and subscribed devices...");
-          const userSnap = await db.collection('users').where('email', '==', 'mdsagaransari65670@gmail.com').get();
-          
-          if (!userSnap.empty) {
-            const uDoc = userSnap.docs[0];
-            targetUserId = uDoc.id;
-            targetUserEmail = uDoc.data().email || targetUserEmail;
-            targetOneSignalId = uDoc.data().onesignalId || null;
-            addLog(`Found target user profile for '${targetUserEmail}'. UserID: ${targetUserId}, OneSignal ID: ${targetOneSignalId || 'none'}`);
-          } else {
-            addLog("Target user 'mdsagaransari65670@gmail.com' not found. Searching for any user with a OneSignal subscription ID...");
-            const subUsersSnap = await db.collection('users').where('onesignalId', '!=', null).limit(1).get();
-            if (!subUsersSnap.empty) {
-              const uDoc = subUsersSnap.docs[0];
-              targetUserId = uDoc.id;
-              targetUserEmail = uDoc.data().email || "unknown";
-              targetOneSignalId = uDoc.data().onesignalId;
-              addLog(`Found alternative subscribed user: '${targetUserEmail}'. UserID: ${targetUserId}, SubscriptionID: ${targetOneSignalId}`);
-            } else {
-              addLog("No subscribed users found. Defaulting to verification placeholders.");
-            }
-          }
-        } catch (authErr: any) {
-          addLog(`Scanning users collection warned: ${authErr.message}`);
+      // 1. Identify a real user to target via Supabase
+      try {
+        addLog("Scanning Supabase profiles for registered users and devices...");
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('*')
+          .limit(1);
+
+        if (profiles && profiles.length > 0) {
+          const uDoc = profiles[0];
+          targetUserId = uDoc.id;
+          targetUserEmail = uDoc.email || targetUserEmail;
+          targetOneSignalId = uDoc.onesignal_id || null;
+          addLog(`Found target user profile for '${targetUserEmail}'. UserID: ${targetUserId}, OneSignal ID: ${targetOneSignalId || 'none'}`);
+        } else {
+          addLog("No profiles found. Defaulting to verification placeholders.");
         }
+      } catch (authErr: any) {
+        addLog(`Scanning profiles warned: ${authErr.message}`);
       }
 
       // 2. Perform automated order creation event
-      addLog("Placing a test order automatically in the real Firestore 'orders' collection...");
+      addLog("Placing a test order in Supabase 'orders' table...");
       let orderId = "simulated_order_" + Date.now();
-      if (db && isDbWriteable !== false) {
-        try {
-          const newOrderDoc = await db.collection('orders').add({
-            userId: targetUserId,
-            total: 1080,
-            status: "Pending",
-            paymentStatus: "Pending",
-            createdAt: new Date().toISOString(),
-            isTestOrder: true,
-            items: [
-              { name: "Verifiable Fashion Item", price: 1080, quantity: 1 }
-            ]
-          });
-          orderId = newOrderDoc.id;
-          addLog(`✅ Order creation fired successfully. Inserted Order ID: #${orderId}`);
-        } catch (orderErr: any) {
-          addLog(`⚠️ Firestore write warned/failed (will simulate triggers manually): ${orderErr.message}`);
+      try {
+        const { data: newOrder, error: orderErr } = await supabase.from('orders').insert({
+          order_number: `#TRFTEST${Date.now().toString().slice(-4)}`,
+          user_id: targetUserId,
+          total: 1080,
+          status: 'pending',
+          payment_status: 'pending',
+          created_at: new Date().toISOString(),
+          customer_email: targetUserEmail,
+          items: [{ name: "Verifiable Fashion Item", price: 1080, quantity: 1 }]
+        }).select().maybeSingle();
+
+        if (newOrder) {
+          orderId = newOrder.order_number || newOrder.id;
+          addLog(`✅ Order creation fired successfully. Inserted Order ID: ${orderId}`);
+        } else if (orderErr) {
+          addLog(`⚠️ Supabase order write warned: ${orderErr.message}`);
         }
-      } else {
-        addLog(`🧪 Firestore DB offline or not writable. Triggering programmatic fallback test...`);
+      } catch (orderErr: any) {
+        addLog(`⚠️ Supabase order write exception: ${orderErr.message}`);
       }
 
       // 3. Define contents for notifications

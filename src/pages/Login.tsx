@@ -25,8 +25,6 @@ export default function Login() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
   const [countdown, setCountdown] = useState(0);
-  const [sandboxOtp, setSandboxOtp] = useState('');
-
   // Handle countdown timer ticker
   useEffect(() => {
     let timer: any;
@@ -153,11 +151,6 @@ export default function Login() {
       
       requestSuccessful = true;
       setCountdown(60);
-      if (data.testingOtp) {
-        setSandboxOtp(data.testingOtp);
-      } else {
-        setSandboxOtp('');
-      }
       setResetStep('verify');
       setOtpDigits(['', '', '', '', '', '']);
       toast.success("Verification OTP code sent successfully! Please check mail.");
@@ -325,7 +318,7 @@ export default function Login() {
       const userRole = profileData?.role || 'user';
       const isVerified = profileData ? profileData.is_verified : false;
 
-      if (!isVerified && sUser.email !== 'admin@theruby.com') {
+      if (!isVerified) {
         toast.error("Please verify your email before logging in.");
         navigate(`/verify-prompt?email=${encodeURIComponent(sUser.email || '')}&uid=${sUser.id}`, { replace: true });
         return;
@@ -357,8 +350,8 @@ export default function Login() {
         console.error("Welcome notification error:", e);
       }
 
-      // Role-based routing
-      if (userRole === 'admin' || sUser.email === 'admin@theruby.com' || sUser.email === 'mdsagaransari65670@gmail.com') {
+      // Role-based routing strictly based on database profile role
+      if (userRole === 'admin') {
         navigate('/admin', { replace: true });
       } else {
         navigate('/', { replace: true });
@@ -693,17 +686,6 @@ export default function Login() {
                     ))}
                   </div>
                 </div>
-
-                {sandboxOtp && (
-                  <div className="bg-[#FFF1F2] border border-rose-100 p-4 rounded-2xl space-y-1 shadow-sm">
-                    <p className="text-[11px] font-extrabold uppercase tracking-widest text-[#E11D48] flex items-center gap-1.5 font-sans">
-                      ⚡ Dev Testing OTP Fallback
-                    </p>
-                    <p className="text-xs text-rose-800 font-medium font-sans">
-                      Since customized SMTP keys/Resend are not configured yet, here is your testing code: <span className="font-mono font-bold bg-white px-2 py-0.5 rounded border border-rose-200 text-sm ml-1 select-all">{sandboxOtp}</span>
-                    </p>
-                  </div>
-                )}
 
                 <div className="text-center font-sans">
                   {countdown > 0 ? (

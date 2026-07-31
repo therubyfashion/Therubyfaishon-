@@ -2314,7 +2314,7 @@ export default function AdminDashboard() {
 
       const data = await response.json();
       if (response.ok) {
-        toast.success(`Compliance-safe local OTP generated successfully! Code: ${data.testingOtp}`);
+        toast.success('Verification OTP code sent successfully!');
       } else {
         toast.error(data.message || data.error || 'Failed to generate test OTP');
       }

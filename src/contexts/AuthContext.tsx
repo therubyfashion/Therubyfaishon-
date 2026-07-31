@@ -57,7 +57,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         // Google OAuth users are verified automatically
         const isVerified = (metadata?.iss === 'https://accounts.google.com' || metadata?.provider === 'google' || metadata?.avatar_url) ? true : false;
-        const role = (email === 'mdsagaransari65670@gmail.com' || email === 'admin@theruby.com' || email?.toLowerCase().includes('rubu') || email?.toLowerCase().includes('ruby')) ? 'admin' : 'user';
+        const role = 'user'; // Default role for new OAuth/signup users is 'user'. Admin role must be assigned in database profiles.role
 
         const newProfile: UserProfile = {
           uid: userId,
@@ -139,10 +139,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       profile, 
       loading, 
       refreshProfile,
-      isAdmin: profile?.role === 'admin' || 
-               user?.email === 'mdsagaransari65670@gmail.com' || 
-               user?.email === 'admin@theruby.com' || 
-               user?.email?.toLowerCase().includes('rubi')
+      isAdmin: profile?.role === 'admin'
     }}>
       {children}
     </AuthContext.Provider>
