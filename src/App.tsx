@@ -44,6 +44,10 @@ const VerifyEmail = React.lazy(() => import('./pages/VerifyEmail'));
 const VerifyPrompt = React.lazy(() => import('./pages/VerifyPrompt'));
 const InfoPage = React.lazy(() => import('./pages/InfoPage'));
 const FAQ = React.lazy(() => import('./pages/FAQ'));
+const PrivacyPolicy = React.lazy(() => import('./pages/PrivacyPolicy'));
+const TermsOfService = React.lazy(() => import('./pages/TermsOfService'));
+const ReturnPolicy = React.lazy(() => import('./pages/ReturnPolicy'));
+const ShippingPolicy = React.lazy(() => import('./pages/ShippingPolicy'));
 
 const ScrollToTop = () => {
   const location = useLocation();
@@ -117,7 +121,7 @@ function AppContent() {
   useEffect(() => {
     if (authLoading) return;
     
-    const publicPaths = ['/login', '/signup', '/verify-prompt', '/verify-email', '/about', '/contact', '/faq', '/checkout', '/cart', '/track', '/order-success'];
+    const publicPaths = ['/login', '/signup', '/verify-prompt', '/verify-email', '/about', '/contact', '/faq', '/checkout', '/cart', '/track', '/order-success', '/privacy-policy', '/terms-of-service', '/return-policy', '/shipping-policy', '/privacy', '/terms', '/returns', '/shipping', '/refund-policy'];
     // Home ('/') is NOT public for logged-in but unverified users
     const isPublicPath = publicPaths.includes(location.pathname) || location.pathname.startsWith('/product/') || location.pathname.startsWith('/track/');
     
@@ -560,6 +564,15 @@ function AppContent() {
             <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/verify-prompt" element={<VerifyPrompt />} />
             <Route path="/faq" element={<FAQ />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+            <Route path="/terms-of-service" element={<TermsOfService />} />
+            <Route path="/return-policy" element={<ReturnPolicy />} />
+            <Route path="/shipping-policy" element={<ShippingPolicy />} />
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/terms" element={<TermsOfService />} />
+            <Route path="/returns" element={<ReturnPolicy />} />
+            <Route path="/refund-policy" element={<ReturnPolicy />} />
+            <Route path="/shipping" element={<ShippingPolicy />} />
             <Route path="/:slug" element={<InfoPage />} />
             <Route 
               path="/admin/*" 

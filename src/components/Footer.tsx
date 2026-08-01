@@ -137,14 +137,16 @@ export default function Footer() {
             ))}
           </FooterAccordion>
           <FooterAccordion title="About Us" icon={<User size={18} />}>
-            {['Our Story', 'Privacy Policy', 'Terms of Use', 'Contact'].map(item => (
-              <Link key={item} to="/about" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">{item}</Link>
-            ))}
+            <Link to="/about" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Our Story</Link>
+            <Link to="/privacy-policy" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Privacy Policy</Link>
+            <Link to="/terms-of-service" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Terms of Service</Link>
+            <Link to="/contact" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Contact Us</Link>
           </FooterAccordion>
           <FooterAccordion title="Help & Support" icon={<HelpIcon size={18} />}>
-            {['FAQ', 'Shipping Info', 'Returns', 'Size Guide'].map(item => (
-              <Link key={item} to="/contact" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">{item}</Link>
-            ))}
+            <Link to="/faq" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">FAQ</Link>
+            <Link to="/shipping-policy" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Shipping Policy</Link>
+            <Link to="/return-policy" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Return & Refund Policy</Link>
+            <Link to="/track" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Track Order</Link>
           </FooterAccordion>
           <FooterAccordion title="Store Locator" icon={<MapPin size={18} />}>
             <p className="text-[10px] text-gray-500 font-bold uppercase tracking-[0.2em] leading-relaxed py-2">
@@ -223,7 +225,7 @@ export default function Footer() {
 
           <div className="text-center pb-12">
             <p className="text-[11px] font-bold text-gray-600 uppercase tracking-[0.3em]">
-              © 2026 {settings?.storeName?.toUpperCase() || 'THE RUBY FASHION'} - ALL RIGHTS RESERVED
+              © 2026 The Ruby Fashion. All rights reserved.
             </p>
           </div>
         </div>

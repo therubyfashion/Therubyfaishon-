@@ -247,7 +247,6 @@ export default function Login() {
       setOtpDigits(['', '', '', '', '', '']);
       setNewPassword('');
       setConfirmPassword('');
-      setSandboxOtp('');
       setApiError(null);
 
       // Auto-navigate to homepage, as they are now securely signed in and ready!
@@ -444,7 +443,6 @@ export default function Login() {
                   onClick={() => {
                     setResetEmail(email);
                     setResetStep('request');
-                    setSandboxOtp('');
                     setShowResetModal(true);
                   }}
                   className="text-xs font-bold text-ruby hover:underline"
