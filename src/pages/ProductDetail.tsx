@@ -933,9 +933,6 @@ export default function ProductDetail() {
                 <Plus size={16} />
               </button>
             </div>
-            <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">
-              {stockVal > 0 ? `${stockVal} items left` : 'Out of stock'}
-            </p>
           </div>
 
           {/* CTA Buttons */}
