@@ -42,6 +42,7 @@ const Settings = React.lazy(() => import('./pages/Settings'));
 const Addresses = React.lazy(() => import('./pages/Addresses'));
 const VerifyEmail = React.lazy(() => import('./pages/VerifyEmail'));
 const VerifyPrompt = React.lazy(() => import('./pages/VerifyPrompt'));
+const VerifyCOD = React.lazy(() => import('./pages/VerifyCOD'));
 const InfoPage = React.lazy(() => import('./pages/InfoPage'));
 const FAQ = React.lazy(() => import('./pages/FAQ'));
 const PrivacyPolicy = React.lazy(() => import('./pages/PrivacyPolicy'));
@@ -121,7 +122,7 @@ function AppContent() {
   useEffect(() => {
     if (authLoading) return;
     
-    const publicPaths = ['/login', '/signup', '/verify-prompt', '/verify-email', '/about', '/contact', '/faq', '/checkout', '/cart', '/track', '/order-success', '/privacy-policy', '/terms-of-service', '/return-policy', '/shipping-policy', '/privacy', '/terms', '/returns', '/shipping', '/refund-policy'];
+    const publicPaths = ['/login', '/signup', '/verify-prompt', '/verify-email', '/verify-cod', '/about', '/contact', '/faq', '/checkout', '/cart', '/track', '/order-success', '/privacy-policy', '/terms-of-service', '/return-policy', '/shipping-policy', '/privacy', '/terms', '/returns', '/shipping', '/refund-policy'];
     // Home ('/') is NOT public for logged-in but unverified users
     const isPublicPath = publicPaths.includes(location.pathname) || location.pathname.startsWith('/product/') || location.pathname.startsWith('/track/');
     
@@ -563,6 +564,7 @@ function AppContent() {
             <Route path="/addresses" element={<Addresses />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/verify-prompt" element={<VerifyPrompt />} />
+            <Route path="/verify-cod" element={<VerifyCOD />} />
             <Route path="/faq" element={<FAQ />} />
             <Route path="/privacy-policy" element={<PrivacyPolicy />} />
             <Route path="/terms-of-service" element={<TermsOfService />} />

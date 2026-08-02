@@ -602,6 +602,10 @@ export default function Checkout() {
             paymentStatus: paymentId ? 'Paid' : 'Pending'
           };
 
+          const isCODOrder = String(finalOrderData.paymentMethod).toUpperCase() === 'COD';
+          const codToken = isCODOrder ? (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + Date.now().toString(36)) : null;
+          const codExpiresAt = isCODOrder ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null;
+
           // Save ONLY to Supabase
           try {
             const supabaseOrderPayload = {
@@ -628,7 +632,10 @@ export default function Checkout() {
               payment_id: finalOrderData.paymentId,
               points_redeemed: pointsToRedeem,
               points_earned: 0,
-              tracking_history: []
+              tracking_history: [],
+              cod_verified: isCODOrder ? false : true,
+              cod_verification_token: codToken,
+              cod_verification_expires_at: codExpiresAt
             };
 
             const { error: supErr } = await supabase
@@ -779,6 +786,22 @@ export default function Checkout() {
                     </tr>
                   </table>
                 </div>
+
+                ${isCODOrder && codToken ? `
+                <div style="text-align:center; margin:32px 0; background-color:#FFF5F7; border:1px solid #FCD34D; border-radius:8px; padding:20px;">
+                  <p style="font-size:16px; color:#333; margin-bottom:16px; font-weight:600;">
+                    Please confirm your order to help us process it faster:
+                  </p>
+                  <a href="https://therubyfashion.shop/verify-cod?token=${encodeURIComponent(codToken)}&order=${encodeURIComponent((finalOrderData.orderId || '').replace('#', ''))}"
+                     style="background:#A11B35; color:white; padding:16px 40px; border-radius:8px;
+                     text-decoration:none; font-size:16px; font-weight:bold; display:inline-block;">
+                    ✅ Yes, Confirm My Order
+                  </a>
+                  <p style="color:#888; font-size:12px; margin-top:12px;">
+                    Link expires in 24 hours. Ignore if you didn't place this order.
+                  </p>
+                </div>
+                ` : ''}
               </div>
             </div>`;
 

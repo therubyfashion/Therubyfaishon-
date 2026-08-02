@@ -1747,6 +1747,9 @@ export function getTemplateOrderConfirmation(data: {
   deliveryAddress?: { name?: string; street?: string; city?: string; state?: string; pincode?: string; phone?: string };
   trackingUrl?: string;
   baseHost?: string;
+  codToken?: string;
+  isCOD?: boolean;
+  paymentMethod?: string;
 }): { subject: string; html: string } {
   const customerName = data.customerName || 'Valued Customer';
   const orderId = data.orderId || 'N/A';
@@ -1757,6 +1760,25 @@ export function getTemplateOrderConfirmation(data: {
   const total = Number(data.total || (subtotal - discount + shipping));
   const deliveryAddress = data.deliveryAddress;
   const trackLink = data.trackingUrl || `${data.baseHost || 'https://therubyfashion.shop'}/track/${orderId}`;
+  
+  const isCOD = data.isCOD || (data.paymentMethod && String(data.paymentMethod).toUpperCase() === 'COD') || !!data.codToken;
+  const codToken = data.codToken || '';
+
+  const codBlock = (isCOD && codToken) ? `
+    <div style="text-align:center; margin:32px 0; background-color:#FFF5F7; border:1px solid #FCD34D; border-radius:8px; padding:20px;">
+      <p style="font-size:16px; color:#333; margin:0 0 16px 0; font-weight:600;">
+        Please confirm your order to help us process it faster:
+      </p>
+      <a href="https://therubyfashion.shop/verify-cod?token=${encodeURIComponent(codToken)}&order=${encodeURIComponent(orderId.replace('#', ''))}"
+         style="background:#A11B35; color:white; padding:16px 40px; border-radius:8px;
+         text-decoration:none; font-size:16px; font-weight:bold; display:inline-block;">
+        ✅ Yes, Confirm My Order
+      </a>
+      <p style="color:#888; font-size:12px; margin:12px 0 0 0;">
+        Link expires in 24 hours. Ignore if you didn't place this order.
+      </p>
+    </div>
+  ` : '';
 
   const itemsRows = items.length > 0 ? items.map(item => `
     <tr style="border-bottom: 1px solid #EEEEEE; font-size: 13px;">
@@ -1857,6 +1879,8 @@ export function getTemplateOrderConfirmation(data: {
     </table>
 
     ${addressBlock}
+
+    ${codBlock}
 
     <div style="text-align: center; margin-top: 28px;">
       <a href="${trackLink}" style="background-color: #A11B35; color: #ffffff; padding: 14px 36px; font-size: 14px; font-weight: bold; border-radius: 6px; text-decoration: none; display: inline-block; letter-spacing: 0.5px; box-shadow: 0 4px 10px rgba(161, 27, 53, 0.25);">
@@ -3505,12 +3529,128 @@ async function startServer() {
     }
   });
 
+  // Endpoint: Verify Cash on Delivery (COD) Order
+  app.get("/api/verify-cod", async (req, res) => {
+    const token = String(req.query.token || '').trim();
+    const orderNumParam = String(req.query.order || '').trim();
+
+    if (!token) {
+      return res.json({ success: false, reason: 'not_found' });
+    }
+
+    try {
+      const supabase = getSupabaseAdmin();
+      
+      // 1. Find order by cod_verification_token
+      const { data: order, error } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('cod_verification_token', token)
+        .maybeSingle();
+
+      if (error || !order) {
+        if (orderNumParam) {
+          const cleanNum = orderNumParam.replace(/^#/, '');
+          const { data: existingOrder } = await supabase
+            .from('orders')
+            .select('*')
+            .or(`order_number.eq.${orderNumParam},order_number.eq.#${cleanNum},order_number.eq.${cleanNum}`)
+            .maybeSingle();
+
+          if (existingOrder && existingOrder.cod_verified) {
+            const customerName = existingOrder.shipping_full_name || existingOrder.customerName || 'Customer';
+            return res.json({ success: false, reason: 'already_verified', orderNumber: existingOrder.order_number, customerName });
+          }
+        }
+        return res.json({ success: false, reason: 'not_found' });
+      }
+
+      const orderNumber = order.order_number || order.orderId || orderNumParam;
+      const customerName = order.shipping_full_name || order.customer_email?.split('@')[0] || 'Customer';
+
+      if (order.cod_verified) {
+        return res.json({ success: false, reason: 'already_verified', orderNumber, customerName });
+      }
+
+      const expiresAt = order.cod_verification_expires_at ? new Date(order.cod_verification_expires_at).getTime() : 0;
+      if (expiresAt > 0 && expiresAt < Date.now()) {
+        return res.json({ success: false, reason: 'expired', orderNumber, customerName });
+      }
+
+      const nowIso = new Date().toISOString();
+      const { error: updateErr } = await supabase
+        .from('orders')
+        .update({
+          cod_verified: true,
+          cod_verified_at: nowIso,
+          status: 'processing'
+        })
+        .eq('id', order.id);
+
+      if (updateErr) {
+        console.error("Failed to update order COD verification status:", updateErr.message);
+        return res.status(500).json({ error: "Failed to update order verification status" });
+      }
+
+      console.log(`✅ COD Order ${orderNumber} successfully verified by customer (${customerName})`);
+
+      const notifTitle = `🎉 COD Order ${orderNumber} confirmed!`;
+      const notifBody = `Customer ${customerName} has verified COD order ${orderNumber}. Status updated to Processing.`;
+
+      NotificationService.sendAdmin(notifTitle, notifBody, { url: '/admin?tab=orders' }).catch(e => console.error("Admin push error:", e));
+
+      const adminEmail = process.env.RESEND_FROM_EMAIL || DEFAULT_FROM_EMAIL;
+      sendEmailDirect({
+        to: adminEmail,
+        subject: `🎉 COD Order ${orderNumber} Confirmed by Customer!`,
+        html: `
+          <div style="font-family: sans-serif; padding: 20px; color: #333;">
+            <h2 style="color: #A11B35;">🎉 COD Order Confirmed</h2>
+            <p>Customer <strong>${customerName}</strong> (${order.customer_email || 'No email'}) has confirmed COD order <strong>${orderNumber}</strong>.</p>
+            <p>Status updated to <strong>Processing</strong>.</p>
+            <p><a href="https://therubyfashion.shop/admin" style="background:#A11B35; color:#fff; padding:10px 20px; border-radius:6px; text-decoration:none; display:inline-block;">View in Admin Panel</a></p>
+          </div>
+        `
+      }).catch(e => console.error("Admin email send error:", e));
+
+      try {
+        const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin');
+        if (admins && admins.length > 0) {
+          const adminNotifs = admins.map(a => ({
+            user_id: a.id,
+            title: notifTitle,
+            body: notifBody,
+            type: 'order',
+            icon_type: 'check',
+            link: '/admin?tab=orders',
+            is_read: false,
+            created_at: nowIso
+          }));
+          await supabase.from('notifications').insert(adminNotifs);
+        }
+      } catch (notifErr: any) {
+        console.warn("Failed to insert admin notification row:", notifErr.message);
+      }
+
+      return res.json({ success: true, orderNumber, customerName });
+    } catch (err: any) {
+      console.error("GET /api/verify-cod error:", err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/send-email", async (req, res) => {
     let { to, subject, html, from, fromName: providedFromName, replyTo, templateKey, template, templateData } = req.body;
     
     try {
       const requestBaseHost = `${req.protocol}://${req.get('host')}`.replace(/^http:/i, 'https:');
       const selectedTemplateKey = (templateKey || template || '').toString().toLowerCase();
+
+      // Check if this status email should be skipped (Processing, Packed, Out for Delivery)
+      if (['processing', 'packed', 'out_for_delivery', 'in_delivery'].includes(selectedTemplateKey)) {
+        console.log(`📧 Skipping status change email for '${selectedTemplateKey}' per configuration guidelines.`);
+        return res.json({ success: true, skipped: true, message: `Email notification for status '${selectedTemplateKey}' is intentionally disabled.` });
+      }
 
       if (selectedTemplateKey) {
         const data = { ...req.body, ...templateData, baseHost: requestBaseHost };
@@ -3524,9 +3664,6 @@ async function startServer() {
           case 'order_shipped':
           case 'shipped':
             generated = getTemplateOrderShipped(data);
-            break;
-          case 'out_for_delivery':
-            generated = getTemplateOutForDelivery(data);
             break;
           case 'order_delivered':
           case 'delivered':
@@ -4609,6 +4746,62 @@ async function startServer() {
   console.log(`📡 Attempting to listen on port ${PORT}...`);
   httpServer.listen(PORT, "0.0.0.0", async () => {
     console.log(`✅ SERVER IS LIVE: http://localhost:${PORT}`);
+    
+    // Auto-cancel unverified COD orders after 24 hours
+    const autoCancelUnverifiedCOD = async () => {
+      try {
+        const supabase = getSupabaseAdmin();
+        if (!supabase) return;
+        const nowIso = new Date().toISOString();
+        const { data: expiredOrders, error } = await supabase
+          .from('orders')
+          .select('*')
+          .ilike('payment_method', 'cod')
+          .eq('cod_verified', false)
+          .eq('status', 'pending')
+          .lt('cod_verification_expires_at', nowIso);
+
+        if (error) {
+          console.warn("Auto-cancel query warning:", error.message);
+          return;
+        }
+
+        if (expiredOrders && expiredOrders.length > 0) {
+          console.log(`⏰ Auto-cancelling ${expiredOrders.length} unverified expired COD orders...`);
+          for (const order of expiredOrders) {
+            await supabase
+              .from('orders')
+              .update({ status: 'cancelled' })
+              .eq('id', order.id);
+
+            const orderNum = order.order_number || order.orderId || order.id;
+            const customerEmail = order.customer_email || order.email || order.address?.email;
+            const customerName = order.shipping_full_name || order.customerName || 'Customer';
+
+            if (customerEmail) {
+              sendEmailDirect({
+                to: customerEmail,
+                subject: `Order Cancelled: #${orderNum} - The Ruby Fashion`,
+                html: `
+                  <div style="font-family: sans-serif; padding: 24px; color: #333;">
+                    <h2 style="color: #A11B35;">Order Cancelled</h2>
+                    <p>Hi <strong>${customerName}</strong>,</p>
+                    <p>Your unconfirmed Cash on Delivery order <strong>#${orderNum}</strong> has been cancelled as the 24-hour verification window has expired.</p>
+                    <p>If you still wish to purchase these items, please place a new order on our store.</p>
+                    <p style="margin-top:20px;"><a href="https://therubyfashion.shop" style="background:#A11B35; color:#fff; padding:12px 24px; border-radius:6px; text-decoration:none; display:inline-block;">Visit Store</a></p>
+                  </div>
+                `
+              }).catch(e => console.warn(`Failed to send COD cancellation email for order ${orderNum}:`, e.message));
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error("Auto-cancel COD orders error:", err.message);
+      }
+    };
+
+    setInterval(autoCancelUnverifiedCOD, 60 * 60 * 1000);
+    setTimeout(autoCancelUnverifiedCOD, 15000);
     
     // Startup validation removed as requested by user. Only real order flow notifications are supported.
     

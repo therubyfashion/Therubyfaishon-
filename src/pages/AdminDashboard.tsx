@@ -3612,14 +3612,27 @@ export default function AdminDashboard() {
             }).catch(pushErr => console.error("Failed to send status update push:", pushErr));
           }
 
-          // Email
-          if (order.address?.email) {
+          // Email — only for allowed statuses (Shipped, Delivered, Cancelled, Refunded, Returned)
+          const allowedEmailStatuses = ['Shipped', 'Delivered', 'Cancelled', 'Refunded', 'Returned'];
+          if (order.address?.email && allowedEmailStatuses.includes(newStatus)) {
+            let emailTemplateKey = '';
+            if (newStatus === 'Shipped') emailTemplateKey = 'shipped';
+            else if (newStatus === 'Delivered') emailTemplateKey = 'delivered';
+            else if (newStatus === 'Cancelled') emailTemplateKey = 'cancelled';
+            else if (newStatus === 'Refunded' || newStatus === 'Returned') emailTemplateKey = 'return_refunded';
+
             fetch('/api/send-email', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 to: order.address.email,
+                templateKey: emailTemplateKey,
                 subject: `Order Update: ${order.orderId} is ${newStatus} 📦`,
+                templateData: {
+                  customerName: order.address.name || 'Valued Customer',
+                  orderId: order.orderId,
+                  trackingUrl: `${window.location.origin}/track/${(order.orderId || '').replace('#', '')}`
+                },
                 html: `
                   <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #000000; padding: 40px 20px; color: #FFFFFF; line-height: 1.5;">
                     <div style="max-width: 500px; margin: 0 auto;">
