@@ -44,39 +44,6 @@ export default function EmailVerification({ onSuccess, onClose, email, userId }:
         throw new Error(errData.error || "Failed to generate verification code securely.");
       }
 
-      const { otp: code } = await otpRes.json();
-      setGeneratedOtp(code);
-
-      // Send Email
-      const emailHtml = `
-        <div style="font-family: sans-serif; padding: 40px; color: #1A2C54; background-color: #F8FAFC;">
-          <div style="max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.05);">
-            <h1 style="color: #E11D48; margin-bottom: 24px;">Confirm Your Address</h1>
-            <p style="font-size: 16px; line-height: 1.6; color: #64748B;">Please use the following verification code to confirm your delivery address and complete your order.</p>
-            
-            <div style="background: #F1F5F9; padding: 30px; border-radius: 16px; text-align: center; margin: 30px 0;">
-              <span style="font-size: 40px; font-weight: 800; letter-spacing: 12px; color: #1A2C54;">${code}</span>
-            </div>
-            
-            <p style="font-size: 14px; color: #94A3B8; text-align: center;">This code is valid for 10 minutes.</p>
-            
-            <div style="margin-top: 40px; border-top: 1px solid #F1F5F9; padding-top: 20px; text-align: center;">
-              <p style="font-size: 12px; color: #94A3B8;">&copy; ${new Date().getFullYear()} The Ruby Fashion</p>
-            </div>
-          </div>
-        </div>
-      `;
-
-      await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          to: email,
-          subject: `${code} is your address confirmation code`,
-          html: emailHtml
-        })
-      });
-
       toast.success("OTP sent to your Gmail! ✨");
       setStep('otp');
       setTimer(60);

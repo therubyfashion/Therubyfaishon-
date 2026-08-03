@@ -1692,21 +1692,32 @@ export function renderBaseEmailLayout({
           
           <!-- Branded Header -->
           <tr>
-            <td align="center" style="background-color: #A11B35; padding: 28px 20px; text-align: center;">
-              <table border="0" cellpadding="0" cellspacing="0" width="100%">
+            <td>
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#A11B35;">
                 <tr>
-                  <td align="center">
-                    <span style="font-family: Arial, Helvetica, sans-serif; font-size: 24px; font-weight: 900; letter-spacing: 3px; color: #ffffff; text-transform: uppercase; text-decoration: none;">THE RUBY FASHION</span>
-                    <div style="font-size: 9px; font-weight: 700; letter-spacing: 4px; color: #FFD1D9; text-transform: uppercase; margin-top: 4px;">COUTURE &amp; STYLES</div>
+                  <td align="center" style="padding:24px 20px;">
+                    <!-- Brand Logo Circle -->
+                    <div style="display:inline-block; background:white; border-radius:50%; 
+                                width:64px; height:64px; line-height:64px; text-align:center;
+                                font-family:Georgia,serif; font-size:24px; font-weight:bold; 
+                                color:#A11B35; vertical-align:middle;">
+                      TR
+                    </div>
+                    <br/>
+                    <!-- Brand Name -->
+                    <span style="font-family:Georgia,serif; font-size:22px; font-weight:bold; 
+                                 color:white; letter-spacing:2px; display:block; margin-top:8px;">
+                      THE RUBY FASHION
+                    </span>
+                    <!-- Tagline -->
+                    <span style="font-family:Arial,sans-serif; font-size:12px; color:rgba(255,255,255,0.8); 
+                                 letter-spacing:1px; display:block; margin-top:4px;">
+                      Premium Ethnic Wear
+                    </span>
                   </td>
                 </tr>
               </table>
             </td>
-          </tr>
-          
-          <!-- Accent Color Bar -->
-          <tr>
-            <td height="5" style="background-color: #7A1226; font-size: 0; line-height: 0;">&nbsp;</td>
           </tr>
 
           <!-- Main Content Section -->
@@ -1718,12 +1729,24 @@ export function renderBaseEmailLayout({
 
           <!-- Footer Section -->
           <tr>
-            <td style="background-color: #FAF8F8; padding: 26px 24px; text-align: center; border-top: 1px solid #EAEAEA; font-size: 12px; color: #666666; line-height: 1.5; font-family: Arial, Helvetica, sans-serif;">
-              <p style="margin: 0 0 6px 0; font-weight: bold; color: #A11B35; font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px;">The Ruby Fashion</p>
-              <p style="margin: 0 0 10px 0; color: #555555; font-size: 12px;">Need assistance? Contact our support team at <a href="mailto:support@therubyfashion.shop" style="color: #A11B35; text-decoration: underline; font-weight: bold;">support@therubyfashion.shop</a></p>
-              <p style="margin: 0 0 12px 0; color: #888888; font-size: 11px; font-style: italic;">This is an automated email, please do not reply directly to this message.</p>
-              <div style="border-top: 1px solid #E2E2E2; margin: 14px 0; font-size: 0; line-height: 0;">&nbsp;</div>
-              <p style="margin: 0; color: #999999; font-size: 11px;">&copy; ${currentYear} The Ruby Fashion. All rights reserved.</p>
+            <td>
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:32px; border-top:1px solid #eee;">
+                <tr>
+                  <td align="center" style="padding:20px; font-family:Arial,sans-serif; font-size:12px; color:#999;">
+                    <p style="margin:0 0 8px;">Questions? Contact us at 
+                      <a href="mailto:support@therubyfashion.shop" style="color:#A11B35;">
+                        support@therubyfashion.shop
+                      </a>
+                    </p>
+                    <p style="margin:0 0 8px;">
+                      <a href="https://therubyfashion.shop/privacy-policy" style="color:#A11B35; text-decoration:none;">Privacy Policy</a> &nbsp;|&nbsp;
+                      <a href="https://therubyfashion.shop/return-policy" style="color:#A11B35; text-decoration:none;">Return Policy</a> &nbsp;|&nbsp;
+                      <a href="https://therubyfashion.shop/terms-of-service" style="color:#A11B35; text-decoration:none;">Terms of Service</a>
+                    </p>
+                    <p style="margin:0;">© ${currentYear} The Ruby Fashion. All rights reserved.</p>
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
 
@@ -3245,197 +3268,17 @@ async function startServer() {
         }
       }
 
-      // Capture request fingerprint details to make the email extremely cool and secure!
-      const clientIp = requestIp.getClientIp(req) || req.ip || "127.0.0.1";
-      const geo = geoip.lookup(clientIp);
-      const requestCity = geo?.city || "New Delhi";
-      const requestCountry = geo?.country || "India";
-      const requestTime = new Date().toLocaleString('en-US', { 
-        timeZone: 'UTC', 
-        dateStyle: 'medium', 
-        timeStyle: 'short' 
-      }) + " UTC";
-      
-      const userAgent = req.get('User-Agent') || "Unknown Device";
-      const isMobile = /mobile|android|iphone|ipad/i.test(userAgent);
-      const isMac = /mac/i.test(userAgent);
-      const isWindows = /win/i.test(userAgent);
-      const osName = isMobile ? "Mobile Device" : isMac ? "macOS Desktop" : isWindows ? "Windows PC" : "Linux/Desktop PC";
-
-      const emailHtml = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Reset Your Password</title>
-        </head>
-        <body style="margin: 0; padding: 0; background-color: #FAF9F6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #1C1917;">
-          <table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed; background-color: #FAF9F6;">
-            <tr>
-              <td align="center" style="padding: 40px 10px 40px 10px;">
-                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08); border: 1px solid #E5E7EB;">
-                  
-                  <!-- Luxury High-Fashion Header with sparkles -->
-                  <tr>
-                    <td align="center" style="padding: 40px 30px; background-color: #0F172A; text-align: center;">
-                      <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                        <tr>
-                          <td align="center">
-                            <!-- Left Sparkle -->
-                            <span style="color: #FDA4AF; font-size: 16px; vertical-align: middle; margin-right: 15px; font-weight: bold;">✦</span>
-                            
-                            <!-- Red Faceted Diamond Logo (Fidelity Premium SVG) -->
-                            <div style="display: inline-block; vertical-align: middle; margin: 0 5px;">
-                              <svg width="42" height="36" viewBox="0 0 48 42" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto;">
-                                <path d="M15.5 2L6 14L24 40L42 14L32.5 2H15.5Z" fill="#E11D48" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M15.5 2L24 14L32.5 2" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M6 14H42" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M15.5 2L24 40M32.5 2L24 40" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M15.5 2H32.5" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M24 14L24 40" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                              </svg>
-                            </div>
-
-                            <!-- Right Sparkle -->
-                            <span style="color: #FDA4AF; font-size: 16px; vertical-align: middle; margin-left: 15px; font-weight: bold;">✦</span>
-                          </td>
-                        </tr>
-                        <tr>
-                          <td align="center" style="padding-top: 12px;">
-                            ${resolvedLogo ? 
-                              `<img src="${resolvedLogo}" alt="${storeName}" style="max-height: 48px; display: inline-block; margin-bottom: 5px;" referrerPolicy="no-referrer">` :
-                              `<span style="display: block; font-size: 24px; font-weight: 800; letter-spacing: 5px; color: #ffffff; text-transform: uppercase; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">The Ruby</span>`
-                            }
-                            <div style="margin-top: 4px; font-size: 11px; font-weight: 500; letter-spacing: 2px; color: #FDA4AF; text-transform: uppercase;">Your Style. Your Choice.</div>
-                          </td>
-                        </tr>
-                      </table>
-                    </td>
-                  </tr>
-                  
-                  <!-- Main Luxurious Card Content -->
-                  <tr>
-                    <td style="padding: 40px 40px 30px 40px; text-align: center; background-color: #ffffff;">
-                      
-                      <!-- Envelope Illustration with Overlapping Padlock -->
-                      <div style="display: block; margin: 0 auto 30px auto; width: 100px; height: 100px;">
-                        <svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <circle cx="50" cy="50" r="46" fill="#FCE7F3" />
-                          <rect x="24" y="32" width="52" height="36" rx="6" fill="#E11D48" />
-                          <path d="M24 35L47.6 51C49 52 51 52 52.4 51L76 35" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
-                          <path d="M24 65L42 50" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-                          <path d="M76 65L58 50" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-                          <circle cx="72" cy="66" r="14" fill="#0F172A" />
-                          <path d="M68 64V61C68 58.8 69.8 57 72 57C72.2 57 74 58.8 74 61V64" stroke="#ffffff" stroke-width="2" stroke-linecap="round" />
-                          <rect x="66" y="64" width="12" height="9" rx="2" fill="#ffffff" />
-                        </svg>
-                      </div>
-
-                      <h2 style="margin: 0 0 16px 0; color: #0F172A; font-size: 26px; font-weight: 800; line-height: 1.3; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">Security <span style="color: #E11D48;">Verification Code</span></h2>
-                      
-                      <div style="text-align: left; padding: 10px 0;">
-                        <p style="margin: 0 0 12px 0; color: #1F2937; font-size: 14px; font-weight: 700; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">Hello,</p>
-                        <p style="margin: 0 0 24px 0; color: #4B5563; font-size: 14px; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">We received a request to authorize a password change for your <strong style="color: #E11D48;">${storeName}</strong> account. Please use the beautiful, secure code below to complete your verification setup:</p>
-                      </div>
-
-                      <!-- Premium Luxury OTP Display Code Widget -->
-                      <div style="margin: 24px 0 32px 0; text-align: center;">
-                        <div style="display: inline-block; background-color: #FAF9F6; border: 2px dashed #E11D48; padding: 24px 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(225, 29, 72, 0.06); text-align: center;">
-                          <span style="display: block; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 4px; color: #E11D48; margin-bottom: 12px;">One-Time Passcode</span>
-                          <span style="display: block; font-size: 46px; font-weight: 900; letter-spacing: 14px; color: #0F172A; font-family: 'Courier New', Courier, monospace; line-height: 1; margin-left: 14px;">${otp}</span>
-                          <span style="display: block; font-size: 11px; color: #64748B; margin-top: 14px; font-weight: 500;">Enter this code into the verification form on the page</span>
-                        </div>
-                      </div>
-
-                      <!-- Security warning/ignore sub-box matching reference screenshot exactly -->
-                      <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #FFF1F2; border-radius: 12px; margin-bottom: 25px;">
-                        <tr>
-                          <td style="padding: 16px 20px; text-align: left;" valign="middle">
-                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                              <tr>
-                                <td width="32" valign="middle" style="padding-right: 12px;">
-                                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: block;">
-                                    <path d="M12 22C12 22 20 18 20 12V5L12 2L4 5V12C4 18 12 22 12 22Z" fill="#FCE7F3" stroke="#E11D48" stroke-width="2" stroke-linejoin="round" />
-                                    <path d="M9 11L11 13L15 9" stroke="#E11D48" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                                  </svg>
-                                </td>
-                                <td style="color: #4B5563; font-size: 12px; line-height: 1.5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;" valign="middle">
-                                  This security code will expire in 15 minutes. If you did not make this request, you can safely <span style="color: #E11D48; font-weight: 700;">ignore</span> this notification.
-                                </td>
-                              </tr>
-                            </table>
-                          </td>
-                        </tr>
-                      </table>
-
-                      <div style="text-align: left; padding-top: 10px;">
-                        <p style="margin: 0; color: #4B5563; font-size: 13px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">Thanks,</p>
-                        <p style="margin: 4px 0 0 0; color: #1F2937; font-size: 13px; font-weight: 700; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">Team <span style="color: #E11D48;">${storeName}</span></p>
-                      </div>
-
-                    </td>
-                  </tr>
-
-                  <!-- High-Contrast Secure Bottom Footer Rail matching look-and-feel exactly -->
-                  <tr>
-                    <td style="padding: 24px 20px; background-color: #0F172A; text-align: center;">
-                      <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                        <tr>
-                          <td align="center">
-                            <table border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto; table-layout: fixed;">
-                              <tr>
-                                <!-- Item 1 -->
-                                <td align="center" style="padding: 0 8px; color: #ffffff; font-size: 9px; font-weight: 750; text-transform: uppercase; letter-spacing: 0.5px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-                                  <span style="color: #E11D48; font-size: 11px; margin-right: 3px; vertical-align: middle;">🔒</span>
-                                  <span style="vertical-align: middle;">Secure Account</span>
-                                </td>
-                                <!-- Divider -->
-                                <td style="width: 1px; background-color: rgba(255, 255, 255, 0.15); height: 12px;"></td>
-                                <!-- Item 2 -->
-                                <td align="center" style="padding: 0 8px; color: #ffffff; font-size: 9px; font-weight: 750; text-transform: uppercase; letter-spacing: 0.5px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-                                  <span style="color: #E11D48; font-size: 11px; margin-right: 3px; vertical-align: middle;">🛡️</span>
-                                  <span style="vertical-align: middle;">Your Data is Safe</span>
-                                </td>
-                                <!-- Divider -->
-                                <td style="width: 1px; background-color: rgba(255, 255, 255, 0.15); height: 12px;"></td>
-                                <!-- Item 3 -->
-                                <td align="center" style="padding: 0 8px; color: #ffffff; font-size: 9px; font-weight: 750; text-transform: uppercase; letter-spacing: 0.5px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-                                  <span style="color: #E11D48; font-size: 11px; margin-right: 3px; vertical-align: middle;">🕒</span>
-                                  <span style="vertical-align: middle;">Expires in 15 mins</span>
-                                </td>
-                                <!-- Divider -->
-                                <td style="width: 1px; background-color: rgba(255, 255, 255, 0.15); height: 12px;"></td>
-                                <!-- Item 4 -->
-                                <td align="center" style="padding: 0 8px; color: #ffffff; font-size: 9px; font-weight: 750; text-transform: uppercase; letter-spacing: 0.5px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-                                  <span style="color: #E11D48; font-size: 11px; margin-right: 3px; vertical-align: middle;">🎧</span>
-                                  <span style="vertical-align: middle;">24/7 Support</span>
-                                </td>
-                              </tr>
-                            </table>
-                          </td>
-                        </tr>
-                        <tr>
-                          <td align="center" style="padding-top: 16px; color: #64748B; font-size: 9px; font-weight: 500; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
-                            &copy; ${new Date().getFullYear()} ${storeName}. All rights reserved under secure customer policies.
-                          </td>
-                        </tr>
-                      </table>
-                    </td>
-                  </tr>
-
-                </table>
-              </td>
-            </tr>
-          </table>
-        </body>
-        </html>
-      `;
+      const { subject: pwdSubject, html: emailHtml } = getTemplateWelcomeOtp({
+        customerName: displayName,
+        otp,
+        purpose: 'password reset',
+        baseHost
+      });
 
       try {
         await sendEmailDirect({
           to: cleanEmail,
-          subject: `${otp} is your verification code for password reset ✨`,
+          subject: pwdSubject,
           html: emailHtml,
           fromName: storeName,
           baseHost: baseHost

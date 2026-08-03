@@ -324,30 +324,6 @@ export default function Login() {
       }
 
       toast.success("Logged in successfully! Welcome back ✨");
-      
-      // Trigger Welcome Push & Email
-      try {
-        if (sUser.email) {
-          fetch('/api/send-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              to: sUser.email,
-              subject: 'Welcome Back to The Ruby Fashion! ✨',
-              html: `
-                <div style="font-family: sans-serif; padding: 20px; color: #1A2C54;">
-                  <h1 style="color: #E11D48;">Welcome Back!</h1>
-                  <p>We're so glad to see you again. Your wardrobe has been waiting for you!</p>
-                  <p>Check out our latest arrivals and find something special today.</p>
-                  <a href="${window.location.origin}" style="display: inline-block; background: #E11D48; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 20px;">Start Shopping</a>
-                </div>
-              `
-            })
-          }).catch(() => {});
-        }
-      } catch (e) {
-        console.error("Welcome notification error:", e);
-      }
 
       // Role-based routing strictly based on database profile role
       if (userRole === 'admin') {
