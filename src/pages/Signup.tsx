@@ -40,10 +40,14 @@ export default function Signup() {
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
+      const redirectUrl = window.location.origin.includes('therubyfashion.shop')
+        ? 'https://therubyfashion.shop/auth/callback'
+        : `${window.location.origin}/auth/callback`;
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin
+          redirectTo: redirectUrl
         }
       });
       if (error) throw error;

@@ -43,6 +43,7 @@ const Addresses = React.lazy(() => import('./pages/Addresses'));
 const VerifyEmail = React.lazy(() => import('./pages/VerifyEmail'));
 const VerifyPrompt = React.lazy(() => import('./pages/VerifyPrompt'));
 const VerifyCOD = React.lazy(() => import('./pages/VerifyCOD'));
+const AuthCallback = React.lazy(() => import('./pages/AuthCallback'));
 const InfoPage = React.lazy(() => import('./pages/InfoPage'));
 const FAQ = React.lazy(() => import('./pages/FAQ'));
 const PrivacyPolicy = React.lazy(() => import('./pages/PrivacyPolicy'));
@@ -551,6 +552,7 @@ function AppContent() {
             <Route path="/checkout" element={<Checkout />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/my-orders" element={<MyOrders />} />
