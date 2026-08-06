@@ -585,12 +585,12 @@ export default function Home() {
             <h3 className="text-[17px] font-bold text-[#111]">Categories</h3>
             <Link to="/shop" className="text-[13px] font-medium text-gray-600">See all</Link>
           </div>
-          <div className="flex flex-row overflow-x-auto gap-3 pb-2 scrollbar-hide no-scrollbar">
+          <div className="flex flex-row overflow-x-auto gap-4 sm:gap-5.5 pb-3 scrollbar-hide no-scrollbar px-1">
             {loading ? (
               [1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-                <div key={i} className="flex flex-col items-center space-y-1.5 flex-shrink-0 animate-pulse">
-                  <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-gray-200 shrink-0" />
-                  <div className="h-3 w-12 bg-gray-200 rounded" />
+                <div key={i} className="flex flex-col items-center space-y-2 flex-shrink-0 animate-pulse">
+                  <div className="w-20 h-20 sm:w-22 sm:h-22 md:w-24 md:h-24 rounded-full bg-gray-200 shrink-0" />
+                  <div className="h-3.5 w-14 bg-gray-200 rounded" />
                 </div>
               ))
             ) : categories.length > 0 ? (
@@ -600,9 +600,9 @@ export default function Home() {
                   <Link 
                     key={cat.id} 
                     to={`/shop?category=${encodeURIComponent(cat.name)}`}
-                    className="flex flex-col items-center space-y-1.5 flex-shrink-0 group w-16 md:w-20"
+                    className="flex flex-col items-center space-y-2 flex-shrink-0 group w-20 sm:w-22 md:w-24"
                   >
-                    <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-[#f0f0f0] flex items-center justify-center group-hover:bg-ruby/10 transition-colors overflow-hidden shrink-0 border border-gray-100">
+                    <div className="w-20 h-20 sm:w-22 sm:h-22 md:w-24 md:h-24 rounded-full bg-[#f0f0f0] flex items-center justify-center group-hover:bg-ruby/10 transition-all duration-300 overflow-hidden shrink-0 border border-gray-200/80 group-hover:shadow-md group-hover:scale-105">
                       {cat.image ? (
                         <img 
                           src={cat.image} 
@@ -610,10 +610,10 @@ export default function Home() {
                           className="w-full h-full object-cover rounded-full group-hover:scale-110 transition-transform duration-300" 
                         />
                       ) : (
-                        <Icon size={24} className="text-[#222] group-hover:text-ruby transition-colors" />
+                        <Icon size={28} className="text-[#222] group-hover:text-ruby transition-colors" />
                       )}
                     </div>
-                    <span className="text-xs font-medium text-[#333] tracking-tight text-center truncate w-full">{cat.name}</span>
+                    <span className="text-xs sm:text-[13px] font-semibold text-[#222] tracking-tight text-center truncate w-full">{cat.name}</span>
                   </Link>
                 );
               })
