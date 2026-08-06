@@ -3053,10 +3053,14 @@ export default function AdminDashboard() {
         role: u.role || 'user',
         createdAt: u.created_at
       })));
+      if (colorsRes.error) {
+        console.error('Colors fetch error in AdminDashboard:', colorsRes.error);
+      }
       const mappedColors = (colorsRes.data || []).map((c: any) => ({
         ...c,
         hex: c.hex_code || c.hex || '#000000'
       }));
+      console.log(`[AdminDashboard] Fetched ${mappedColors.length} colors from Supabase`);
       setColors(mappedColors);
       setSizes(sizesRes.data || []);
 
@@ -5027,28 +5031,49 @@ export default function AdminDashboard() {
   const handleSaveColor = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!colorForm.name || !colorForm.hex) return;
+    
+    const payload = {
+      name: colorForm.name.trim(),
+      hex_code: colorForm.hex.trim()
+    };
+
+    console.log('[Color Save] Payload:', payload, 'Editing color:', editingColor);
+
     try {
       if (editingColor) {
-        const { error } = await supabase.from('colors').update({
-          name: colorForm.name,
-          hex_code: colorForm.hex
-        }).eq('id', editingColor.id);
-        if (error) throw error;
+        console.log('[Color Save] Making Supabase update call...');
+        const { data, error } = await supabase
+          .from('colors')
+          .update(payload)
+          .eq('id', editingColor.id)
+          .select();
+
+        if (error) {
+          console.error('[Color Save] Color update error:', error);
+          throw error;
+        }
+        console.log('[Color Save] Color update success:', data);
         toast.success('Color updated');
       } else {
-        const { error } = await supabase.from('colors').insert([{
-          name: colorForm.name,
-          hex_code: colorForm.hex
-        }]);
-        if (error) throw error;
+        console.log('[Color Save] Making Supabase insert call...');
+        const { data, error } = await supabase
+          .from('colors')
+          .insert([payload])
+          .select();
+
+        if (error) {
+          console.error('[Color Save] Color insert error:', error);
+          throw error;
+        }
+        console.log('[Color Save] Color insert success:', data);
         toast.success('Color added');
       }
       setIsColorModalOpen(false);
       setEditingColor(null);
-      fetchDashboardData();
+      await fetchDashboardData();
     } catch (error: any) {
       console.error("Save color error:", error);
-      toast.error('Failed to save color');
+      toast.error('Failed to save color: ' + (error.message || error.details || String(error)));
     }
   };
 
@@ -5059,12 +5084,18 @@ export default function AdminDashboard() {
       message: 'Are you sure you want to delete this color option?',
       onConfirm: async () => {
         try {
+          console.log('[Color Delete] Deleting color ID:', id);
           const { error } = await supabase.from('colors').delete().eq('id', id);
-          if (error) throw error;
+          if (error) {
+            console.error('[Color Delete] Error deleting color:', error);
+            throw error;
+          }
+          console.log('[Color Delete] Color deleted successfully');
           toast.success('Color deleted');
-          fetchDashboardData();
-        } catch (error) {
-          toast.error('Failed to delete color');
+          await fetchDashboardData();
+        } catch (error: any) {
+          console.error("Delete color error:", error);
+          toast.error('Failed to delete color: ' + (error.message || String(error)));
         } finally {
           setGenericDeleteModal(prev => ({ ...prev, isOpen: false }));
         }

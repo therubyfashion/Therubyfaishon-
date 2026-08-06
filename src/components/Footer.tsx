@@ -2,13 +2,8 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { 
   Instagram, Facebook, Youtube, Twitter,
-  ShoppingBag, Truck, RotateCcw, 
-  Headphones, Award, ChevronDown, 
-  ShieldCheck, Lock, ArrowUp,
-  LayoutGrid, User, Headphones as HelpIcon,
-  MapPin, Package,
-  ChevronRight,
-  HandCoins
+  ChevronDown, ShieldCheck, ArrowUp,
+  MapPin, Mail, Clock, MessageCircle, HandCoins
 } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -16,30 +11,24 @@ import { cn } from '../lib/utils';
 
 interface AccordionItemProps {
   title: string;
-  icon: React.ReactNode;
   children: React.ReactNode;
 }
 
-function FooterAccordion({ title, icon, children }: AccordionItemProps) {
+function FooterAccordion({ title, children }: AccordionItemProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div className="border-b border-white/5 last:border-none">
+    <div className="border-b border-[#222] last:border-none">
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between py-5 px-4 group hover:bg-white/[0.02] transition-all"
+        className="w-full flex items-center justify-between py-4 px-1 text-left group"
       >
-        <div className="flex items-center gap-4">
-          <div className="text-gray-400 group-hover:text-ruby transition-colors">
-            {icon}
-          </div>
-          <span className="text-[11px] font-bold uppercase tracking-[0.25em] text-white/90 group-hover:text-white transition-colors">
-            {title}
-          </span>
-        </div>
+        <span className="text-xs font-bold uppercase tracking-[0.2em] text-white group-hover:text-[#A11B35] transition-colors">
+          {title}
+        </span>
         <ChevronDown 
           size={16} 
-          className={cn("text-gray-600 transition-transform duration-500", isOpen && "rotate-180 text-ruby")} 
+          className={cn("text-gray-400 transition-transform duration-300", isOpen && "rotate-180 text-[#A11B35]")} 
         />
       </button>
       <AnimatePresence>
@@ -50,7 +39,7 @@ function FooterAccordion({ title, icon, children }: AccordionItemProps) {
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
-            <div className="px-14 pb-6 space-y-3">
+            <div className="px-1 pb-5 pt-1 space-y-2">
               {children}
             </div>
           </motion.div>
@@ -69,177 +58,268 @@ export default function Footer() {
   };
 
   const socialLinks = [
-    { id: 'instagram', icon: Instagram, url: settings?.footerSocials?.instagram, color: 'hover:bg-[#E1306C]' },
-    { id: 'facebook', icon: Facebook, url: settings?.footerSocials?.facebook, color: 'hover:bg-[#1877F2]' },
-    { id: 'youtube', icon: Youtube, url: settings?.footerSocials?.youtube, color: 'hover:bg-[#FF0000]' },
-    { id: 'twitter', icon: Twitter, url: settings?.footerSocials?.x || settings?.footerSocials?.twitter, color: 'hover:bg-sky-500' }
-  ].filter(link => link.url);
+    { 
+      id: 'instagram', 
+      name: 'Instagram',
+      icon: Instagram, 
+      url: settings?.footerSocials?.instagram || '#'
+    },
+    { 
+      id: 'facebook', 
+      name: 'Facebook',
+      icon: Facebook, 
+      url: settings?.footerSocials?.facebook || '#'
+    },
+    { 
+      id: 'whatsapp', 
+      name: 'WhatsApp',
+      icon: MessageCircle, 
+      url: '#'
+    },
+  ];
+
+  if (settings?.footerSocials?.youtube) {
+    socialLinks.push({ id: 'youtube', name: 'YouTube', icon: Youtube, url: settings.footerSocials.youtube });
+  }
+  if (settings?.footerSocials?.x || settings?.footerSocials?.twitter) {
+    socialLinks.push({ id: 'twitter', name: 'Twitter', icon: Twitter, url: settings.footerSocials.x || settings.footerSocials.twitter });
+  }
 
   return (
-    <footer className="bg-[#111214] text-white pt-20 pb-16 relative overflow-hidden border-t border-white/5 font-sans">
-      {/* Background elements */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-px bg-gradient-to-r from-transparent via-ruby/30 to-transparent" />
-      <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-ruby/5 rounded-full blur-[150px] -translate-y-1/2 pointer-events-none" />
-
-      <div className="max-w-4xl mx-auto px-6 relative z-10 flex flex-col items-center">
-        {/* LOGO SECTION */}
-        <div className="text-center space-y-6 mb-16">
-          <div className="inline-flex flex-col items-center group cursor-pointer" onClick={() => navigate('/')}>
-             <div className="w-14 h-14 border border-ruby/30 rounded-full flex items-center justify-center mb-1 group-hover:scale-105 transition-transform duration-500">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" className="text-ruby drop-shadow-[0_0_8px_rgba(224,30,90,0.4)]">
-                  <path d="M6 3H12L15 3L22 9L12 21L2 9L6 3Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                  <path d="M12 21L8 9L12 3L16 9L12 21Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                  <path d="M2 9H22" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-             </div>
-             <h3 className="text-4xl font-serif font-bold text-white tracking-tight">The <span className="text-white">Ruby</span></h3>
-             <div className="flex flex-col items-center mt-3">
-                <span className="text-[10px] font-black uppercase tracking-[0.4em] text-gray-400">Elevate Your Style</span>
-                <div className="flex items-center gap-4 w-full mt-4">
-                  <div className="h-px w-20 bg-gradient-to-r from-transparent to-white/20" />
-                  <div className="w-1.5 h-1.5 bg-ruby rotate-45 animate-pulse" />
-                  <div className="h-px w-20 bg-gradient-to-l from-transparent to-white/20" />
-                </div>
-             </div>
-          </div>
-        </div>
-
-        {/* HIGHLIGHTS GRID - Separate boxes as requested */}
-        <div className="grid grid-cols-2 gap-4 w-full mb-12">
-          {[
-            { icon: <Truck size={24} />, title: "Free Shipping", desc: "On all prepaid orders" },
-            { icon: <Award size={24} />, title: "Premium Quality", desc: "Finest fabrics & stitching" },
-            { icon: <RotateCcw size={24} />, title: "Easy Returns", desc: "7 days easy return policy" },
-            { icon: <HelpIcon size={24} />, title: "24/7 Support", desc: "We're here to help you" },
-          ].map((item, idx) => (
-            <div key={idx} className="bg-[#0A0B0D]/50 border border-white/5 p-6 flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-4 sm:gap-6 group hover:bg-white/[0.04] transition-all hover:border-ruby/30 rounded-[1.5rem] shadow-lg">
-              <div className="text-ruby transition-transform duration-500 group-hover:scale-110 flex-shrink-0">
-                {item.icon}
-              </div>
-              <div className="space-y-1">
-                <h4 className="text-[11px] sm:text-[12px] font-bold uppercase tracking-widest text-white/90">{item.title}</h4>
-                <p className="text-[9px] sm:text-[10px] text-gray-500 font-bold uppercase tracking-widest leading-tight">{item.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* ACCORDION NAVIGATION */}
-        <div className="w-full bg-[#0A0B0D]/50 border border-white/5 rounded-[2rem] overflow-hidden mb-16 shadow-xl">
-          <FooterAccordion title="Shop" icon={<ShoppingBag size={18} />}>
-            {['New Arrivals', 'Best Sellers', 'Western Wear', 'Sale'].map(item => (
-              <Link key={item} to="/shop" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">{item}</Link>
-            ))}
-          </FooterAccordion>
-          <FooterAccordion title="Categories" icon={<LayoutGrid size={18} />}>
-            {['Dresses', 'Tops', 'Bottoms', 'Accessories'].map(item => (
-              <Link key={item} to="/shop" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">{item}</Link>
-            ))}
-          </FooterAccordion>
-          <FooterAccordion title="About Us" icon={<User size={18} />}>
-            <Link to="/about" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Our Story</Link>
-            <Link to="/privacy-policy" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Privacy Policy</Link>
-            <Link to="/terms-of-service" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Terms of Service</Link>
-            <Link to="/contact" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Contact Us</Link>
-          </FooterAccordion>
-          <FooterAccordion title="Help & Support" icon={<HelpIcon size={18} />}>
-            <Link to="/faq" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">FAQ</Link>
-            <Link to="/shipping-policy" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Shipping Policy</Link>
-            <Link to="/return-policy" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Return & Refund Policy</Link>
-            <Link to="/track" className="block text-[11px] text-gray-500 hover:text-ruby py-2 uppercase tracking-[0.2em] font-bold transition-colors">Track Order</Link>
-          </FooterAccordion>
-          <FooterAccordion title="Store Locator" icon={<MapPin size={18} />}>
-            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-[0.2em] leading-relaxed py-2">
-              Find our boutique locations across major cities.
-            </p>
-          </FooterAccordion>
-          <FooterAccordion title="Track Order" icon={<Package size={18} />}>
-            <Link to="/track" className="inline-flex items-center gap-3 text-[11px] text-ruby font-bold uppercase tracking-[0.2em] py-2">
-              Check Status <ChevronRight size={12} />
+    <footer className="bg-[#0D0D0D] text-white pt-12 pb-10 border-t border-[#222] font-sans relative">
+      <div className="max-w-7xl mx-auto px-6 md:px-10">
+        
+        {/* 1. TOP SECTION - BRAND & STORY */}
+        <div className="pb-10 border-b border-[#222] max-w-3xl">
+          <div className="space-y-3">
+            <Link to="/" className="inline-block group">
+              <h2 className="text-2xl md:text-3xl font-serif font-bold text-white tracking-tight group-hover:text-[#A11B35] transition-colors">
+                The Ruby Fashion
+              </h2>
             </Link>
-          </FooterAccordion>
-        </div>
-
-        {/* PAYMENTS SECTION - UPI & COD ONLY */}
-        <div className="text-center space-y-8 mb-16 w-full">
-          <div className="flex items-center gap-6">
-            <div className="h-px flex-1 bg-gradient-to-r from-transparent to-white/10" />
-            <span className="text-[10px] font-black uppercase tracking-[0.4em] text-gray-500">WE ACCEPT</span>
-            <div className="h-px flex-1 bg-gradient-to-l from-transparent to-white/10" />
-          </div>
-          <div className="flex justify-center gap-6">
-             {/* UPI LOGO - Using a more reliable SVG URL */}
-             <div className="bg-white px-6 py-3 rounded-xl flex items-center justify-center min-w-[120px] h-14 transform hover:scale-105 transition-transform shadow-lg shadow-black/20 group">
-               <img 
-                 src="https://www.vectorlogo.zone/logos/upi/upi-ar21.svg" 
-                 alt="UPI" 
-                 className="h-8 w-auto object-contain" 
-               />
-             </div>
-             {/* COD BOX - Added Icon for better look */}
-             <div className="bg-white px-6 py-3 rounded-xl flex items-center justify-center gap-2 min-w-[140px] h-14 transform hover:scale-105 transition-transform shadow-lg shadow-black/20 group">
-               <HandCoins size={20} className="text-ruby" />
-               <div className="flex flex-col items-start">
-                 <span className="text-[10px] font-black text-black leading-none tracking-tighter">CASH ON</span>
-                 <span className="text-[10px] font-black text-ruby leading-none tracking-tighter uppercase">Delivery</span>
-               </div>
-             </div>
-          </div>
-        </div>
-
-        {/* TRUST BADGES - Single line layout */}
-        <div className="flex flex-col sm:flex-row gap-4 w-full mb-16">
-          <div className="flex-1 flex items-center justify-center gap-5 bg-white/[0.02] border border-white/5 p-6 rounded-[1.5rem] hover:border-ruby/20 transition-colors">
-             <ShieldCheck size={24} className="text-ruby/80 drop-shadow-[0_0_8px_rgba(224,30,90,0.3)]" />
-             <div className="text-left">
-               <p className="text-[11px] font-bold text-white/90 uppercase tracking-widest">Secure Payments</p>
-               <p className="text-[9px] text-gray-500 uppercase font-bold tracking-widest leading-none">100% secure & trusted</p>
-             </div>
-          </div>
-          <div className="flex-1 flex items-center justify-center gap-5 bg-white/[0.02] border border-white/5 p-6 rounded-[1.5rem] hover:border-ruby/20 transition-colors">
-             <Lock size={24} className="text-ruby/80 drop-shadow-[0_0_8px_rgba(224,30,90,0.3)]" />
-             <div className="text-left">
-               <p className="text-[11px] font-bold text-white/90 uppercase tracking-widest">Privacy Protected</p>
-               <p className="text-[9px] text-gray-500 uppercase font-bold tracking-widest leading-none">Your data is safe with us</p>
-             </div>
-          </div>
-        </div>
-
-        {/* SOCIALS & CREDITS - Circles from image */}
-        <div className="flex flex-col items-center gap-10 w-full pt-10 border-t border-white/5">
-          {socialLinks.length > 0 && (
-            <div className="flex items-center gap-5">
-              {socialLinks.map((social) => (
-                <a 
-                  key={social.id} 
-                  href={social.url} 
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={cn("w-12 h-12 bg-white/5 border border-white/5 rounded-full flex items-center justify-center text-gray-400 hover:text-white transition-all transform hover:-translate-y-2 shadow-xl", social.color)}
-                >
-                  <social.icon size={20} />
-                </a>
-              ))}
-            </div>
-          )}
-
-          <div className="text-center pb-12">
-            <p className="text-[11px] font-bold text-gray-600 uppercase tracking-[0.3em]">
-              © 2026 The Ruby Fashion. All rights reserved.
+            <p className="text-xs sm:text-sm text-gray-300 font-normal leading-relaxed">
+              The Ruby Fashion was born out of a deep passion for preserving timeless Indian craftsmanship while embracing contemporary elegance. We blend handcrafted textiles, intricate embroideries, and flattering modern silhouettes to empower women on every special occasion. From effortless festive kurtis to magnificent royal lehengas, each creation is crafted with rich fabrics, royal hues, and exceptional craftsmanship. Welcome to a legacy of grace, heritage, and timeless beauty.
             </p>
           </div>
         </div>
 
-        {/* BACK TO TOP */}
-        <motion.button 
-          whileHover={{ scale: 1.1, translateY: -5 }}
-          whileTap={{ scale: 0.9 }}
-          onClick={scrollToTop}
-          className="w-12 h-12 bg-[#141517] border border-white/10 rounded-full flex items-center justify-center text-gray-400 hover:text-ruby hover:border-ruby transition-all shadow-2xl absolute -bottom-4"
-        >
-          <ArrowUp size={20} />
-        </motion.button>
+        {/* 2. MIDDLE SECTION - 4 COLUMN GRID (DESKTOP) / ACCORDION (MOBILE) */}
+        
+        {/* Desktop Grid */}
+        <div className="hidden md:grid md:grid-cols-4 gap-8 py-12 border-b border-[#222]">
+          {/* Column 1: Quick Links */}
+          <div className="space-y-4">
+            <h4 className="text-xs font-bold uppercase tracking-[0.2em] text-white">Quick Links</h4>
+            <ul className="space-y-2.5 text-xs text-gray-400">
+              <li>
+                <Link to="/" className="hover:text-[#A11B35] transition-colors">Home</Link>
+              </li>
+              <li>
+                <Link to="/shop" className="hover:text-[#A11B35] transition-colors">Shop</Link>
+              </li>
+              <li>
+                <Link to="/about" className="hover:text-[#A11B35] transition-colors">About Us</Link>
+              </li>
+              <li>
+                <Link to="/contact" className="hover:text-[#A11B35] transition-colors">Contact Us</Link>
+              </li>
+              <li>
+                <Link to="/track" className="hover:text-[#A11B35] transition-colors">Track Order</Link>
+              </li>
+            </ul>
+          </div>
+
+          {/* Column 2: Policies */}
+          <div className="space-y-4">
+            <h4 className="text-xs font-bold uppercase tracking-[0.2em] text-white">Policies</h4>
+            <ul className="space-y-2.5 text-xs text-gray-400">
+              <li>
+                <Link to="/faq" className="hover:text-[#A11B35] transition-colors">FAQs & Help</Link>
+              </li>
+              <li>
+                <Link to="/privacy-policy" className="hover:text-[#A11B35] transition-colors">Privacy Policy</Link>
+              </li>
+              <li>
+                <Link to="/terms-of-service" className="hover:text-[#A11B35] transition-colors">Terms & Conditions</Link>
+              </li>
+              <li>
+                <Link to="/return-policy" className="hover:text-[#A11B35] transition-colors">Return & Refund Policy</Link>
+              </li>
+              <li>
+                <Link to="/shipping-policy" className="hover:text-[#A11B35] transition-colors">Shipping Policy</Link>
+              </li>
+            </ul>
+          </div>
+
+          {/* Column 3: Categories */}
+          <div className="space-y-4">
+            <h4 className="text-xs font-bold uppercase tracking-[0.2em] text-white">Categories</h4>
+            <ul className="space-y-2.5 text-xs text-gray-400">
+              {[
+                { name: 'Kurti', cat: 'Kurti' },
+                { name: 'Saree', cat: 'Saree' },
+                { name: 'Lehenga', cat: 'Lehenga' },
+                { name: 'Suit Sets', cat: 'Suit Sets' },
+                { name: 'Western Wear', cat: 'Western Wear' }
+              ].map(item => (
+                <li key={item.name}>
+                  <Link to={`/shop?category=${encodeURIComponent(item.cat)}`} className="hover:text-[#A11B35] transition-colors">
+                    {item.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Column 4: Contact & Support */}
+          <div className="space-y-4">
+            <h4 className="text-xs font-bold uppercase tracking-[0.2em] text-white">Contact & Support</h4>
+            <div className="space-y-3 text-xs text-gray-400">
+              <a href="mailto:support@therubyfashion.shop" className="flex items-center gap-2 hover:text-[#A11B35] transition-colors">
+                <Mail size={14} className="text-[#A11B35] shrink-0" />
+                <span>support@therubyfashion.shop</span>
+              </a>
+              <div className="flex items-center gap-2">
+                <Clock size={14} className="text-[#A11B35] shrink-0" />
+                <span>Mon-Sat: 10AM - 7PM</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <MapPin size={14} className="text-[#A11B35] shrink-0" />
+                <span>Mumbai, India</span>
+              </div>
+
+              {/* Social Media Icons */}
+              <div className="pt-2 flex items-center gap-3">
+                {socialLinks.map(social => (
+                  <a
+                    key={social.id}
+                    href={social.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={social.name}
+                    className="w-9 h-9 bg-[#181818] border border-[#2a2a2a] rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-[#A11B35] hover:border-[#A11B35] transition-all duration-300"
+                  >
+                    <social.icon size={16} />
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile Accordion */}
+        <div className="md:hidden py-6 border-b border-[#222]">
+          <FooterAccordion title="Quick Links">
+            <ul className="space-y-2 text-xs text-gray-400">
+              <li><Link to="/" className="block py-1 hover:text-[#A11B35]">Home</Link></li>
+              <li><Link to="/shop" className="block py-1 hover:text-[#A11B35]">Shop</Link></li>
+              <li><Link to="/about" className="block py-1 hover:text-[#A11B35]">About Us</Link></li>
+              <li><Link to="/contact" className="block py-1 hover:text-[#A11B35]">Contact Us</Link></li>
+              <li><Link to="/track" className="block py-1 hover:text-[#A11B35]">Track Order</Link></li>
+            </ul>
+          </FooterAccordion>
+
+          <FooterAccordion title="Policies">
+            <ul className="space-y-2 text-xs text-gray-400">
+              <li><Link to="/faq" className="block py-1 hover:text-[#A11B35]">FAQs & Help</Link></li>
+              <li><Link to="/privacy-policy" className="block py-1 hover:text-[#A11B35]">Privacy Policy</Link></li>
+              <li><Link to="/terms-of-service" className="block py-1 hover:text-[#A11B35]">Terms & Conditions</Link></li>
+              <li><Link to="/return-policy" className="block py-1 hover:text-[#A11B35]">Return & Refund Policy</Link></li>
+              <li><Link to="/shipping-policy" className="block py-1 hover:text-[#A11B35]">Shipping Policy</Link></li>
+            </ul>
+          </FooterAccordion>
+
+          <FooterAccordion title="Categories">
+            <ul className="space-y-2 text-xs text-gray-400">
+              {['Kurti', 'Saree', 'Lehenga', 'Suit Sets', 'Western Wear'].map(cat => (
+                <li key={cat}>
+                  <Link to={`/shop?category=${encodeURIComponent(cat)}`} className="block py-1 hover:text-[#A11B35]">{cat}</Link>
+                </li>
+              ))}
+            </ul>
+          </FooterAccordion>
+
+          <FooterAccordion title="Contact & Support">
+            <div className="space-y-3 text-xs text-gray-400 pt-1">
+              <p className="flex items-center gap-2">
+                <Mail size={14} className="text-[#A11B35]" /> support@therubyfashion.shop
+              </p>
+              <p className="flex items-center gap-2">
+                <Clock size={14} className="text-[#A11B35]" /> Mon-Sat: 10AM - 7PM
+              </p>
+              <p className="flex items-center gap-2">
+                <MapPin size={14} className="text-[#A11B35]" /> Mumbai, India
+              </p>
+              <div className="pt-2 flex items-center gap-3">
+                {socialLinks.map(social => (
+                  <a
+                    key={social.id}
+                    href={social.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={social.name}
+                    className="w-9 h-9 bg-[#181818] border border-[#2a2a2a] rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-[#A11B35] transition-all"
+                  >
+                    <social.icon size={16} />
+                  </a>
+                ))}
+              </div>
+            </div>
+          </FooterAccordion>
+        </div>
+
+        {/* 3. PAYMENT METHODS SECTION */}
+        <div className="py-8 border-b border-[#222] flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
+            <span className="text-xs font-bold uppercase tracking-[0.2em] text-gray-400 shrink-0">
+              We Accept
+            </span>
+            <div className="flex items-center gap-3 justify-center w-full sm:w-auto">
+              {/* UPI */}
+              <div className="bg-white border border-white px-3 py-1.5 rounded-lg flex items-center justify-center h-10 w-36 shadow-xs hover:scale-[1.02] transition-transform cursor-pointer shrink-0">
+                <img 
+                  src="https://www.vectorlogo.zone/logos/upi/upi-ar21.svg" 
+                  alt="UPI" 
+                  className="h-5 w-auto object-contain" 
+                />
+              </div>
+
+              {/* Cash On Delivery */}
+              <div className="bg-[#181818] border border-[#2a2a2a] px-3 py-1.5 rounded-lg flex items-center justify-center gap-1.5 h-10 w-36 hover:border-[#A11B35]/50 transition-colors cursor-pointer shrink-0">
+                <HandCoins size={15} className="text-[#A11B35] shrink-0" />
+                <span className="text-[11px] font-bold text-white uppercase tracking-wider whitespace-nowrap">Cash On Delivery</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Security Badge */}
+          <div className="inline-flex items-center gap-2.5 bg-[#181818] border border-[#2a2a2a] px-4 py-2.5 rounded-full text-xs text-gray-300 font-medium">
+            <ShieldCheck size={16} className="text-[#A11B35]" />
+            <span>100% Secure Payments | SSL Encrypted</span>
+          </div>
+        </div>
+
+        {/* 4. BOTTOM BAR */}
+        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-500">
+          <p>© 2026 The Ruby Fashion. All rights reserved.</p>
+          <p className="flex items-center gap-1 font-medium">
+            Made with <span className="text-[#A11B35]">❤️</span> in India 🇮🇳
+          </p>
+        </div>
+
       </div>
+
+      {/* Back To Top Floating Button */}
+      <motion.button 
+        whileHover={{ scale: 1.1, y: -3 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={scrollToTop}
+        aria-label="Scroll to top"
+        className="fixed bottom-6 right-6 w-11 h-11 bg-[#181818] border border-[#333] hover:border-[#A11B35] rounded-full flex items-center justify-center text-gray-300 hover:text-[#A11B35] transition-all shadow-xl z-30 cursor-pointer"
+      >
+        <ArrowUp size={18} />
+      </motion.button>
     </footer>
   );
 }
+

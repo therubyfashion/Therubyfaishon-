@@ -10,7 +10,7 @@ import { trackPixelEvent } from '../lib/pixel';
 import { toast } from 'sonner';
 import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
-import { ShoppingBag, Heart, Share2, ChevronRight, Truck, ShieldCheck, RefreshCw, X, Ruler, Star, MessageSquare, ThumbsUp, User, Minus, Plus, Send, ChevronDown, Maximize2, Camera, Image as ImageIcon } from 'lucide-react';
+import { ShoppingBag, Heart, Share2, ChevronRight, Truck, ShieldCheck, RefreshCw, X, Ruler, Star, MessageSquare, ThumbsUp, User, Minus, Plus, Send, ChevronDown, Maximize2, Camera, Image as ImageIcon, Sparkles, Gift } from 'lucide-react';
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import { Navigation, Pagination, Zoom, Thumbs } from 'swiper/modules';
@@ -439,7 +439,7 @@ export default function ProductDetail() {
                 .from('products')
                 .select('*')
                 .neq('id', id)
-                .limit(10);
+                .limit(12);
 
               if (relatedData) {
                 const currentCatIds = p.category_ids || [];
@@ -447,7 +447,8 @@ export default function ProductDetail() {
                   const rCatIds = r.category_ids || [];
                   return rCatIds.some((cid: string) => currentCatIds.includes(cid));
                 });
-                const finalRelated = matched.length > 0 ? matched : relatedData;
+                const otherProducts = relatedData.filter((r: any) => !matched.some((m: any) => m.id === r.id));
+                const finalRelated = [...matched, ...otherProducts];
 
                 related = finalRelated.map((rp: any) => ({
                   id: rp.id,
@@ -1029,7 +1030,7 @@ export default function ProductDetail() {
           </button>
         </div>
 
-        {showReviewForm && (
+        {showReviewForm && sortedReviews.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1042,9 +1043,31 @@ export default function ProductDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-4">
             {sortedReviews.length === 0 ? (
-              <div className="bg-white border border-dashed border-gray-200 rounded-[14px] p-12 text-center">
-                <MessageSquare size={40} className="mx-auto text-gray-200 mb-4" />
-                <p className="text-gray-400 font-medium">No reviews yet. Be the first to share your thoughts!</p>
+              <div className="bg-gradient-to-br from-[#1A2C54]/5 via-white to-ruby/5 border border-ruby/15 rounded-[2rem] p-6 md:p-10 space-y-6 shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-ruby/5 rounded-full -mr-16 -mt-16 pointer-events-none" />
+                
+                <div className="text-center space-y-3 relative z-10">
+                  <div className="w-14 h-14 bg-ruby/10 text-ruby rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+                    <Sparkles size={28} className="text-ruby animate-pulse" />
+                  </div>
+                  <h3 className="text-xl md:text-2xl font-serif font-bold text-[#1A2C54]">
+                    ✨ Be the first to share your experience!
+                  </h3>
+                  <p className="text-xs md:text-sm text-gray-500 max-w-md mx-auto">
+                    Help other fashion lovers make great choices. Share your fit, feel, and style thoughts on this piece!
+                  </p>
+
+                  {/* Incentive Badge */}
+                  <div className="inline-flex items-center gap-2 bg-gradient-to-r from-amber-500/10 via-amber-400/15 to-ruby/10 border border-amber-500/30 text-[#1A2C54] px-5 py-2.5 rounded-full text-xs font-bold shadow-xs">
+                    <Gift size={16} className="text-amber-600" />
+                    <span>Early reviewers get 50 loyalty points bonus!</span>
+                  </div>
+                </div>
+
+                {/* Star rating input already visible */}
+                <div className="pt-2">
+                  <ReviewForm productId={product.id} onReviewAdded={() => { fetchReviews(); setShowReviewForm(false); }} />
+                </div>
               </div>
             ) : (
               sortedReviews.map((review) => (
@@ -1103,22 +1126,23 @@ export default function ProductDetail() {
         </div>
       </div>
 
-      {/* Related Products */}
+      {/* Related Products - You May Also Like */}
       {relatedProducts.length > 0 && (
-        <div className="max-w-7xl mx-auto px-[5%] pb-12 pt-4">
-          <div className="flex items-center justify-between mb-6">
-            <div className="space-y-1">
-              <h2 className="text-[24px] font-serif font-bold text-[#1A2C54]">You May Also Like</h2>
-              <p className="text-gray-400 text-xs font-medium">Handpicked recommendations for you.</p>
+        <div className="max-w-7xl mx-auto px-[5%] pb-16 pt-10 border-t border-gray-100">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-[2px] text-ruby block mb-1">Handpicked Recommendations</span>
+              <h2 className="text-2xl md:text-3xl font-serif font-bold text-[#1A2C54]">You May Also Like</h2>
             </div>
             <button 
               onClick={() => navigate('/shop')}
-              className="text-xs font-bold uppercase tracking-widest text-ruby hover:underline"
+              className="group inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-ruby hover:text-[#1A2C54] transition-colors"
             >
-              View All
+              <span>View Collection</span>
+              <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
             </button>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-10">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
             {relatedProducts.map(p => (
               <ProductCard key={p.id} product={p} />
             ))}

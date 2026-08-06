@@ -5,7 +5,7 @@ import {
   ShoppingBag, ArrowRight, Star, ShieldCheck, Truck, RotateCcw, 
   Search, Bell, Heart, User, Filter, ChevronRight, Package,
   Shirt, Smartphone, Watch, Laptop, ShoppingCart, Gem, Utensils, ToyBrick,
-  Plus, ThumbsUp, ThumbsDown, X, Camera, Image as ImageIcon
+  Plus, ThumbsUp, ThumbsDown, X, Camera, Image as ImageIcon, ChevronDown
 } from 'lucide-react';
 import { supabase } from '../supabase';
 import { Product, Category } from '../types';
@@ -59,7 +59,31 @@ export default function Home() {
   const [newReview, setNewReview] = useState({ rating: 5, text: '', tag: 'Fabric', image: '' as string | null });
   const [reviews, setReviews] = useState<any[]>([]);
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const navigate = useNavigate();
+
+  const homeFaqs = [
+    {
+      question: "Delivery me kitne din lagte hain aur order track kaise karein?",
+      answer: "Standard delivery poore India me 3 se 5 business days (metro cities) aur 5 se 7 days baki locations ke liye lagte hain. Order dispatch hone ke baad aapko WhatsApp & SMS par tracking link milti hai. Aap hamari website par 'Track Order' option se bhi live status check kar sakte hain."
+    },
+    {
+      question: "Kya Cash on Delivery (COD) available hai?",
+      answer: "Haan! Cash on Delivery (COD) aur Instant UPI payment poore India me 25,000+ pin codes par available hai. Delivery ke waqt aap cash ya UPI QR scan karke easily pay kar sakte hain."
+    },
+    {
+      question: "Agar size fit nahi hua toh Return ya Exchange kaise karein?",
+      answer: "Hum 7 days ka easy Return & Size Exchange policy dete hain. Agar size me koi issue ho toh aap 'My Orders' section se ya hamari support team se contact karke free doorstep reverse pickup arrange karwa sakte hain."
+    },
+    {
+      question: "Fabric aur Embroidery ki quality kaisi hoti hai?",
+      answer: "The Ruby Fashion par har product Premium Pure Cotton, Georgette, Chanderi & Silk fabric se banta hai. Inme high-density durable stitching aur genuine embroidery hoti hai jo washing ke baad bhi vibrant rehti hai."
+    },
+    {
+      question: "Saree, Kurti aur Lehenga ke liye correct size kaise chunein?",
+      answer: "Har product page par ek detailed Size Guide chart diya gaya hai jisme Bust, Waist, Hip aur Length in inches mention hain. Agar aap do sizes ke beech me hain, toh comfortable fit ke liye ek size bada chunein."
+    }
+  ];
 
   // Load initial cached values to avoid showing skeleton loading and render instantly
   useEffect(() => {
@@ -652,6 +676,62 @@ export default function Home() {
               <p className="text-gray-400 text-sm italic">No popular products found in this category.</p>
             </div>
           )}
+        </div>
+
+        {/* Frequently Asked Questions Section */}
+        <div className="space-y-3.5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-[17px] font-bold text-[#111]">Frequently Asked Questions</h3>
+              <p className="text-[11px] text-gray-500 font-medium">Quick answers regarding delivery, COD, returns & product quality</p>
+            </div>
+            <Link 
+              to="/faq" 
+              className="text-[12px] font-bold text-[#A11B35] hover:underline flex items-center gap-1 shrink-0"
+            >
+              <span>View All</span>
+              <ChevronRight size={14} />
+            </Link>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-100 p-4 sm:p-5 shadow-sm space-y-2.5">
+            {homeFaqs.map((faq, index) => {
+              const isOpen = openFaqIndex === index;
+              return (
+                <div 
+                  key={index} 
+                  className="border-b border-gray-100 last:border-none pb-2.5 last:pb-0"
+                >
+                  <button
+                    onClick={() => setOpenFaqIndex(isOpen ? null : index)}
+                    className="w-full flex items-center justify-between py-2 text-left group gap-3 cursor-pointer"
+                  >
+                    <span className="text-[13px] sm:text-sm font-bold text-[#111] group-hover:text-[#A11B35] transition-colors leading-snug">
+                      {faq.question}
+                    </span>
+                    <div className={`p-1 rounded-full transition-transform duration-300 shrink-0 ${isOpen ? 'bg-[#A11B35]/10 text-[#A11B35] rotate-180' : 'bg-gray-100 text-gray-400'}`}>
+                      <ChevronDown size={16} />
+                    </div>
+                  </button>
+                  <AnimatePresence>
+                    {isOpen && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.25, ease: "easeInOut" }}
+                        className="overflow-hidden"
+                      >
+                        <p className="text-[12px] sm:text-[13px] text-gray-600 leading-relaxed pt-1 pb-2 pl-0.5">
+                          {faq.answer}
+                        </p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* Testimonials */}
