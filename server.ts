@@ -1123,6 +1123,8 @@ export const NotificationService = {
         android_sound: "shopify",
         ios_sound: "shopify.wav",
         sound: "shopify.wav",
+        chrome_web_icon: "https://therubyfashion.shop/icons/icon-192x192.png",
+        firefox_icon: "https://therubyfashion.shop/icons/icon-192x192.png",
       };
 
       if (imageUrl) {
@@ -4060,7 +4062,19 @@ async function startServer() {
 
   // Send notification to admins (for new orders)
   app.post("/api/send-admin-push", async (req, res) => {
-    const { title, body, imageUrl, url, userId } = req.body;
+    const { 
+      title, 
+      body, 
+      imageUrl, 
+      url, 
+      userId,
+      orderNumber,
+      total,
+      paymentMethod,
+      customerName,
+      city,
+      itemsSummary
+    } = req.body;
     
     try {
       console.log("OneSignal: Constructing push to admins...");
@@ -4098,17 +4112,34 @@ async function startServer() {
         });
       }
 
+      const cleanOrderNum = orderNumber ? String(orderNumber).replace(/^#/, '') : '';
+      const headingText = cleanOrderNum 
+        ? ("🛍️ New Order! #" + cleanOrderNum) 
+        : (title || "🛍️ New Order Received!");
+
+      const bodyText = (total !== undefined && paymentMethod && customerName && city && itemsSummary)
+        ? `₹${total} • ${String(paymentMethod).toUpperCase()} • ${customerName} • ${city}\n${itemsSummary} • Confirm to process`
+        : (body || "New order received!");
+
       const notification: any = {
         contents: {
-          en: body || "New order received!",
+          en: bodyText,
         },
         headings: {
-          en: title || "New Order",
+          en: headingText,
         },
-        url: url || '/',
+        url: url || "https://therubyfashion.shop/admin?tab=orders",
+        android_group: "group_NewOrders",
+        android_group_message: { en: "{{notification_count}} new orders" },
+        buttons: [
+          { id: "view_order", text: "View Order" },
+          { id: "mark_processing", text: "Mark Processing" }
+        ],
         android_sound: "shopify",
         ios_sound: "shopify.wav",
         sound: "shopify.wav",
+        chrome_web_icon: "https://therubyfashion.shop/icons/icon-192x192.png",
+        firefox_icon: "https://therubyfashion.shop/icons/icon-192x192.png",
         include_subscription_ids: adminPlayerIds
       };
 

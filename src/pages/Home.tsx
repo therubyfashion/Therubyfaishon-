@@ -164,17 +164,20 @@ export default function Home() {
         cacheAndSave('banners', activeBanners);
         setBannersLoaded(true);
 
-        // 3. Fetch Products
-        const { data: prodData, error: prodErr } = await supabase
-          .from('products')
-          .select('*')
-          .order('created_at', { ascending: false });
+        // 3. Fetch Products - Trending and Popular sections with exact filters
+        const [trendingRes, popularRes] = await Promise.all([
+          supabase.from('products').select('*').eq('is_trending', true).order('created_at', { ascending: false }),
+          supabase.from('products').select('*').eq('is_popular', true).order('created_at', { ascending: false })
+        ]);
 
-        if (prodErr) {
-          console.warn("Home products fetch error:", prodErr);
+        if (trendingRes.error) {
+          console.warn("Home trending products fetch error:", trendingRes.error);
+        }
+        if (popularRes.error) {
+          console.warn("Home popular products fetch error:", popularRes.error);
         }
 
-        const allProds: Product[] = (prodData || []).map(p => ({
+        const mapProduct = (p: any): Product => ({
           id: p.id,
           name: p.name || '',
           description: p.description || '',
@@ -197,24 +200,21 @@ export default function Home() {
           variants: p.variants || [],
           viewCount: p.view_count ?? 0,
           wishlistCount: p.wishlist_count ?? 0,
-        }));
+        });
 
-        console.log(`[Product Diagnostic - Query Result Count] Total products fetched for Home: ${allProds.length}`);
+        const trendingData = (trendingRes.data || []).map(mapProduct);
+        const popularData = (popularRes.data || []).map(mapProduct);
+
+        console.log(`[Product Diagnostic - Query Result Count] Trending: ${trendingData.length}, Popular: ${popularData.length}`);
 
         // Run health checks & log diagnostics
-        allProds.forEach(p => {
+        [...trendingData, ...popularData].forEach(p => {
           const health = checkProductHealth(p);
           if (!health.isValid) {
             console.warn(`[Product Diagnostic - Health Check Warning] Product "${p.name}" (${p.id}) has health issues:`, health.errors, health.warnings);
           }
           logProductDiagnostics('Rendered', p);
         });
-
-        const trending = allProds.filter(p => p.isTrending);
-        const popular = allProds.filter(p => p.isPopular);
-
-        const trendingData = trending.length > 0 ? trending : (allProds.length > 0 ? allProds.slice(0, 8) : []);
-        const popularData = popular.length > 0 ? popular : (allProds.length > 0 ? allProds.slice(0, 8) : []);
 
         setTrendingProducts(trendingData);
         setPopularProducts(popularData);
@@ -561,11 +561,11 @@ export default function Home() {
             <h3 className="text-[17px] font-bold text-[#111]">Categories</h3>
             <Link to="/shop" className="text-[13px] font-medium text-gray-600">See all</Link>
           </div>
-          <div className="flex md:grid md:grid-cols-6 lg:grid-cols-8 gap-4 md:gap-6 space-x-5 md:space-x-0 overflow-x-auto md:overflow-visible pb-2 scrollbar-hide">
+          <div className="flex flex-row overflow-x-auto gap-3 pb-2 scrollbar-hide no-scrollbar">
             {loading ? (
-              [1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="flex flex-col items-center space-y-2 flex-shrink-0 md:flex-shrink animate-pulse">
-                  <div className="w-[60px] h-[60px] md:w-20 md:h-20 rounded-full bg-gray-200" />
+              [1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                <div key={i} className="flex flex-col items-center space-y-1.5 flex-shrink-0 animate-pulse">
+                  <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-gray-200 shrink-0" />
                   <div className="h-3 w-12 bg-gray-200 rounded" />
                 </div>
               ))
@@ -575,21 +575,21 @@ export default function Home() {
                 return (
                   <Link 
                     key={cat.id} 
-                    to={`/shop?category=${cat.name}`}
-                    className="flex flex-col items-center space-y-2 flex-shrink-0 md:flex-shrink group"
+                    to={`/shop?category=${encodeURIComponent(cat.name)}`}
+                    className="flex flex-col items-center space-y-1.5 flex-shrink-0 group w-16 md:w-20"
                   >
-                    <div className="w-[60px] h-[60px] md:w-20 md:h-20 rounded-full bg-[#f0f0f0] flex items-center justify-center group-hover:bg-ruby/10 transition-colors overflow-hidden">
+                    <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-[#f0f0f0] flex items-center justify-center group-hover:bg-ruby/10 transition-colors overflow-hidden shrink-0 border border-gray-100">
                       {cat.image ? (
                         <img 
                           src={cat.image} 
                           alt={cat.name} 
-                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" 
+                          className="w-full h-full object-cover rounded-full group-hover:scale-110 transition-transform duration-300" 
                         />
                       ) : (
-                        <Icon size={26} className="text-[#222] group-hover:text-ruby transition-colors" />
+                        <Icon size={24} className="text-[#222] group-hover:text-ruby transition-colors" />
                       )}
                     </div>
-                    <span className="text-[12px] md:text-xs font-medium text-[#333] tracking-tight text-center">{cat.name}</span>
+                    <span className="text-xs font-medium text-[#333] tracking-tight text-center truncate w-full">{cat.name}</span>
                   </Link>
                 );
               })

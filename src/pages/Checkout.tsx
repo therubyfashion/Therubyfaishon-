@@ -832,16 +832,34 @@ export default function Checkout() {
 
           const sendAdminPush = async () => {
             try {
-              // Direct client-side trigger to ensure admin push notification is delivered 100% reliably in real time!
-              // Also pass the current logged-in userId to support instant delivery on the tester's device!
+              const firstItem = finalOrderData.items && finalOrderData.items[0];
+              const itemName = firstItem?.name || firstItem?.title || 'Item';
+              const rawSize = firstItem?.selectedSize || firstItem?.size;
+              const itemSize = rawSize ? ` (${rawSize})` : '';
+              const itemQty = firstItem?.quantity ? ` x${firstItem.quantity}` : ' x1';
+              const itemsSummary = `${itemName}${itemSize}${itemQty}`;
+
+              const totalVal = Math.round(Number(finalOrderData.total || 0));
+              const payMethod = String(finalOrderData.paymentMethod || 'COD').toUpperCase();
+              const custName = finalOrderData.customerName || finalOrderData.address?.fullName || 'Customer';
+              const custCity = finalOrderData.address?.city || finalOrderData.city || 'City';
+              const rawOrderId = finalOrderData.orderId || ('TRF' + Math.floor(1000 + Math.random() * 9000));
+              const orderNum = String(rawOrderId).replace(/^#/, '');
+
               const res = await fetch('/api/send-admin-push', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 keepalive: true,
                 body: JSON.stringify({
-                  title: 'New Order Received! 🛍️',
-                  body: `Order ${finalOrderData.orderId} of ₹${Number(finalOrderData.total).toLocaleString()} placed by ${finalOrderData.customerName}.`,
-                  url: '/admin?tab=orders',
+                  orderNumber: orderNum,
+                  total: totalVal,
+                  paymentMethod: payMethod,
+                  customerName: custName,
+                  city: custCity,
+                  itemsSummary: itemsSummary,
+                  title: `🛍️ New Order Received! #${orderNum}`,
+                  body: `₹${totalVal} • ${payMethod} • ${custName} • ${custCity}\n${itemsSummary} • Confirm to process`,
+                  url: 'https://therubyfashion.shop/admin?tab=orders',
                   userId: user?.uid
                 })
               });

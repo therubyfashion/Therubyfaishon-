@@ -1098,7 +1098,9 @@ export default function AdminDashboard() {
   const [categoryForm, setCategoryForm] = useState({ name: '', image: '', sortOrder: '' });
   const [editingCategory, setEditingCategory] = useState<any>(null);
   const [colorForm, setColorForm] = useState({ name: '', hex: '#000000' });
-  const [sizeForm, setSizeForm] = useState({ name: '' });
+  const [editingColor, setEditingColor] = useState<any | null>(null);
+  const [sizeForm, setSizeForm] = useState({ name: '', sort_order: '' as string | number });
+  const [editingSize, setEditingSize] = useState<any | null>(null);
   const [couponForm, setCouponForm] = useState<any>({
     code: '',
     type: 'percentage',
@@ -3027,8 +3029,8 @@ export default function AdminDashboard() {
         settingsRes, sessionsRes, promotionsRes
       ] = await Promise.all([
         supabase.from('profiles').select('*').limit(500),
-        supabase.from('colors').select('*'),
-        supabase.from('sizes').select('*'),
+        supabase.from('colors').select('*').order('created_at', { ascending: false }),
+        supabase.from('sizes').select('*').order('sort_order', { ascending: true }),
         supabase.from('coupons').select('*').order('created_at', { ascending: false }),
         supabase.from('banners').select('*').order('created_at', { ascending: false }),
         supabase.from('settings').select('*').limit(1),
@@ -3051,7 +3053,11 @@ export default function AdminDashboard() {
         role: u.role || 'user',
         createdAt: u.created_at
       })));
-      setColors(colorsRes.data || []);
+      const mappedColors = (colorsRes.data || []).map((c: any) => ({
+        ...c,
+        hex: c.hex_code || c.hex || '#000000'
+      }));
+      setColors(mappedColors);
       setSizes(sizesRes.data || []);
 
       let supabaseMappedOrders: any[] = [];
@@ -5004,7 +5010,17 @@ export default function AdminDashboard() {
   };
 
   const handleAddColor = () => {
+    setEditingColor(null);
     setColorForm({ name: '', hex: '#000000' });
+    setIsColorModalOpen(true);
+  };
+
+  const handleEditColor = (color: any) => {
+    setEditingColor(color);
+    setColorForm({
+      name: color.name || '',
+      hex: color.hex_code || color.hex || '#000000'
+    });
     setIsColorModalOpen(true);
   };
 
@@ -5012,15 +5028,27 @@ export default function AdminDashboard() {
     e.preventDefault();
     if (!colorForm.name || !colorForm.hex) return;
     try {
-      await supabase.from('colors').insert([{
-        name: colorForm.name,
-        hex: colorForm.hex
-      }]);
-      toast.success('Color added');
+      if (editingColor) {
+        const { error } = await supabase.from('colors').update({
+          name: colorForm.name,
+          hex_code: colorForm.hex
+        }).eq('id', editingColor.id);
+        if (error) throw error;
+        toast.success('Color updated');
+      } else {
+        const { error } = await supabase.from('colors').insert([{
+          name: colorForm.name,
+          hex_code: colorForm.hex
+        }]);
+        if (error) throw error;
+        toast.success('Color added');
+      }
       setIsColorModalOpen(false);
+      setEditingColor(null);
       fetchDashboardData();
-    } catch (error) {
-      toast.error('Failed to add color');
+    } catch (error: any) {
+      console.error("Save color error:", error);
+      toast.error('Failed to save color');
     }
   };
 
@@ -5031,7 +5059,8 @@ export default function AdminDashboard() {
       message: 'Are you sure you want to delete this color option?',
       onConfirm: async () => {
         try {
-          await supabase.from('colors').delete().eq('id', id);
+          const { error } = await supabase.from('colors').delete().eq('id', id);
+          if (error) throw error;
           toast.success('Color deleted');
           fetchDashboardData();
         } catch (error) {
@@ -5044,7 +5073,17 @@ export default function AdminDashboard() {
   };
 
   const handleAddSize = () => {
-    setSizeForm({ name: '' });
+    setEditingSize(null);
+    setSizeForm({ name: '', sort_order: (sizes.length + 1) * 10 });
+    setIsSizeModalOpen(true);
+  };
+
+  const handleEditSize = (size: any) => {
+    setEditingSize(size);
+    setSizeForm({
+      name: size.name || '',
+      sort_order: size.sort_order ?? 0
+    });
     setIsSizeModalOpen(true);
   };
 
@@ -5052,14 +5091,27 @@ export default function AdminDashboard() {
     e.preventDefault();
     if (!sizeForm.name) return;
     try {
-      await supabase.from('sizes').insert([{
-        name: sizeForm.name
-      }]);
-      toast.success('Size added');
+      if (editingSize) {
+        const { error } = await supabase.from('sizes').update({
+          name: sizeForm.name,
+          sort_order: Number(sizeForm.sort_order) || 0
+        }).eq('id', editingSize.id);
+        if (error) throw error;
+        toast.success('Size updated');
+      } else {
+        const { error } = await supabase.from('sizes').insert([{
+          name: sizeForm.name,
+          sort_order: Number(sizeForm.sort_order) || 0
+        }]);
+        if (error) throw error;
+        toast.success('Size added');
+      }
       setIsSizeModalOpen(false);
+      setEditingSize(null);
       fetchDashboardData();
     } catch (error) {
-      toast.error('Failed to add size');
+      console.error("Save size error:", error);
+      toast.error('Failed to save size');
     }
   };
 
@@ -5070,7 +5122,8 @@ export default function AdminDashboard() {
       message: 'Are you sure you want to delete this size option?',
       onConfirm: async () => {
         try {
-          await supabase.from('sizes').delete().eq('id', id);
+          const { error } = await supabase.from('sizes').delete().eq('id', id);
+          if (error) throw error;
           toast.success('Size deleted');
           fetchDashboardData();
         } catch (error) {
@@ -7957,14 +8010,19 @@ export default function AdminDashboard() {
                 {colors.map(color => (
                   <div key={color.id} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3 group hover:border-ruby/30 transition-all">
                     <div className="flex items-center justify-between">
-                      <div className="w-10 h-10 rounded-xl shadow-inner border border-gray-100" style={{ backgroundColor: color.hex }}></div>
-                      <button onClick={() => handleDeleteColor(color.id)} className="p-2 text-gray-300 hover:text-red-500 transition-colors">
-                        <Trash2 size={18} />
-                      </button>
+                      <div className="w-10 h-10 rounded-xl shadow-inner border border-gray-100" style={{ backgroundColor: color.hex_code || color.hex }}></div>
+                      <div className="flex items-center space-x-1">
+                        <button onClick={() => handleEditColor(color)} className="p-2 text-gray-300 hover:text-ruby transition-colors" title="Edit Color">
+                          <Edit2 size={16} />
+                        </button>
+                        <button onClick={() => handleDeleteColor(color.id)} className="p-2 text-gray-300 hover:text-red-500 transition-colors" title="Delete Color">
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
                     </div>
                     <div>
                       <h3 className="font-bold text-[#1A2C54]">{color.name}</h3>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-mono">{color.hex}</p>
+                      <p className="text-[10px] text-gray-400 uppercase tracking-widest font-mono">{color.hex_code || color.hex}</p>
                     </div>
                   </div>
                 ))}
@@ -7983,13 +8041,21 @@ export default function AdminDashboard() {
                   <Plus size={16} className="mr-2" /> Add Size
                 </button>
               </div>
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 sm:gap-6">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-6">
                 {sizes.map(size => (
-                  <div key={size.id} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col items-center justify-center space-y-2 group hover:border-ruby/30 transition-all">
+                  <div key={size.id} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col items-center justify-center space-y-2 group hover:border-ruby/30 transition-all relative">
                     <span className="text-xl font-black text-[#1A2C54]">{size.name}</span>
-                    <button onClick={() => handleDeleteSize(size.id)} className="p-1 text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 transition-all">
-                      <Trash2 size={14} />
-                    </button>
+                    {size.sort_order !== undefined && size.sort_order !== null && (
+                      <span className="text-[9px] text-gray-400 uppercase font-mono tracking-widest">Order: {size.sort_order}</span>
+                    )}
+                    <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-all">
+                      <button onClick={() => handleEditSize(size)} className="p-1 text-gray-300 hover:text-ruby transition-colors" title="Edit Size">
+                        <Edit2 size={14} />
+                      </button>
+                      <button onClick={() => handleDeleteSize(size.id)} className="p-1 text-gray-300 hover:text-red-500 transition-colors" title="Delete Size">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -11867,7 +11933,10 @@ export default function AdminDashboard() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setIsColorModalOpen(false)}
+              onClick={() => {
+                setIsColorModalOpen(false);
+                setEditingColor(null);
+              }}
               className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             />
             <motion.div 
@@ -11877,8 +11946,8 @@ export default function AdminDashboard() {
               className="relative bg-white w-full max-w-md p-6 md:p-8 rounded-3xl shadow-2xl space-y-6"
             >
               <div className="flex justify-between items-center border-b border-gray-50 pb-4">
-                <h2 className="text-xl font-bold text-gray-800">Add Color</h2>
-                <button onClick={() => setIsColorModalOpen(false)} className="p-2 hover:text-ruby transition-colors bg-gray-50 rounded-full">
+                <h2 className="text-xl font-bold text-gray-800">{editingColor ? 'Edit Color' : 'Add Color'}</h2>
+                <button onClick={() => { setIsColorModalOpen(false); setEditingColor(null); }} className="p-2 hover:text-ruby transition-colors bg-gray-50 rounded-full">
                   <X size={20} />
                 </button>
               </div>
@@ -11914,7 +11983,7 @@ export default function AdminDashboard() {
                   </div>
                 </div>
                 <button type="submit" className="w-full py-4 bg-ruby text-white rounded-2xl text-sm font-bold uppercase tracking-widest shadow-lg shadow-ruby/20 hover:bg-ruby-dark transition-all active:scale-95">
-                  Save Color
+                  {editingColor ? 'Update Color' : 'Save Color'}
                 </button>
               </form>
             </motion.div>
@@ -11930,7 +11999,10 @@ export default function AdminDashboard() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setIsSizeModalOpen(false)}
+              onClick={() => {
+                setIsSizeModalOpen(false);
+                setEditingSize(null);
+              }}
               className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             />
             <motion.div 
@@ -11940,8 +12012,8 @@ export default function AdminDashboard() {
               className="relative bg-white w-full max-w-md p-6 md:p-8 rounded-3xl shadow-2xl space-y-6"
             >
               <div className="flex justify-between items-center border-b border-gray-50 pb-4">
-                <h2 className="text-xl font-bold text-gray-800">Add Size</h2>
-                <button onClick={() => setIsSizeModalOpen(false)} className="p-2 hover:text-ruby transition-colors bg-gray-50 rounded-full">
+                <h2 className="text-xl font-bold text-gray-800">{editingSize ? 'Edit Size' : 'Add Size'}</h2>
+                <button onClick={() => { setIsSizeModalOpen(false); setEditingSize(null); }} className="p-2 hover:text-ruby transition-colors bg-gray-50 rounded-full">
                   <X size={20} />
                 </button>
               </div>
@@ -11957,8 +12029,18 @@ export default function AdminDashboard() {
                     placeholder="e.g. XL, 42, Large"
                   />
                 </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Sort Order (Optional)</label>
+                  <input 
+                    type="number" 
+                    value={sizeForm.sort_order ?? 0}
+                    onChange={e => setSizeForm({...sizeForm, sort_order: parseInt(e.target.value) || 0})}
+                    className="w-full border-b border-gray-100 py-2 text-sm focus:outline-none focus:border-ruby transition-colors bg-transparent font-mono"
+                    placeholder="e.g. 10, 20, 30"
+                  />
+                </div>
                 <button type="submit" className="w-full py-4 bg-ruby text-white rounded-2xl text-sm font-bold uppercase tracking-widest shadow-lg shadow-ruby/20 hover:bg-ruby-dark transition-all active:scale-95">
-                  Save Size
+                  {editingSize ? 'Update Size' : 'Save Size'}
                 </button>
               </form>
             </motion.div>
