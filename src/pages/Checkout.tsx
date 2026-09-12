@@ -842,7 +842,7 @@ export default function Checkout() {
               const totalVal = Math.round(Number(finalOrderData.total || 0));
               const payMethod = String(finalOrderData.paymentMethod || 'COD').toUpperCase();
               const custName = finalOrderData.customerName || finalOrderData.address?.fullName || 'Customer';
-              const custCity = finalOrderData.address?.city || finalOrderData.city || 'City';
+              const custCity = finalOrderData.address?.city || (finalOrderData as any).city || 'City';
               const rawOrderId = finalOrderData.orderId || ('TRF' + Math.floor(1000 + Math.random() * 9000));
               const orderNum = String(rawOrderId).replace(/^#/, '');
 

@@ -137,6 +137,8 @@ const mapSupabaseProduct = (p: any, categoryMap: Record<string, string>): Produc
     dimensions: p.dimensions || undefined,
     seoTitle: p.seo_title || undefined,
     seoDescription: p.seo_description || undefined,
+    sourceUrl: p.source_url || p.sourceUrl || undefined,
+    source_url: p.source_url || p.sourceUrl || undefined,
     variants: p.variants || [],
     viewCount: p.view_count ?? 0,
     wishlistCount: p.wishlist_count ?? 0,
@@ -694,6 +696,21 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                     onChange={e => setFormData({...formData, barcode: e.target.value})}
                     className="w-full border-b border-gray-100 py-3 text-sm font-bold text-[#1A2C54] focus:outline-none focus:border-ruby transition-colors bg-transparent"
                   />
+                </div>
+
+                <div className="md:col-span-2 space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 flex items-center justify-between">
+                    <span>Source URL (Internal Reference)</span>
+                    <span className="text-[9px] text-gray-400 font-normal lowercase">(optional, not shown to customers)</span>
+                  </label>
+                  <input 
+                    type="url" 
+                    placeholder="https://meesho.com/product/... (optional, not shown to customers)"
+                    value={formData.sourceUrl || formData.source_url || ''}
+                    onChange={e => setFormData({...formData, sourceUrl: e.target.value, source_url: e.target.value})}
+                    className="w-full border-b border-gray-100 py-3 text-sm font-bold text-[#1A2C54] focus:outline-none focus:border-ruby transition-colors bg-transparent placeholder:font-normal placeholder:text-gray-300"
+                  />
+                  <p className="text-[11px] text-gray-400">This link is only visible to you in order details. Customers never see it.</p>
                 </div>
 
                 <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
@@ -2379,9 +2396,86 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (viewingCustomer && viewingCustomer.items) {
-      setFulfillmentItems(viewingCustomer.items.map((item: any) => ({ ...item, qtyToFulfill: item.quantity })));
+      setFulfillmentItems(viewingCustomer.items.map((item: any) => {
+        const pId = item.productId || item.product_id || item.id;
+        const matchingProduct = products.find((p: any) => p.id === pId);
+        const sourceUrl = item.source_url || item.sourceUrl || (matchingProduct as any)?.source_url || (matchingProduct as any)?.sourceUrl;
+        return { 
+          ...item, 
+          qtyToFulfill: item.quantity,
+          source_url: sourceUrl || undefined,
+          sourceUrl: sourceUrl || undefined
+        };
+      }));
     }
-  }, [viewingCustomer]);
+  }, [viewingCustomer?.id, products]);
+
+  // Fetch product source_url dynamically for viewing order items
+  useEffect(() => {
+    if (!viewingCustomer || !viewingCustomer.items || viewingCustomer.items.length === 0) return;
+
+    let isMounted = true;
+    const fetchSourceUrlsForOrder = async () => {
+      const productIds = viewingCustomer.items
+        .map((it: any) => it.productId || it.product_id || it.id)
+        .filter(Boolean);
+
+      if (productIds.length === 0) return;
+
+      const sourceMap: Record<string, string> = {};
+      products.forEach((p: any) => {
+        const sUrl = p.source_url || p.sourceUrl;
+        if (sUrl && p.id) {
+          sourceMap[p.id] = sUrl;
+        }
+      });
+
+      try {
+        const { data: fetchedProducts, error } = await supabase
+          .from('products')
+          .select('id, source_url')
+          .in('id', productIds);
+
+        if (!error && fetchedProducts) {
+          fetchedProducts.forEach((p: any) => {
+            if (p.source_url && p.id) {
+              sourceMap[p.id] = p.source_url;
+            }
+          });
+        }
+      } catch (err) {
+        console.warn("Error fetching source_url for order items:", err);
+      }
+
+      if (!isMounted) return;
+
+      let changed = false;
+      const updatedItems = viewingCustomer.items.map((item: any) => {
+        const pId = item.productId || item.product_id || item.id;
+        const freshUrl = sourceMap[pId] || item.source_url || item.sourceUrl;
+        if (freshUrl && item.source_url !== freshUrl) {
+          changed = true;
+          return { ...item, source_url: freshUrl, sourceUrl: freshUrl };
+        }
+        return item;
+      });
+
+      if (changed) {
+        setViewingCustomer((prev: any) => prev ? { ...prev, items: updatedItems } : prev);
+        setFulfillmentItems((prev: any[]) => prev.map((item: any) => {
+          const pId = item.productId || item.product_id || item.id;
+          const freshUrl = sourceMap[pId] || item.source_url || item.sourceUrl;
+          return freshUrl ? { ...item, source_url: freshUrl, sourceUrl: freshUrl } : item;
+        }));
+      }
+    };
+
+    fetchSourceUrlsForOrder();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [viewingCustomer?.id]);
 
   const handleUpdateFulfillmentQty = (idx: number, delta: number) => {
     setFulfillmentItems(prev => prev.map((item, i) => {
@@ -2727,6 +2821,8 @@ export default function AdminDashboard() {
     stockStatus: string;
     seoTitle: string;
     seoDescription: string;
+    sourceUrl?: string;
+    source_url?: string;
     weight: string;
     dimensions: string;
     sku: string;
@@ -2747,6 +2843,8 @@ export default function AdminDashboard() {
     stockStatus: 'In Stock',
     seoTitle: '',
     seoDescription: '',
+    sourceUrl: '',
+    source_url: '',
     weight: '',
     dimensions: '',
     sku: '',
@@ -3182,6 +3280,25 @@ export default function AdminDashboard() {
       } catch (prodExc) {
         console.error("Exception fetching products from Supabase inside fetchDashboardData:", prodExc);
       }
+
+      // Enrich merged orders items with source_url from products
+      const productSourceMap: Record<string, string> = {};
+      supabaseProducts.forEach(p => {
+        const u = p.source_url || p.sourceUrl;
+        if (u && p.id) productSourceMap[p.id] = u;
+      });
+
+      mergedOrders.forEach(ord => {
+        if (Array.isArray(ord.items)) {
+          ord.items.forEach((it: any) => {
+            const pId = it.productId || it.product_id || it.id;
+            if (pId && productSourceMap[pId]) {
+              it.source_url = productSourceMap[pId];
+              it.sourceUrl = productSourceMap[pId];
+            }
+          });
+        }
+      });
 
       setProducts(supabaseProducts);
       setOrders(mergedOrders);
@@ -4241,6 +4358,7 @@ export default function AdminDashboard() {
         dimensions: productData.dimensions || null,
         seo_title: productData.seoTitle || null,
         seo_description: productData.seoDescription || null,
+        source_url: productData.sourceUrl || productData.source_url || null,
         variants: productData.variants || [],
         updated_at: new Date().toISOString()
       };
@@ -4307,6 +4425,8 @@ export default function AdminDashboard() {
         stockStatus: 'In Stock',
         seoTitle: '',
         seoDescription: '',
+        sourceUrl: '',
+        source_url: '',
         weight: '',
         dimensions: '',
         sku: '',
@@ -6312,6 +6432,8 @@ export default function AdminDashboard() {
                             stockStatus: 'In Stock',
                             seoTitle: '',
                             seoDescription: '',
+                            sourceUrl: '',
+                            source_url: '',
                             weight: '',
                             dimensions: '',
                             sku: '',
@@ -6354,7 +6476,21 @@ export default function AdminDashboard() {
                                 <ImageIcon size={20} />
                               </div>
                             )}
-                            <span className="font-bold text-gray-800">{p.name}</span>
+                            <div className="flex flex-col">
+                              <span className="font-bold text-gray-800">{p.name}</span>
+                              {(p.sourceUrl || p.source_url) && (
+                                <a 
+                                  href={p.sourceUrl || p.source_url} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-blue-600 transition-colors font-medium mt-0.5"
+                                  title="Open source reference URL in new tab"
+                                >
+                                  <span>Source 🔗</span>
+                                </a>
+                              )}
+                            </div>
                           </td>
                           <td className="py-4 px-8 text-gray-500">{Array.isArray(p.category) ? p.category.join(', ') : p.category}</td>
                           <td className="py-4 px-8 font-bold text-gray-800">₹{p.price.toFixed(2)}</td>
@@ -6379,6 +6515,8 @@ export default function AdminDashboard() {
                                   stockStatus: p.stockStatus || 'In Stock',
                                   seoTitle: p.seoTitle || '',
                                   seoDescription: p.seoDescription || '',
+                                  sourceUrl: p.sourceUrl || p.source_url || '',
+                                  source_url: p.sourceUrl || p.source_url || '',
                                   weight: p.weight || '',
                                   dimensions: p.dimensions || '',
                                   sku: p.sku || '',
@@ -6421,7 +6559,21 @@ export default function AdminDashboard() {
                       )}
                     </div>
                     <div className="flex-grow min-w-0">
-                      <h3 className="text-[13px] font-[800] text-gray-900 leading-tight truncate">{p.name}</h3>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h3 className="text-[13px] font-[800] text-gray-900 leading-tight truncate">{p.name}</h3>
+                        {(p.sourceUrl || p.source_url) && (
+                          <a 
+                            href={p.sourceUrl || p.source_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center text-[11px] text-gray-400 hover:text-blue-600 font-medium"
+                            title="Open source URL in new tab"
+                          >
+                            🔗
+                          </a>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2 mt-1">
                         <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest leading-tight truncate">
                           {Array.isArray(p.category) ? p.category.join(', ') : p.category}
@@ -6452,6 +6604,8 @@ export default function AdminDashboard() {
                                 stockStatus: p.stockStatus || 'In Stock',
                                 seoTitle: p.seoTitle || '',
                                 seoDescription: p.seoDescription || '',
+                                sourceUrl: p.sourceUrl || p.source_url || '',
+                                source_url: p.sourceUrl || p.source_url || '',
                                 weight: p.weight || '',
                                 dimensions: p.dimensions || '',
                                 sku: p.sku || '',
@@ -7078,7 +7232,21 @@ export default function AdminDashboard() {
                                     <img src={item.image} alt="" className="w-full h-full object-cover" />
                                   </div>
                                   <div>
-                                    <p className="text-sm font-bold text-shop-text">{item.name}</p>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <p className="text-sm font-bold text-shop-text">{item.name}</p>
+                                      {(item.source_url || item.sourceUrl) && (
+                                        <a
+                                          href={item.source_url || item.sourceUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-gray-500 hover:text-blue-600 bg-gray-100 hover:bg-gray-200/80 transition-colors"
+                                          title="Open product source link in new tab"
+                                        >
+                                          <span>View Source 🔗</span>
+                                        </a>
+                                      )}
+                                    </div>
                                     <p className="text-xs text-gray-400">Qty: {item.quantity} {item.selectedSize ? `• Size: ${item.selectedSize}` : ''}</p>
                                   </div>
                                 </div>
@@ -7118,7 +7286,21 @@ export default function AdminDashboard() {
                                     <img src={item.image} alt="" className="w-full h-full object-cover" />
                                   </div>
                                   <div>
-                                    <p className="text-sm font-bold text-shop-text">{item.name}</p>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <p className="text-sm font-bold text-shop-text">{item.name}</p>
+                                      {(item.source_url || item.sourceUrl) && (
+                                        <a
+                                          href={item.source_url || item.sourceUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-gray-500 hover:text-blue-600 bg-gray-100 hover:bg-gray-200/80 transition-colors"
+                                          title="Open product source link in new tab"
+                                        >
+                                          <span>View Source 🔗</span>
+                                        </a>
+                                      )}
+                                    </div>
                                     <p className="text-xs text-gray-400">Qty: {item.quantity} {item.selectedSize ? `• Size: ${item.selectedSize}` : ''}</p>
                                   </div>
                                 </div>
@@ -7184,7 +7366,21 @@ export default function AdminDashboard() {
                                     </div>
                                   </td>
                                   <td className="py-3 px-3">
-                                    <div className="text-[14px] font-[600] text-shop-text">{item.name}</div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <div className="text-[14px] font-[600] text-shop-text">{item.name}</div>
+                                      {(item.source_url || item.sourceUrl) && (
+                                        <a
+                                          href={item.source_url || item.sourceUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-gray-500 hover:text-blue-600 bg-gray-100 hover:bg-gray-200/80 transition-colors"
+                                          title="Open product source link in new tab"
+                                        >
+                                          <span>View Source 🔗</span>
+                                        </a>
+                                      )}
+                                    </div>
                                     <div className="text-[12px] text-shop-text-muted">
                                       {item.selectedSize && `Size: ${item.selectedSize}`}
                                       {item.selectedSize && item.selectedColor && ' / '}
@@ -7227,7 +7423,21 @@ export default function AdminDashboard() {
                                   <img src={item.image} alt="" className="w-full h-full object-cover" />
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                  <div className="text-[14px] font-[700] text-shop-text truncate">{item.name}</div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="text-[14px] font-[700] text-shop-text">{item.name}</div>
+                                    {(item.source_url || item.sourceUrl) && (
+                                      <a
+                                        href={item.source_url || item.sourceUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-gray-500 hover:text-blue-600 bg-gray-100 hover:bg-gray-200/80 transition-colors shrink-0"
+                                        title="Open product source link in new tab"
+                                      >
+                                        <span>View Source 🔗</span>
+                                      </a>
+                                    )}
+                                  </div>
                                   <div className="text-[12px] text-shop-text-muted mt-0.5">
                                     {item.selectedSize && `Size: ${item.selectedSize}`}
                                     {item.selectedSize && item.selectedColor && ' / '}
@@ -7857,7 +8067,21 @@ export default function AdminDashboard() {
                                     <img src={item.image} alt="" className="w-full h-full object-cover" />
                                   </div>
                                   <div>
-                                    <p className="text-xs font-bold text-gray-900">{item.name}</p>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <p className="text-xs font-bold text-gray-900">{item.name}</p>
+                                      {(item.source_url || item.sourceUrl) && (
+                                        <a
+                                          href={item.source_url || item.sourceUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-gray-500 hover:text-blue-600 bg-gray-100 hover:bg-gray-200/80 transition-colors"
+                                          title="Open product source link in new tab"
+                                        >
+                                          <span>View Source 🔗</span>
+                                        </a>
+                                      )}
+                                    </div>
                                     <p className="text-[11px] text-gray-400">Qty: {item.quantity} {item.selectedSize ? `• Size: ${item.selectedSize}` : ''}</p>
                                   </div>
                                 </div>

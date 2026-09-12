@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { supabase } from '../supabase';
@@ -362,6 +362,72 @@ export default function ProductDetail() {
     }
   }, [id]);
 
+  const fetchReviews = useCallback(async () => {
+    if (!id) return;
+    const cacheKey = `ruby_product_cache_${id}`;
+    try {
+      const { data, error } = await supabase
+        .from('reviews')
+        .select('*')
+        .eq('product_id', id);
+
+      if (error) throw error;
+
+      const fetchedReviews = (data || []).map(row => {
+        let commentText = row.comment || '';
+        let emailVal = row.reviewer_email || '';
+        let userImageVal = row.avatar_url || '';
+        let imageVal = null;
+
+        try {
+          if (commentText.startsWith('{') && commentText.endsWith('}')) {
+            const parsed = JSON.parse(commentText);
+            if (parsed && typeof parsed === 'object') {
+              commentText = parsed.text || '';
+              emailVal = parsed.userEmail || emailVal;
+              userImageVal = parsed.userImage || userImageVal;
+              imageVal = parsed.image || null;
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+
+        return {
+          id: row.id,
+          productId: row.product_id || '',
+          userName: row.user_name || 'Anonymous',
+          userEmail: emailVal,
+          userImage: userImageVal,
+          rating: row.rating || 5,
+          comment: commentText,
+          image: imageVal,
+          createdAt: row.created_at || new Date().toISOString(),
+          likes: row.likes || 0,
+        };
+      });
+
+      // Sort client-side to avoid needing a composite index
+      fetchedReviews.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setReviews(fetchedReviews);
+
+      // Update the cache with reviews too
+      try {
+        const rawCache = localStorage.getItem(cacheKey);
+        if (rawCache) {
+          const parsed = JSON.parse(rawCache);
+          parsed.reviews = fetchedReviews;
+          localStorage.setItem(cacheKey, JSON.stringify(parsed));
+        }
+      } catch (e) {
+        console.warn("Failed to update reviews in product cache:", e);
+      }
+    } catch (error) {
+      console.error("Error fetching reviews:", error);
+      setReviews([]);
+    }
+  }, [id]);
+
   useEffect(() => {
     const fetchProduct = async () => {
       if (!id) return;
@@ -564,75 +630,9 @@ export default function ProductDetail() {
       }
     };
 
-    const fetchReviews = async () => {
-      if (!id) return;
-      const cacheKey = `ruby_product_cache_${id}`;
-      try {
-        const { data, error } = await supabase
-          .from('reviews')
-          .select('*')
-          .eq('product_id', id);
-
-        if (error) throw error;
-
-        const fetchedReviews = (data || []).map(row => {
-          let commentText = row.comment || '';
-          let emailVal = row.reviewer_email || '';
-          let userImageVal = row.avatar_url || '';
-          let imageVal = null;
-
-          try {
-            if (commentText.startsWith('{') && commentText.endsWith('}')) {
-              const parsed = JSON.parse(commentText);
-              if (parsed && typeof parsed === 'object') {
-                commentText = parsed.text || '';
-                emailVal = parsed.userEmail || emailVal;
-                userImageVal = parsed.userImage || userImageVal;
-                imageVal = parsed.image || null;
-              }
-            }
-          } catch (e) {
-            // ignore
-          }
-
-          return {
-            id: row.id,
-            productId: row.product_id || '',
-            userName: row.user_name || 'Anonymous',
-            userEmail: emailVal,
-            userImage: userImageVal,
-            rating: row.rating || 5,
-            comment: commentText,
-            image: imageVal,
-            createdAt: row.created_at || new Date().toISOString(),
-            likes: row.likes || 0,
-          };
-        });
-
-        // Sort client-side to avoid needing a composite index
-        fetchedReviews.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setReviews(fetchedReviews);
-
-        // Update the cache with reviews too
-        try {
-          const rawCache = localStorage.getItem(cacheKey);
-          if (rawCache) {
-            const parsed = JSON.parse(rawCache);
-            parsed.reviews = fetchedReviews;
-            localStorage.setItem(cacheKey, JSON.stringify(parsed));
-          }
-        } catch (e) {
-          console.warn("Failed to update reviews in product cache:", e);
-        }
-      } catch (error) {
-        console.error("Error fetching reviews:", error);
-        setReviews([]);
-      }
-    };
-
     fetchProduct();
     fetchReviews();
-  }, [id, navigate]);
+  }, [id, navigate, fetchReviews]);
 
   if (loading) return <ProductDetailSkeleton />;
   if (!product) return null;

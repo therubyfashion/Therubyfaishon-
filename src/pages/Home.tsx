@@ -62,6 +62,16 @@ export default function Home() {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const navigate = useNavigate();
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return 'Good Morning';
+    if (hour >= 12 && hour < 17) return 'Good Afternoon';
+    if (hour >= 17 && hour < 21) return 'Good Evening';
+    return 'Good Night';
+  };
+
+  const greeting = getGreeting();
+
   const homeFaqs = [
     {
       question: "Delivery me kitne din lagte hain aur order track kaise karein?",
@@ -481,7 +491,7 @@ export default function Home() {
               )}
             </div>
             <div>
-              <p className="text-[12px] text-gray-400 font-medium">Good Morning 👋</p>
+              <p className="text-[12px] text-gray-400 font-medium">{greeting}</p>
               <p className="text-[17px] font-bold text-[#111] leading-tight">
                 {(user && localStorage.getItem(`user_name_${user.uid}`)) || profile?.displayName || user?.displayName || 'User'}
               </p>

@@ -20,6 +20,8 @@ export interface Product {
   stockStatus?: string;
   createdAt: string;
   updatedAt?: string;
+  sourceUrl?: string;
+  source_url?: string;
   seoTitle?: string;
   seoDescription?: string;
   weight?: string;
