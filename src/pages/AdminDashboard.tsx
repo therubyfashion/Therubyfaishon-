@@ -633,6 +633,66 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
                   </div>
                 </div>
 
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Available Sizes (Select Applicable Sizes)</label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allAvailable = sizes && sizes.length > 0 
+                            ? sizes.map((s: any) => s.name) 
+                            : ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free Size'];
+                          setFormData({ ...formData, sizes: allAvailable });
+                        }}
+                        className="text-[9px] font-bold text-ruby hover:underline uppercase"
+                      >
+                        Select All
+                      </button>
+                      <span className="text-gray-300 text-xs">•</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData({ ...formData, sizes: [] });
+                        }}
+                        className="text-[9px] font-bold text-gray-400 hover:text-gray-600 uppercase"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(sizes && sizes.length > 0 ? sizes.map((s: any) => s.name) : ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free Size']).map((sizeName: string) => {
+                      const isSelected = Array.isArray(formData.sizes) && formData.sizes.includes(sizeName);
+                      return (
+                        <button
+                          key={sizeName}
+                          type="button"
+                          onClick={() => {
+                            const current = Array.isArray(formData.sizes) ? formData.sizes : [];
+                            const updated = current.includes(sizeName)
+                              ? current.filter((s: string) => s !== sizeName)
+                              : [...current, sizeName];
+                            setFormData({ ...formData, sizes: updated });
+                          }}
+                          className={cn(
+                            "px-3.5 py-2 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1.5 border",
+                            isSelected
+                              ? "bg-ruby/10 border-ruby text-ruby shadow-sm"
+                              : "bg-white border-gray-200 text-gray-500 hover:border-gray-300"
+                          )}
+                        >
+                          <span>{sizeName}</span>
+                          {isSelected && <Check size={12} className="shrink-0 text-ruby" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(!formData.sizes || formData.sizes.length === 0) && (
+                    <p className="text-[10px] text-gray-400 italic">No sizes selected. Click to select only the sizes this product comes in.</p>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Stock Quantity</label>
@@ -2836,7 +2896,7 @@ export default function AdminDashboard() {
     description: '',
     price: 0,
     category: [],
-    sizes: ['S', 'M', 'L', 'XL'],
+    sizes: [],
     images: [''],
     stock: 10,
     comparePrice: 0,
@@ -4340,13 +4400,17 @@ export default function AdminDashboard() {
         .map((name: string) => nameToIdMap[name])
         .filter(Boolean);
 
+      // Ensure only explicitly selected sizes from the product form state are saved
+      const rawSizes = Array.isArray(formData.sizes) ? formData.sizes : (Array.isArray(productData.sizes) ? productData.sizes : []);
+      const selectedSizes = Array.from(new Set(rawSizes.filter((s: any) => typeof s === 'string' && s.trim() !== '')));
+
       const supabaseProductPayload: any = {
         name: productData.name,
         description: productData.description || '',
         price: Number(productData.price) || 0,
         compare_price: Number(productData.comparePrice) || 0,
         category_ids: categoryIds,
-        sizes: Array.isArray(productData.sizes) ? productData.sizes : [],
+        sizes: selectedSizes,
         images: Array.isArray(productData.images) ? productData.images : [],
         stock: Number(productData.stock) || 0,
         stock_status: productData.stockStatus || 'In Stock',
@@ -4417,7 +4481,7 @@ export default function AdminDashboard() {
         description: '', 
         price: 0, 
         category: [], 
-        sizes: sizes.length > 0 ? sizes.map((s: any) => s.name) : ['S', 'M', 'L', 'XL'], 
+        sizes: [], 
         images: [''], 
         stock: 10,
         comparePrice: 0,
@@ -6424,8 +6488,8 @@ export default function AdminDashboard() {
                             name: '', 
                             description: '', 
                             price: 0, 
-                            category: 'Women', 
-                            sizes: sizes.length > 0 ? sizes.map(s => s.name) : ['S', 'M', 'L', 'XL'], 
+                            category: [], 
+                            sizes: [], 
                             images: [''], 
                             stock: 10,
                             comparePrice: 0,
@@ -6508,7 +6572,7 @@ export default function AdminDashboard() {
                                   description: p.description,
                                   price: p.price,
                                   category: Array.isArray(p.category) ? p.category : (p.category ? [p.category] : []),
-                                  sizes: p.sizes,
+                                  sizes: Array.isArray(p.sizes) ? p.sizes : (typeof p.sizes === 'string' ? [p.sizes] : []),
                                   images: p.images,
                                   stock: p.stock,
                                   comparePrice: p.comparePrice || 0,
@@ -6597,7 +6661,7 @@ export default function AdminDashboard() {
                                 description: p.description,
                                 price: p.price,
                                 category: Array.isArray(p.category) ? p.category : (p.category ? [p.category] : []),
-                                sizes: p.sizes,
+                                sizes: Array.isArray(p.sizes) ? p.sizes : (typeof p.sizes === 'string' ? [p.sizes] : []),
                                 images: p.images,
                                 stock: p.stock,
                                 comparePrice: p.comparePrice || 0,

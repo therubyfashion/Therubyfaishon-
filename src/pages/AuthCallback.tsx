@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function AuthCallback() {
   const navigate = useNavigate();
+  const { refreshProfile } = useAuth();
   const handled = useRef(false);
 
   useEffect(() => {
@@ -19,16 +21,19 @@ export default function AuthCallback() {
       }
 
       try {
-        // Check if profile exists
-        const { data: profile } = await supabase
+        // After getting session, log everything
+        console.log('Session user:', session.user.id, session.user.email);
+
+        const { data: existingProfile, error: fetchError } = await supabase
           .from('profiles')
           .select('role')
           .eq('id', session.user.id)
           .single();
 
-        if (!profile) {
-          // Create profile for new Google OAuth user
-          await supabase.from('profiles').insert({
+        console.log('Existing profile:', existingProfile, 'Fetch error:', fetchError);
+
+        if (!existingProfile) {
+          const { error: insertError } = await supabase.from('profiles').insert({
             id: session.user.id,
             email: session.user.email,
             display_name: session.user.user_metadata?.full_name ||
@@ -38,12 +43,23 @@ export default function AuthCallback() {
             is_verified: true,
             photo_url: session.user.user_metadata?.avatar_url || null
           });
-          navigate('/', { replace: true });
-        } else {
-          navigate(profile.role === 'admin' ? '/admin' : '/', { replace: true });
+          console.log('Insert error:', insertError);
         }
+
+        // Re-fetch profile into AuthContext to ensure profile and session state are active
+        try {
+          await refreshProfile();
+        } catch (rErr) {
+          console.error('Error refreshing profile in AuthContext:', rErr);
+        }
+
+        const role = existingProfile?.role || 'user';
+        navigate(role === 'admin' ? '/admin' : '/', { replace: true });
       } catch (err) {
         console.error('Profile error:', err);
+        try {
+          await refreshProfile();
+        } catch (_) {}
         navigate('/', { replace: true });
       }
     };
@@ -82,7 +98,7 @@ export default function AuthCallback() {
       clearTimeout(timeout);
       subscription.unsubscribe();
     };
-  }, [navigate]);
+  }, [navigate, refreshProfile]);
 
   return (
     <div style={{ 
