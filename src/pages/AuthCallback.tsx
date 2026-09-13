@@ -1,96 +1,87 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
 export default function AuthCallback() {
   const navigate = useNavigate();
+  const handled = useRef(false);
 
   useEffect(() => {
-    const handleCallback = async () => {
+    if (handled.current) return;
+    
+    const handleAuth = async (session: any) => {
+      if (handled.current) return;
+      handled.current = true;
+
+      if (!session?.user) {
+        navigate('/login', { replace: true });
+        return;
+      }
+
       try {
-        // Wait for Supabase to automatically handle the OAuth callback
-        // Supabase JS v2 handles PKCE automatically via onAuthStateChange
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.error('Session error:', error);
-          navigate('/login', { replace: true });
-          return;
-        }
+        // Check if profile exists
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', session.user.id)
+          .single();
 
-        if (session?.user) {
-          // Session exists — check/create profile
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', session.user.id)
-            .single();
-
-          if (!profile) {
-            // Create profile for new Google OAuth user
-            await supabase.from('profiles').insert({
-              id: session.user.id,
-              email: session.user.email,
-              display_name: session.user.user_metadata?.full_name || 
-                           session.user.user_metadata?.name || 
-                           session.user.email?.split('@')[0],
-              role: 'user',
-              is_verified: true,
-              photo_url: session.user.user_metadata?.avatar_url || null
-            });
-          }
-
-          // Route based on role
-          const role = profile?.role || 'user';
-          navigate(role === 'admin' ? '/admin' : '/', { replace: true });
+        if (!profile) {
+          // Create profile for new Google OAuth user
+          await supabase.from('profiles').insert({
+            id: session.user.id,
+            email: session.user.email,
+            display_name: session.user.user_metadata?.full_name ||
+                         session.user.user_metadata?.name ||
+                         session.user.email?.split('@')[0],
+            role: 'user',
+            is_verified: true,
+            photo_url: session.user.user_metadata?.avatar_url || null
+          });
+          navigate('/', { replace: true });
         } else {
-          // No session yet — listen for auth state change
-          const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            async (event, session) => {
-              if (event === 'SIGNED_IN' && session?.user) {
-                subscription.unsubscribe();
-                
-                const { data: profile } = await supabase
-                  .from('profiles')
-                  .select('role')
-                  .eq('id', session.user.id)
-                  .single();
-
-                if (!profile) {
-                  await supabase.from('profiles').insert({
-                    id: session.user.id,
-                    email: session.user.email,
-                    display_name: session.user.user_metadata?.full_name || 
-                                 session.user.user_metadata?.name || 
-                                 session.user.email?.split('@')[0],
-                    role: 'user',
-                    is_verified: true,
-                    photo_url: session.user.user_metadata?.avatar_url || null
-                  });
-                }
-
-                const role = profile?.role || 'user';
-                navigate(role === 'admin' ? '/admin' : '/', { replace: true });
-              } else if (event === 'SIGNED_OUT') {
-                subscription.unsubscribe();
-                navigate('/login', { replace: true });
-              }
-            }
-          );
-
-          // Timeout fallback — if nothing happens in 5 seconds, go to login
-          setTimeout(() => {
-            subscription.unsubscribe();
-            navigate('/login', { replace: true });
-          }, 5000);
+          navigate(profile.role === 'admin' ? '/admin' : '/', { replace: true });
         }
       } catch (err) {
-        console.error('Auth callback error:', err);
-        navigate('/login', { replace: true });
+        console.error('Profile error:', err);
+        navigate('/', { replace: true });
       }
     };
 
-    handleCallback();
+    // Listen for auth state change
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('Auth event:', event, session?.user?.email);
+        if (event === 'SIGNED_IN' && session) {
+          subscription.unsubscribe();
+          await handleAuth(session);
+        }
+      }
+    );
+
+    // Also check existing session immediately
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log('Existing session:', session?.user?.email);
+      if (session) {
+        subscription.unsubscribe();
+        handleAuth(session);
+      }
+    });
+
+    // Longer timeout — 10 seconds
+    const timeout = setTimeout(() => {
+      if (!handled.current) {
+        console.log('Timeout — no auth event received');
+        subscription.unsubscribe();
+        // Don't go to login — go to home and let AuthContext handle it
+        navigate('/', { replace: true });
+      }
+    }, 10000);
+
+    return () => {
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, [navigate]);
 
   return (
@@ -111,8 +102,11 @@ export default function AuthCallback() {
         borderRadius: '50%',
         animation: 'spin 0.8s linear infinite'
       }} />
-      <p style={{ color: '#666', fontFamily: 'sans-serif', fontSize: '16px' }}>
+      <p style={{ color: '#333', fontFamily: 'sans-serif', fontSize: '16px', fontWeight: '500' }}>
         Completing sign in...
+      </p>
+      <p style={{ color: '#999', fontFamily: 'sans-serif', fontSize: '13px' }}>
+        Please wait a moment
       </p>
       <style>{`
         @keyframes spin {
