@@ -43,7 +43,7 @@ const Addresses = React.lazy(() => import('./pages/Addresses'));
 const VerifyEmail = React.lazy(() => import('./pages/VerifyEmail'));
 const VerifyPrompt = React.lazy(() => import('./pages/VerifyPrompt'));
 const VerifyCOD = React.lazy(() => import('./pages/VerifyCOD'));
-const AuthCallback = React.lazy(() => import('./pages/AuthCallback'));
+import AuthCallback from './pages/AuthCallback';
 const InfoPage = React.lazy(() => import('./pages/InfoPage'));
 const FAQ = React.lazy(() => import('./pages/FAQ'));
 const PrivacyPolicy = React.lazy(() => import('./pages/PrivacyPolicy'));
@@ -90,6 +90,7 @@ function AppContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const isAdminPath = location.pathname.startsWith('/admin');
+  const isAuthCallback = location.pathname === '/auth/callback';
   const [showSplash, setShowSplash] = useState(true);
 
   // Clear old stale caches to ensure fresh data from Supabase
@@ -123,11 +124,32 @@ function AppContent() {
   useEffect(() => {
     if (authLoading) return;
     
-    const publicPaths = ['/login', '/signup', '/verify-prompt', '/verify-email', '/verify-cod', '/about', '/contact', '/faq', '/checkout', '/cart', '/track', '/order-success', '/privacy-policy', '/terms-of-service', '/return-policy', '/shipping-policy', '/privacy', '/terms', '/returns', '/shipping', '/refund-policy'];
+    // Check if user is authenticated via Google
+    const isGoogle = Boolean(
+      user?.app_metadata?.provider === 'google' ||
+      (Array.isArray(user?.app_metadata?.providers) && user?.app_metadata?.providers.includes('google')) ||
+      (Array.isArray(user?.identities) && user?.identities.some((i: any) => i.provider === 'google')) ||
+      user?.user_metadata?.provider === 'google' ||
+      user?.user_metadata?.iss === 'https://accounts.google.com' ||
+      (typeof user?.user_metadata?.iss === 'string' && user?.user_metadata?.iss.includes('accounts.google.com')) ||
+      profile?.isVerified
+    );
+
+    // Google OAuth users are always verified and MUST NEVER be redirected to verify-prompt or login
+    if (isGoogle) return;
+
+    const publicPaths = [
+      '/login', '/signup', '/verify-prompt', '/verify-email', '/verify-cod',
+      '/about', '/contact', '/faq', '/checkout', '/cart', '/track',
+      '/order-success', '/privacy-policy', '/terms-of-service', '/return-policy',
+      '/shipping-policy', '/privacy', '/terms', '/returns', '/shipping',
+      '/refund-policy', '/auth/callback'
+    ];
     // Home ('/') is NOT public for logged-in but unverified users
     const isPublicPath = publicPaths.includes(location.pathname) || location.pathname.startsWith('/product/') || location.pathname.startsWith('/track/');
     
     if (user && profile && !profile.isVerified && !isPublicPath) {
+      console.warn("Unverified user redirected to verify-prompt:", user.email);
       navigate(`/verify-prompt?email=${encodeURIComponent(user.email || '')}&uid=${user.uid}`, { replace: true });
     }
   }, [user, profile, location.pathname, authLoading, navigate]);
@@ -536,10 +558,10 @@ function AppContent() {
   return (
     <div className="min-h-screen flex flex-col">
       <AnimatePresence>
-        {showSplash && <SplashScreen />}
+        {showSplash && !isAuthCallback && <SplashScreen />}
       </AnimatePresence>
       <ScrollToTop />
-      {!isAdminPath && <Navbar />}
+      {!isAdminPath && !isAuthCallback && <Navbar />}
 
       <main className="flex-grow">
         <Suspense fallback={<PageLoader variant="minimal" message="Gathering Collections" />}>
@@ -589,9 +611,9 @@ function AppContent() {
           </Routes>
         </Suspense>
       </main>
-      {!isAdminPath && <Footer />}
-      {!isAdminPath && <BottomNav />}
-      {!isAdminPath && <ChatWidget />}
+      {!isAdminPath && !isAuthCallback && <Footer />}
+      {!isAdminPath && !isAuthCallback && <BottomNav />}
+      {!isAdminPath && !isAuthCallback && <ChatWidget />}
       <Toaster position="top-center" richColors />
     </div>
   );

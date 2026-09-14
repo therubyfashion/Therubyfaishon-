@@ -18,6 +18,23 @@ const AuthContext = createContext<AuthContextType>({
   refreshProfile: async () => {},
 });
 
+export const isGoogleAuthUser = (sessionUser?: any, metadata?: any): boolean => {
+  const appMeta = sessionUser?.app_metadata || {};
+  const userMeta = metadata || sessionUser?.user_metadata || {};
+  const identities = sessionUser?.identities || [];
+  
+  return Boolean(
+    appMeta.provider === 'google' ||
+    (Array.isArray(appMeta.providers) && appMeta.providers.includes('google')) ||
+    (Array.isArray(identities) && identities.some((i: any) => i.provider === 'google')) ||
+    userMeta.provider === 'google' ||
+    userMeta.iss === 'https://accounts.google.com' ||
+    (typeof userMeta.iss === 'string' && userMeta.iss.includes('accounts.google.com')) ||
+    Boolean(userMeta.avatar_url && userMeta.email_verified) ||
+    Boolean(userMeta.picture && userMeta.email_verified)
+  );
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -25,6 +42,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchProfile = async (userId: string, email: string, metadata: any, sessionUser?: any) => {
     try {
+      const isGoogle = isGoogleAuthUser(sessionUser, metadata);
+
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -35,29 +54,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.error("Error fetching Supabase profile in AuthContext:", error);
       }
 
-      // Check if user is authenticated via Google or has confirmed email
-      const isGoogleUser = Boolean(
-        metadata?.iss === 'https://accounts.google.com' || 
-        metadata?.provider === 'google' || 
-        metadata?.avatar_url || 
-        metadata?.picture ||
-        sessionUser?.app_metadata?.provider === 'google' ||
-        sessionUser?.app_metadata?.providers?.includes('google') ||
-        sessionUser?.email_confirmed_at
-      );
-
       if (data) {
-        const isVerified = Boolean(data.is_verified || isGoogleUser);
+        // If provider === 'google', SKIP the is_verified check entirely and treat them as verified
+        const isVerified = isGoogle ? true : Boolean(data.is_verified);
 
         // Auto-heal is_verified in Supabase profiles if user is Google-authenticated
-        if (!data.is_verified && isGoogleUser) {
-          supabase.from('profiles').update({ is_verified: true }).eq('id', userId).then();
+        if (!data.is_verified && isGoogle) {
+          supabase.from('profiles').update({ is_verified: true }).eq('id', userId).then(({ error: healErr }) => {
+            if (healErr) {
+              console.error("AuthContext: Error auto-healing profile is_verified:", healErr);
+            } else {
+              console.log("AuthContext: Successfully auto-healed is_verified for Google user:", userId);
+            }
+          });
         }
 
         setProfile({
           uid: data.id,
           email: data.email,
-          displayName: data.display_name || metadata?.full_name || metadata?.name || data.email.split('@')[0] || 'User',
+          displayName: data.display_name || metadata?.full_name || metadata?.name || data.email?.split('@')[0] || 'User',
           phoneNumber: data.phone_number || '',
           photoURL: data.photo_url || metadata?.avatar_url || metadata?.picture || '',
           phoneVerified: true,
@@ -68,11 +83,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           createdAt: data.created_at || new Date().toISOString()
         } as UserProfile);
       } else {
-        // Fallback or OAuth auto-profile creation
-        const displayName = metadata?.full_name || metadata?.name || email.split('@')[0] || 'User';
+        // Fallback or OAuth inline profile creation:
+        // Prevent race condition if AuthCallback hasn't finished inserting yet.
+        // Google OAuth users get is_verified = true immediately, never redirecting to login.
+        console.log("AuthContext: Profile does not exist yet. Creating profile inline for user:", userId, "isGoogle:", isGoogle);
+        const displayName = metadata?.full_name || metadata?.name || email?.split('@')[0] || 'User';
         const photoUrl = metadata?.avatar_url || metadata?.picture || '';
-        const isVerified = isGoogleUser ? true : false;
-        const role = 'user'; // Default role for new OAuth/signup users is 'user'. Admin role must be assigned in database profiles.role
+        const isVerified = isGoogle ? true : false;
+        const role = 'user';
 
         const newProfile: UserProfile = {
           uid: userId,
@@ -85,27 +103,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           createdAt: new Date().toISOString()
         };
 
+        // Immediately set profile in state so no route guard or null check redirects to login/verify
         setProfile(newProfile);
 
-        // Create the profile in the profiles table
+        // Create the profile in the profiles table with upsert on conflict 'id'
         try {
-          const { error: insertErr } = await supabase.from('profiles').insert({
-            id: userId,
-            email: email,
-            display_name: displayName,
-            role: role,
-            is_verified: isVerified,
-            photo_url: photoUrl || null,
-            loyalty_points: 0,
-            created_at: newProfile.createdAt
-          });
+          const { data: upsertData, error: insertErr } = await supabase
+            .from('profiles')
+            .upsert({
+              id: userId,
+              email: email,
+              display_name: displayName,
+              role: role,
+              is_verified: isVerified,
+              photo_url: photoUrl || null,
+              loyalty_points: 0,
+              created_at: newProfile.createdAt
+            }, { onConflict: 'id' })
+            .select()
+            .maybeSingle();
+
           if (insertErr) {
-            console.error("Error inserting fallback profile in AuthContext:", insertErr);
+            console.error("AuthContext: Error upserting inline profile in Supabase:", insertErr);
           } else {
-            console.log("Successfully created profile in AuthContext for user:", userId);
+            console.log("AuthContext: Successfully created inline profile in Supabase for user:", userId, upsertData);
           }
         } catch (insertErr) {
-          console.error("Exception inserting fallback profile in AuthContext:", insertErr);
+          console.error("AuthContext: Exception creating inline profile in Supabase:", insertErr);
         }
       }
     } catch (err) {
@@ -116,10 +140,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const handleSession = async (session: any) => {
     if (session?.user) {
       const sUser = session.user;
+      const isGoogle = isGoogleAuthUser(sUser, sUser.user_metadata);
       const userCompat = {
         ...sUser,
         uid: sUser.id,
-        emailVerified: sUser.email_confirmed_at ? true : false,
+        emailVerified: isGoogle ? true : Boolean(sUser.email_confirmed_at),
         reload: async () => {},
         getIdToken: async () => session.access_token || ""
       };
@@ -134,13 +159,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     // Check session on load
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        console.error("AuthContext: getSession error on init:", error);
+      }
       handleSession(session);
     });
 
     // Subscribe to auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      handleSession(session);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("AuthContext: onAuthStateChange event:", event, "userId:", session?.user?.id);
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setProfile(null);
+        setLoading(false);
+      } else if (session?.user) {
+        // When SIGNED_IN or other events fire for a Google user, process session and do NOT sign out or redirect to login
+        await handleSession(session);
+      } else {
+        setUser(null);
+        setProfile(null);
+        setLoading(false);
+      }
     });
 
     return () => {
