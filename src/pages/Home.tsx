@@ -141,7 +141,20 @@ export default function Home() {
         const parsed = cached ? JSON.parse(cached) : {};
         parsed[key] = data;
         parsed.cachedAt = Date.now();
-        localStorage.setItem('ruby_home_cache_v2', JSON.stringify(parsed));
+        const dataStr = JSON.stringify(parsed);
+        if (dataStr.length < 3 * 1024 * 1024) {
+          try {
+            localStorage.setItem('ruby_home_cache_v2', dataStr);
+          } catch (e) {
+            console.warn('localStorage full, clearing cache...');
+            Object.keys(localStorage)
+              .filter(k => k.startsWith('ruby_product_cache_'))
+              .forEach(k => localStorage.removeItem(k));
+            try {
+              localStorage.setItem('ruby_home_cache_v2', dataStr);
+            } catch {}
+          }
+        }
       } catch (e) {
         console.warn("Failed to write home cache:", e);
       }

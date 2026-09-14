@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { supabase } from '../supabase';
@@ -19,6 +19,19 @@ import { ProductDetailSkeleton } from '../components/Skeleton';
 import ProductCard from '../components/ProductCard';
 import { compressImage } from '../utils/imageUtils';
 import { formatPrice } from '../utils/currency';
+
+const STANDARD_SIZE_ORDER = ['Free Size', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL'];
+const sortSizesList = (list: any[]): string[] => {
+  const strList: string[] = (list || []).map(s => String(s).trim()).filter(Boolean);
+  return strList.sort((a, b) => {
+    const idxA = STANDARD_SIZE_ORDER.indexOf(a);
+    const idxB = STANDARD_SIZE_ORDER.indexOf(b);
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+    return a.localeCompare(b);
+  });
+};
 
 function ReviewForm({ productId, onReviewAdded }: { productId: string; onReviewAdded: () => void }) {
   const { user, profile } = useAuth();
@@ -348,7 +361,11 @@ export default function ProductDetail() {
         const parsed = JSON.parse(cached);
         if (parsed.product) {
           setProduct(parsed.product);
-          if (parsed.product.sizes && parsed.product.sizes.length > 0) setSelectedSize(parsed.product.sizes[0]);
+          const cachedVariantSizes = Array.from(new Set((parsed.product.variants || []).map((v: any) => v.size).filter(Boolean)));
+          const cachedValidSizes = cachedVariantSizes.length > 0
+            ? sortSizesList(cachedVariantSizes)
+            : (Array.isArray(parsed.product.sizes) ? sortSizesList(parsed.product.sizes.filter(Boolean)) : []);
+          if (cachedValidSizes.length > 0) setSelectedSize(cachedValidSizes[0]);
           if (parsed.product.variants && parsed.product.variants.length > 0) setSelectedColor(parsed.product.variants[0].color);
         }
         if (parsed.relatedProducts) setRelatedProducts(parsed.relatedProducts);
@@ -417,7 +434,21 @@ export default function ProductDetail() {
         if (rawCache) {
           const parsed = JSON.parse(rawCache);
           parsed.reviews = fetchedReviews;
-          localStorage.setItem(cacheKey, JSON.stringify(parsed));
+          const data = JSON.stringify(parsed);
+          if (data.length < 3 * 1024 * 1024) { // only save if under 3MB
+            try {
+              localStorage.setItem(cacheKey, data);
+            } catch (e) {
+              console.warn('localStorage full, clearing cache...');
+              // Clear old caches
+              Object.keys(localStorage)
+                .filter(k => k.startsWith('ruby_product_cache_'))
+                .forEach(k => localStorage.removeItem(k));
+              try {
+                localStorage.setItem(cacheKey, data);
+              } catch {}
+            }
+          }
         }
       } catch (e) {
         console.warn("Failed to update reviews in product cache:", e);
@@ -564,7 +595,15 @@ export default function ProductDetail() {
           setProduct(data);
           
           // Preselect sizes/colors if not already set by cache or UI
-          setSelectedSize(prev => prev || (data!.sizes && data!.sizes.length > 0 ? data!.sizes[0] : ''));
+          const fetchedVariantSizes = Array.from(new Set((data.variants || []).map((v: any) => v.size).filter(Boolean)));
+          const fetchedValidSizes = fetchedVariantSizes.length > 0 
+            ? sortSizesList(fetchedVariantSizes) 
+            : (Array.isArray(data.sizes) ? sortSizesList(data.sizes.filter(Boolean)) : []);
+
+          setSelectedSize(prev => {
+            if (prev && fetchedValidSizes.includes(prev)) return prev;
+            return fetchedValidSizes.length > 0 ? fetchedValidSizes[0] : '';
+          });
           setSelectedColor(prev => prev || (data!.variants && data!.variants.length > 0 ? data!.variants[0].color : ''));
           
           if (related.length > 0) {
@@ -588,7 +627,7 @@ export default function ProductDetail() {
             }
           }
 
-          // Track Recently Viewed
+          // Track Recently Viewed (limit to last 5 items only)
           try {
             const recentlyViewed = JSON.parse(localStorage.getItem('recentlyViewed') || '[]');
             const updatedRecentlyViewed = [
@@ -597,25 +636,55 @@ export default function ProductDetail() {
                 name: data.name,
                 price: data.price,
                 comparePrice: data.comparePrice,
-                images: data.images,
+                images: Array.isArray(data.images) && data.images.length > 0 ? [data.images[0]] : [],
                 category: data.category
               },
               ...recentlyViewed.filter((p: any) => p.id !== data.id)
-            ].slice(0, 10);
-            localStorage.setItem('recentlyViewed', JSON.stringify(updatedRecentlyViewed));
+            ].slice(0, 5);
+
+            const rvData = JSON.stringify(updatedRecentlyViewed);
+            try {
+              localStorage.setItem('recentlyViewed', rvData);
+            } catch (e) {
+              console.warn('localStorage full, clearing cache...');
+              // Clear old caches
+              Object.keys(localStorage)
+                .filter(k => k.startsWith('ruby_product_cache_'))
+                .forEach(k => localStorage.removeItem(k));
+              try {
+                localStorage.setItem('recentlyViewed', rvData);
+              } catch {}
+            }
           } catch (e) {
-            console.error("Error updating recently viewed:", e);
+            console.warn("Error updating recently viewed:", e);
           }
 
           // Save fresh details to cache
           try {
             const existingReviews = JSON.parse(localStorage.getItem(cacheKey) || '{}').reviews || [];
-            localStorage.setItem(cacheKey, JSON.stringify({
+            const dataToCache = JSON.stringify({
               product: data,
               relatedProducts: related,
               reviews: existingReviews,
               savedAt: Date.now()
-            }));
+            });
+
+            if (dataToCache.length < 3 * 1024 * 1024) { // only save if under 3MB
+              try {
+                localStorage.setItem(cacheKey, dataToCache);
+              } catch (e) {
+                console.warn('localStorage full, clearing cache...');
+                // Clear old caches
+                Object.keys(localStorage)
+                  .filter(k => k.startsWith('ruby_product_cache_'))
+                  .forEach(k => localStorage.removeItem(k));
+                try {
+                  localStorage.setItem(cacheKey, dataToCache);
+                } catch {
+                  // Silent
+                }
+              }
+            }
           } catch (e) {
             console.warn("Failed to write product cache:", e);
           }
@@ -638,6 +707,10 @@ export default function ProductDetail() {
   if (!product) return null;
 
   const handleAddToCart = () => {
+    if (availableSizes.length > 0 && !selectedSize) {
+      toast.error("Please select a size first");
+      return;
+    }
     addToCart(product, selectedSize, selectedColor, quantity);
     
     // Meta Pixel Tracking
@@ -734,9 +807,55 @@ export default function ProductDetail() {
     }
   };
 
-  const colors = Array.from(new Set(product.variants?.map(v => v.color) || []));
+  const colors = Array.from(new Set(product.variants?.map(v => v.color).filter(Boolean) || []));
   const isFavorite = isInWishlist(product.id);
   const stockVal = product.stock !== undefined && product.stock !== null ? Number(product.stock) : 99;
+
+  // Derive strictly the sizes that were actually configured for this product:
+  // 1. If product has variants, only the sizes configured in variants are valid.
+  // 2. Otherwise, use product.sizes explicitly selected in admin.
+  const availableSizes = useMemo(() => {
+    if (!product) return [];
+    const variantSizes = Array.from(
+      new Set(
+        (product.variants || [])
+          .map((v: any) => v.size)
+          .filter((s: any) => typeof s === 'string' && s.trim() !== '')
+      )
+    );
+    if (variantSizes.length > 0) {
+      return sortSizesList(variantSizes);
+    }
+    if (Array.isArray(product.sizes) && product.sizes.length > 0) {
+      const validSizes = product.sizes.filter((s: any) => typeof s === 'string' && s.trim() !== '');
+      return sortSizesList(validSizes);
+    }
+    return [];
+  }, [product?.variants, product?.sizes]);
+
+  // Sizes available for the currently selected color (if color is selected)
+  const sizesForSelectedColor = useMemo(() => {
+    if (!selectedColor || !product?.variants || product.variants.length === 0) {
+      return availableSizes;
+    }
+    const filtered = product.variants
+      .filter((v: any) => v.color && v.color.toLowerCase() === selectedColor.toLowerCase())
+      .map((v: any) => v.size)
+      .filter((s: any) => typeof s === 'string' && s.trim() !== '');
+    return Array.from(new Set(filtered));
+  }, [selectedColor, product?.variants, availableSizes]);
+
+  // Keep selectedSize synchronized with available sizes
+  useEffect(() => {
+    if (availableSizes.length > 0) {
+      const targetSizes = sizesForSelectedColor.length > 0 ? sizesForSelectedColor : availableSizes;
+      if (!selectedSize || !targetSizes.includes(selectedSize)) {
+        setSelectedSize(targetSizes[0]);
+      }
+    } else {
+      setSelectedSize('');
+    }
+  }, [availableSizes, sizesForSelectedColor, selectedColor]);
 
   const handleToggleWishlist = () => {
     if (!user) {
@@ -869,28 +988,50 @@ export default function ProductDetail() {
           <div className="h-[1px] bg-gray-100 my-6" />
 
           {/* Size Selection */}
-          <div className="mb-6">
-            <div className="flex justify-between items-center mb-3">
-              <h4 className="text-[13px] font-bold text-gray-600 uppercase tracking-wider">Select Size</h4>
-              <button 
-                onClick={() => setIsSizeChartOpen(true)}
-                className="text-[11px] font-bold text-ruby hover:underline uppercase tracking-widest"
-              >
-                Size Guide
-              </button>
-            </div>
-            <div className="flex gap-[10px] flex-wrap">
-              {(product.sizes || []).map(size => (
+          {availableSizes.length > 0 && (
+            <div className="mb-6">
+              <div className="flex justify-between items-center mb-3">
+                <h4 className="text-[13px] font-bold text-gray-600 uppercase tracking-wider">
+                  Select Size
+                  {selectedSize && <span className="ml-2 text-ruby font-bold">({selectedSize})</span>}
+                </h4>
                 <button 
-                  key={size}
-                  onClick={() => setSelectedSize(size)}
-                  className={`w-[50px] h-[50px] rounded-[10px] border-[1.5px] text-[13px] font-bold transition-all ${selectedSize === size ? 'bg-[#1A2C54] text-white border-[#1A2C54]' : 'bg-white text-[#1A2C54] border-gray-100 hover:border-ruby hover:text-ruby'}`}
+                  onClick={() => setIsSizeChartOpen(true)}
+                  className="text-[11px] font-bold text-ruby hover:underline uppercase tracking-widest"
                 >
-                  {size}
+                  Size Guide
                 </button>
-              ))}
+              </div>
+              <div className="flex gap-[10px] flex-wrap">
+                {availableSizes.map(size => {
+                  const isAvailableInColor = sizesForSelectedColor.length === 0 || sizesForSelectedColor.includes(size);
+                  const isSelected = selectedSize === size;
+                  return (
+                    <button 
+                      key={size}
+                      onClick={() => {
+                        setSelectedSize(size);
+                        if (product.variants && product.variants.length > 0 && !isAvailableInColor) {
+                          const matching = product.variants.find((v: any) => v.size === size && v.color);
+                          if (matching) setSelectedColor(matching.color);
+                        }
+                      }}
+                      className={`min-w-[50px] px-3.5 h-[50px] rounded-[10px] border-[1.5px] text-[13px] font-bold transition-all relative flex items-center justify-center ${
+                        isSelected 
+                          ? 'bg-[#1A2C54] text-white border-[#1A2C54] shadow-md shadow-[#1A2C54]/20' 
+                          : isAvailableInColor
+                            ? 'bg-white text-[#1A2C54] border-gray-100 hover:border-ruby hover:text-ruby'
+                            : 'bg-gray-50 text-gray-400 border-gray-100 hover:border-gray-300'
+                      }`}
+                      title={!isAvailableInColor ? `Not available in ${selectedColor}` : undefined}
+                    >
+                      {size}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Color Selection */}
           {colors.length > 0 && (

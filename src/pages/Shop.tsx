@@ -97,7 +97,20 @@ export default function Shop() {
         const parsed = cached ? JSON.parse(cached) : {};
         parsed[key] = data;
         parsed.savedAt = Date.now();
-        localStorage.setItem(cacheKey, JSON.stringify(parsed));
+        const dataStr = JSON.stringify(parsed);
+        if (dataStr.length < 3 * 1024 * 1024) {
+          try {
+            localStorage.setItem(cacheKey, dataStr);
+          } catch (e) {
+            console.warn('localStorage full, clearing cache...');
+            Object.keys(localStorage)
+              .filter(k => k.startsWith('ruby_product_cache_'))
+              .forEach(k => localStorage.removeItem(k));
+            try {
+              localStorage.setItem(cacheKey, dataStr);
+            } catch {}
+          }
+        }
       } catch (e) {
         console.warn("Failed to write shop cache:", e);
       }
@@ -227,7 +240,20 @@ export default function Shop() {
       parsed.products = prods;
       parsed.categories = categories;
       parsed.savedAt = Date.now();
-      localStorage.setItem(cacheKey, JSON.stringify(parsed));
+      const dataStr = JSON.stringify(parsed);
+      if (dataStr.length < 3 * 1024 * 1024) {
+        try {
+          localStorage.setItem(cacheKey, dataStr);
+        } catch (e) {
+          console.warn('localStorage full, clearing cache...');
+          Object.keys(localStorage)
+            .filter(k => k.startsWith('ruby_product_cache_'))
+            .forEach(k => localStorage.removeItem(k));
+          try {
+            localStorage.setItem(cacheKey, dataStr);
+          } catch {}
+        }
+      }
     } catch (e) {}
 
   }, [allProducts, activeCategory, sortBy, categories]);

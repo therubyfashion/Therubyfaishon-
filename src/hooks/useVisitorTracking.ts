@@ -26,10 +26,27 @@ export const useVisitorTracking = () => {
 
   useEffect(() => {
     // Generate or get session ID using localStorage
-    let sessionId = localStorage.getItem('visitor_session_id');
-    if (!sessionId) {
+    let sessionId: string | null = null;
+    try {
+      sessionId = localStorage.getItem('visitor_session_id');
+      if (!sessionId) {
+        sessionId = 'sess_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString(36);
+        try {
+          localStorage.setItem('visitor_session_id', sessionId);
+        } catch (e) {
+          console.warn('localStorage full, clearing cache...');
+          Object.keys(localStorage)
+            .filter(k => k.startsWith('ruby_product_cache_'))
+            .forEach(k => localStorage.removeItem(k));
+          try {
+            localStorage.setItem('visitor_session_id', sessionId);
+          } catch {
+            // Silent fail
+          }
+        }
+      }
+    } catch {
       sessionId = 'sess_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString(36);
-      localStorage.setItem('visitor_session_id', sessionId);
     }
 
     const track = async () => {
@@ -110,23 +127,28 @@ export const useVisitorTracking = () => {
         });
 
         // Insert or Upsert into Supabase active_sessions table
-        const { error: upsertErr } = await supabase
-          .from('active_sessions')
-          .upsert(trackingData, { onConflict: 'session_id' });
+        try {
+          const { error } = await supabase
+            .from('active_sessions')
+            .upsert(trackingData, { onConflict: 'session_id' });
 
-        if (upsertErr) {
-          console.warn("Supabase active_sessions upsert warning:", upsertErr.message);
+          if (error) {
+            // Silent fail — visitor tracking is non-critical
+            return;
+          }
+
+          // Clean up stale sessions (> 10 mins)
+          const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+          await supabase
+            .from('active_sessions')
+            .delete()
+            .lt('last_seen', tenMinsAgo);
+        } catch {
+          // Silent fail
         }
 
-        // Clean up stale sessions (> 10 mins)
-        const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-        await supabase
-          .from('active_sessions')
-          .delete()
-          .lt('last_seen', tenMinsAgo);
-
-      } catch (e) {
-        console.error("Tracking failed", e);
+      } catch {
+        // Silent fail — visitor tracking is non-critical
       }
     };
 

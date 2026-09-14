@@ -64,7 +64,10 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     e.preventDefault();
     e.stopPropagation();
     
-    addToCart(product, (product.sizes && product.sizes[0]) || 'M');
+    const firstSize = (product.sizes && product.sizes.length > 0 && product.sizes[0])
+      || (product.variants && product.variants.length > 0 && product.variants[0]?.size)
+      || '';
+    addToCart(product, firstSize);
     
     // Meta Pixel Tracking
     trackPixelEvent('AddToCart', {

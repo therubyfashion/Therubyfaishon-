@@ -416,9 +416,16 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
       toast.error("Please enter both size and color");
       return;
     }
+    const updatedVariants = [...(formData.variants || []), { ...newVariant }];
+    const currentSizes = Array.isArray(formData.sizes) ? formData.sizes : [];
+    const updatedSizes = currentSizes.includes(newVariant.size)
+      ? currentSizes
+      : [...currentSizes, newVariant.size];
+
     setFormData({
       ...formData,
-      variants: [...(formData.variants || []), { ...newVariant }]
+      variants: updatedVariants,
+      sizes: updatedSizes
     });
     setNewVariant({ size: '', color: '', stock: 0 });
   };
@@ -4400,9 +4407,17 @@ export default function AdminDashboard() {
         .map((name: string) => nameToIdMap[name])
         .filter(Boolean);
 
-      // Ensure only explicitly selected sizes from the product form state are saved
+      // Ensure only explicitly selected sizes from the product form state or configured variants are saved
       const rawSizes = Array.isArray(formData.sizes) ? formData.sizes : (Array.isArray(productData.sizes) ? productData.sizes : []);
-      const selectedSizes = Array.from(new Set(rawSizes.filter((s: any) => typeof s === 'string' && s.trim() !== '')));
+      const variantSizes = Array.isArray(formData.variants) && formData.variants.length > 0
+        ? Array.from(new Set(formData.variants.map((v: any) => v.size).filter(Boolean)))
+        : [];
+
+      // If variants are defined, they strictly specify the valid sizes for this product.
+      // If no variants exist, use explicitly picked sizes from the sizes selector.
+      const selectedSizes = variantSizes.length > 0
+        ? variantSizes
+        : Array.from(new Set(rawSizes.filter((s: any) => typeof s === 'string' && s.trim() !== '')));
 
       const supabaseProductPayload: any = {
         name: productData.name,
@@ -6567,12 +6582,18 @@ export default function AdminDashboard() {
                             <button 
                               onClick={() => {
                                 setEditingProduct(p);
+                                const pVariantSizes = Array.isArray(p.variants) && p.variants.length > 0
+                                  ? Array.from(new Set(p.variants.map((v: any) => v.size).filter(Boolean)))
+                                  : [];
+                                const pRawSizes = Array.isArray(p.sizes) ? p.sizes : (typeof p.sizes === 'string' ? [p.sizes] : []);
+                                const pInitialSizes = pVariantSizes.length > 0 ? pVariantSizes : pRawSizes;
+
                                 setFormData({
                                   name: p.name,
                                   description: p.description,
                                   price: p.price,
                                   category: Array.isArray(p.category) ? p.category : (p.category ? [p.category] : []),
-                                  sizes: Array.isArray(p.sizes) ? p.sizes : (typeof p.sizes === 'string' ? [p.sizes] : []),
+                                  sizes: pInitialSizes,
                                   images: p.images,
                                   stock: p.stock,
                                   comparePrice: p.comparePrice || 0,
@@ -6656,12 +6677,18 @@ export default function AdminDashboard() {
                           <button 
                             onClick={() => {
                               setEditingProduct(p);
+                              const pVariantSizes = Array.isArray(p.variants) && p.variants.length > 0
+                                ? Array.from(new Set(p.variants.map((v: any) => v.size).filter(Boolean)))
+                                : [];
+                              const pRawSizes = Array.isArray(p.sizes) ? p.sizes : (typeof p.sizes === 'string' ? [p.sizes] : []);
+                              const pInitialSizes = pVariantSizes.length > 0 ? pVariantSizes : pRawSizes;
+
                               setFormData({
                                 name: p.name,
                                 description: p.description,
                                 price: p.price,
                                 category: Array.isArray(p.category) ? p.category : (p.category ? [p.category] : []),
-                                sizes: Array.isArray(p.sizes) ? p.sizes : (typeof p.sizes === 'string' ? [p.sizes] : []),
+                                sizes: pInitialSizes,
                                 images: p.images,
                                 stock: p.stock,
                                 comparePrice: p.comparePrice || 0,
