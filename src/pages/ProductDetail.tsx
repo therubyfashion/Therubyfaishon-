@@ -703,10 +703,58 @@ export default function ProductDetail() {
     fetchReviews();
   }, [id, navigate, fetchReviews]);
 
-  if (loading) return <ProductDetailSkeleton />;
-  if (!product) return null;
+  // Derive strictly the sizes that were actually configured for this product:
+  // 1. If product has variants, only the sizes configured in variants are valid.
+  // 2. Otherwise, use product.sizes explicitly selected in admin.
+  const availableSizes = useMemo(() => {
+    if (!product) return [];
+    const variantSizes = Array.from(
+      new Set(
+        (product.variants || [])
+          .map((v: any) => v.size)
+          .filter((s: any) => typeof s === 'string' && s.trim() !== '')
+      )
+    );
+    if (variantSizes.length > 0) {
+      return sortSizesList(variantSizes);
+    }
+    if (Array.isArray(product.sizes) && product.sizes.length > 0) {
+      const validSizes = product.sizes.filter((s: any) => typeof s === 'string' && s.trim() !== '');
+      return sortSizesList(validSizes);
+    }
+    return [];
+  }, [product?.variants, product?.sizes]);
+
+  // Sizes available for the currently selected color (if color is selected)
+  const sizesForSelectedColor = useMemo(() => {
+    if (!selectedColor || !product?.variants || product.variants.length === 0) {
+      return availableSizes;
+    }
+    const filtered = product.variants
+      .filter((v: any) => v.color && v.color.toLowerCase() === selectedColor.toLowerCase())
+      .map((v: any) => v.size)
+      .filter((s: any) => typeof s === 'string' && s.trim() !== '');
+    return Array.from(new Set(filtered));
+  }, [selectedColor, product?.variants, availableSizes]);
+
+  // Keep selectedSize synchronized with available sizes
+  useEffect(() => {
+    if (availableSizes.length > 0) {
+      const targetSizes = sizesForSelectedColor.length > 0 ? sizesForSelectedColor : availableSizes;
+      if (!selectedSize || !targetSizes.includes(selectedSize)) {
+        setSelectedSize(targetSizes[0]);
+      }
+    } else {
+      setSelectedSize('');
+    }
+  }, [availableSizes, sizesForSelectedColor, selectedColor]);
+
+  const colors = Array.from(new Set(product?.variants?.map(v => v.color).filter(Boolean) || []));
+  const isFavorite = product ? isInWishlist(product.id) : false;
+  const stockVal = product?.stock !== undefined && product?.stock !== null ? Number(product.stock) : 99;
 
   const handleAddToCart = () => {
+    if (!product) return;
     if (availableSizes.length > 0 && !selectedSize) {
       toast.error("Please select a size first");
       return;
@@ -777,6 +825,7 @@ export default function ProductDetail() {
   });
 
   const handleShare = async () => {
+    if (!product) return;
     const currentUrl = window.location.href;
     const shareUrl = currentUrl.includes('localhost') 
       ? `https://therubyfashion.shop/product/${product.id}`
@@ -807,61 +856,12 @@ export default function ProductDetail() {
     }
   };
 
-  const colors = Array.from(new Set(product.variants?.map(v => v.color).filter(Boolean) || []));
-  const isFavorite = isInWishlist(product.id);
-  const stockVal = product.stock !== undefined && product.stock !== null ? Number(product.stock) : 99;
-
-  // Derive strictly the sizes that were actually configured for this product:
-  // 1. If product has variants, only the sizes configured in variants are valid.
-  // 2. Otherwise, use product.sizes explicitly selected in admin.
-  const availableSizes = useMemo(() => {
-    if (!product) return [];
-    const variantSizes = Array.from(
-      new Set(
-        (product.variants || [])
-          .map((v: any) => v.size)
-          .filter((s: any) => typeof s === 'string' && s.trim() !== '')
-      )
-    );
-    if (variantSizes.length > 0) {
-      return sortSizesList(variantSizes);
-    }
-    if (Array.isArray(product.sizes) && product.sizes.length > 0) {
-      const validSizes = product.sizes.filter((s: any) => typeof s === 'string' && s.trim() !== '');
-      return sortSizesList(validSizes);
-    }
-    return [];
-  }, [product?.variants, product?.sizes]);
-
-  // Sizes available for the currently selected color (if color is selected)
-  const sizesForSelectedColor = useMemo(() => {
-    if (!selectedColor || !product?.variants || product.variants.length === 0) {
-      return availableSizes;
-    }
-    const filtered = product.variants
-      .filter((v: any) => v.color && v.color.toLowerCase() === selectedColor.toLowerCase())
-      .map((v: any) => v.size)
-      .filter((s: any) => typeof s === 'string' && s.trim() !== '');
-    return Array.from(new Set(filtered));
-  }, [selectedColor, product?.variants, availableSizes]);
-
-  // Keep selectedSize synchronized with available sizes
-  useEffect(() => {
-    if (availableSizes.length > 0) {
-      const targetSizes = sizesForSelectedColor.length > 0 ? sizesForSelectedColor : availableSizes;
-      if (!selectedSize || !targetSizes.includes(selectedSize)) {
-        setSelectedSize(targetSizes[0]);
-      }
-    } else {
-      setSelectedSize('');
-    }
-  }, [availableSizes, sizesForSelectedColor, selectedColor]);
-
   const handleToggleWishlist = () => {
     if (!user) {
       toast.error("Please login to add items to your wishlist");
       return;
     }
+    if (!product) return;
     const isCurrentlyFavorite = isFavorite;
     toggleWishlist(product);
     if (isCurrentlyFavorite) {
@@ -870,6 +870,9 @@ export default function ProductDetail() {
       toast.success(`Added ${product.name} to wishlist`);
     }
   };
+
+  if (loading) return <ProductDetailSkeleton />;
+  if (!product) return null;
 
   return (
     <div id="product-detail" className="bg-gray-50 min-h-screen pb-20">
