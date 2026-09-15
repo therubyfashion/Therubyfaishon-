@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase';
+import { toast } from 'sonner';
 
 export default function AuthCallback() {
   const navigate = useNavigate();
@@ -9,15 +10,31 @@ export default function AuthCallback() {
   useEffect(() => {
     if (handled.current) return;
 
-    const handleAuth = async (session: any) => {
+    const finalizeRedirect = (destination: string) => {
       if (handled.current) return;
       handled.current = true;
-      const user = session.user;
+      toast.success("Welcome! Successfully signed in.");
+      // Use window.location.replace to guarantee immediate hard redirect and clean URL state
+      window.location.replace(destination);
+    };
+
+    const handleAuth = async (session: any) => {
+      if (handled.current) return;
+      const user = session?.user;
+      if (!user) {
+        finalizeRedirect('/');
+        return;
+      }
+
       try {
         const { data: profile } = await supabase
-          .from('profiles').select('role').eq('id', user.id).maybeSingle();
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .maybeSingle();
+
         if (!profile) {
-          await supabase.from('profiles').insert({
+          await supabase.from('profiles').upsert({
             id: user.id,
             email: user.email,
             display_name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'User',
@@ -25,50 +42,50 @@ export default function AuthCallback() {
             is_verified: true,
             photo_url: user.user_metadata?.avatar_url || null,
             loyalty_points: 0
-          });
+          }, { onConflict: 'id' });
         }
-        navigate(profile?.role === 'admin' ? '/admin' : '/', { replace: true });
-      } catch {
-        navigate('/', { replace: true });
+
+        const target = profile?.role === 'admin' ? '/admin' : '/';
+        finalizeRedirect(target);
+      } catch (err) {
+        console.error("AuthCallback handleAuth exception:", err);
+        finalizeRedirect('/');
       }
     };
 
-    // PRIMARY: Try manual code exchange first
+    // 1. Primary: Manual code exchange if ?code= is present in URL
     const tryCodeExchange = async () => {
       const code = new URLSearchParams(window.location.search).get('code');
       if (code) {
         try {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-          if (!error && data.session) {
+          if (!error && data?.session) {
             await handleAuth(data.session);
             return true;
           }
-          console.error('Code exchange error:', error);
         } catch (e) {
-          console.error('Code exchange exception:', e);
+          console.error("Code exchange exception:", e);
         }
       }
       return false;
     };
 
-    // FALLBACK: onAuthStateChange
+    // 2. Primary fallback: onAuthStateChange listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (handled.current) return;
         if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
-          handled.current = true;
           subscription.unsubscribe();
           await handleAuth(session);
         }
       }
     );
 
-    // Run
+    // Run code exchange or check active session
     tryCodeExchange().then(success => {
-      if (!success) {
+      if (!success && !handled.current) {
         supabase.auth.getSession().then(({ data: { session } }) => {
-          if (session && !handled.current) {
-            handled.current = true;
+          if (session?.user && !handled.current) {
             subscription.unsubscribe();
             handleAuth(session);
           }
@@ -76,16 +93,28 @@ export default function AuthCallback() {
       }
     });
 
+    // 3. Fallback safety timer - redirect after 3 seconds max so page NEVER stays stuck on /auth/callback
     const timeout = setTimeout(() => {
       if (!handled.current) {
-        handled.current = true;
         subscription.unsubscribe();
-        navigate('/', { replace: true });
+        finalizeRedirect('/');
       }
-    }, 10000);
+    }, 3000);
 
-    return () => { clearTimeout(timeout); subscription.unsubscribe(); };
+    return () => {
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, [navigate]);
 
-  return null;
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 dark:bg-zinc-950 p-4">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-9 h-9 border-3 border-amber-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+          Signing you in...
+        </p>
+      </div>
+    </div>
+  );
 }

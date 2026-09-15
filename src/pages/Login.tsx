@@ -277,8 +277,8 @@ export default function Login() {
     setLoading(true);
     try {
       const redirectUrl = window.location.origin.includes('therubyfashion.shop')
-        ? 'https://therubyfashion.shop/auth/callback'
-        : `${window.location.origin}/auth/callback`;
+        ? 'https://therubyfashion.shop/?login_success=true'
+        : `${window.location.origin}/?login_success=true`;
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
