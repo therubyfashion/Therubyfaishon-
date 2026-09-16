@@ -263,19 +263,26 @@ export default function Checkout() {
   const subtotal = Number(total) || 0;
   const discount = Number(appliedPromo ? appliedPromo.discount : 0);
   const shippingCost = Number(selectedShippingObj?.cost || 0);
-  const codFee = Number(selectedPayment === 'cod' ? 80 : 0);
 
   // Loyalty Points calculation: 100 points = ₹10 discount (min 100 points required)
   const userPoints = Number(profile?.loyaltyPoints || 0);
   const canRedeemPoints = userPoints >= 100;
-  const maxDiscountFromPoints = Math.max(0, subtotal - discount + shippingCost + codFee);
+  const maxDiscountFromPoints = Math.max(0, subtotal - discount + shippingCost);
   const pointsNeededForFullDiscount = Math.floor(maxDiscountFromPoints * 10);
   const pointsToRedeem = (useLoyaltyPoints && canRedeemPoints) 
     ? Math.min(userPoints, pointsNeededForFullDiscount) 
     : 0;
   const pointsDiscount = Math.floor(pointsToRedeem / 10);
 
-  const finalTotal = Math.max(0, subtotal - discount - pointsDiscount + shippingCost + codFee);
+  // Base Order Total for Review Step (Product amount + Shipping - Discounts) WITHOUT COD charge
+  const reviewTotal = Math.max(0, subtotal - discount - pointsDiscount + shippingCost);
+
+  // COD fee is only applied on Payment step when Cash on Delivery is selected
+  const codFee = selectedPayment === 'cod' ? 80 : 0;
+
+  // Final payable total on Payment step (adds ₹80 if COD selected, ₹0 for UPI)
+  const payableTotal = selectedPayment === 'cod' ? reviewTotal + codFee : reviewTotal;
+  const finalTotal = payableTotal;
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -1029,9 +1036,9 @@ export default function Checkout() {
           document.body.appendChild(script);
         });
 
-        let razorpayKey = (import.meta as any).env.VITE_RAZORPAY_KEY_ID;
+        let razorpayKey = (import.meta as any).env.VITE_RAZORPAY_KEY_ID || storeSettings?.razorpayKeyId;
         
-        // If not in env, try to fetch from server
+        // If not in env or storeSettings, fetch from server
         if (!razorpayKey) {
           try {
             const configRes = await fetch('/api/payment-config');
@@ -1063,9 +1070,9 @@ export default function Checkout() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              amount: Math.round(finalTotal * 100),
+              amount: Math.round(payableTotal * 100),
               currency: 'INR',
-              receipt: formattedOrderId
+              receipt: formattedOrderId.replace(/[^a-zA-Z0-9_-]/g, '')
             })
           });
 
@@ -1087,9 +1094,9 @@ export default function Checkout() {
               await completeOrder(response.razorpay_payment_id);
             },
             prefill: {
-              name: selectedAddrObj?.name,
-              email: selectedAddrObj?.email,
-              contact: selectedAddrObj?.number,
+              name: selectedAddrObj?.name || user?.displayName || 'Customer',
+              email: selectedAddrObj?.email || user?.email || profile?.email || '',
+              contact: (selectedAddrObj?.number || profile?.phone || '').replace(/\D/g, '').slice(-10),
             },
             theme: {
               color: '#E11D48',
@@ -1177,7 +1184,7 @@ export default function Checkout() {
             </div>
 
             {/* Step Content */}
-            <AnimatePresence mode="wait">
+            <AnimatePresence initial={false}>
               {currentStep === 1 ? (
                 <motion.div 
                   key="step1"
@@ -1702,7 +1709,7 @@ export default function Checkout() {
                         </div>
                         <div className="pt-6 border-t border-gray-200 flex justify-between items-end">
                           <p className="text-lg font-bold text-[#1A2C54]">Order Total</p>
-                          <p className="text-2xl font-bold text-ruby">{formatPrice(finalTotal)}</p>
+                          <p className="text-2xl font-bold text-ruby">{formatPrice(reviewTotal)}</p>
                         </div>
                       </div>
                     </div>
@@ -1710,14 +1717,22 @@ export default function Checkout() {
 
                   <div className="step-nav flex gap-4 mt-8 pt-8 border-t border-gray-100">
                     <button 
-                      onClick={() => setCurrentStep(2)}
-                      className="flex-1 bg-white border border-gray-100 text-[#1A2C54] py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-gray-50 transition-all"
+                      type="button"
+                      onClick={() => {
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                        setCurrentStep(2);
+                      }}
+                      className="flex-1 bg-white border border-gray-100 text-[#1A2C54] py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-gray-50 transition-all cursor-pointer"
                     >
                       Back
                     </button>
                     <button 
-                      onClick={() => setCurrentStep(4)}
-                      className="flex-1 bg-ruby text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95"
+                      type="button"
+                      onClick={() => {
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                        setCurrentStep(4);
+                      }}
+                      className="flex-1 bg-ruby text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95 cursor-pointer"
                     >
                       Continue to Payment
                     </button>
@@ -1726,22 +1741,34 @@ export default function Checkout() {
               ) : (
                 <motion.div 
                   key="step4"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  className="space-y-8"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.15 }}
+                  className="space-y-6"
                 >
-                  <div className="space-y-4">
+                  {/* Top Bar with Clear Change Review Button */}
+                  <div className="flex items-center justify-between pb-3 border-b border-gray-100">
                     <button 
-                      onClick={() => setCurrentStep(3)}
-                      className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-gray-400 hover:text-ruby transition-colors mb-4 px-3 py-1.5 rounded-full bg-gray-50 border border-gray-100"
+                      type="button"
+                      onClick={() => {
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                        setCurrentStep(3);
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border-2 border-gray-200 hover:border-ruby text-xs font-bold uppercase tracking-wider text-[#1A2C54] hover:text-ruby shadow-xs transition-all active:scale-95 group cursor-pointer"
+                      title="Return to review your items and price breakdown"
                     >
-                      <ChevronLeft size={12} strokeWidth={3} /> Change Review
+                      <ChevronLeft size={16} strokeWidth={2.5} className="text-ruby group-hover:-translate-x-1 transition-transform" />
+                      <span>← Back to Review Order</span>
                     </button>
-                    <div className="space-y-2">
-                      <h2 className="text-xl font-bold text-[#1A2C54]">Payment Method</h2>
-                      <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Select how you'd like to pay</p>
-                    </div>
+                    <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest bg-gray-100 px-3 py-1.5 rounded-full">
+                      Step 4: Payment
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <h2 className="text-xl font-bold text-[#1A2C54]">Select Payment Method</h2>
+                    <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Choose UPI for free handling or Cash on Delivery</p>
                   </div>
                   
                   <div className="payment-options flex flex-col gap-4">
@@ -1754,7 +1781,11 @@ export default function Checkout() {
                     >
                       <div className="payment-icon p-3 bg-white rounded-2xl text-ruby shadow-sm"><Smartphone size={24} /></div>
                       <div className="flex-grow">
-                        <span className="payment-name block text-[16px] font-bold text-[#1A2C54]">UPI / Wallets</span>
+                        <div className="flex items-center gap-2">
+                          <span className="payment-name block text-[16px] font-bold text-[#1A2C54]">UPI / Wallets / Cards</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">Save ₹80</span>
+                        </div>
+                        <span className="text-xs text-gray-400">Instant online payment with zero extra charges</span>
                       </div>
                       <div className={cn(
                         "pay-radio w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
@@ -1773,7 +1804,11 @@ export default function Checkout() {
                     >
                       <div className="payment-icon p-3 bg-white rounded-2xl text-ruby shadow-sm"><Handshake size={24} /></div>
                       <div className="flex-grow">
-                        <span className="payment-name block text-[16px] font-bold text-[#1A2C54]">Cash on Delivery</span>
+                        <div className="flex items-center gap-2">
+                          <span className="payment-name block text-[16px] font-bold text-[#1A2C54]">Cash on Delivery</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">+₹80 Fee</span>
+                        </div>
+                        <span className="text-xs text-gray-400">Pay cash upon delivery at your doorstep</span>
                       </div>
                       <div className={cn(
                         "pay-radio w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
@@ -1784,27 +1819,45 @@ export default function Checkout() {
                     </div>
                   </div>
 
+                  {/* Dynamic Payment Breakdown Summary */}
+                  <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100 space-y-3">
+                    <div className="flex justify-between text-xs font-semibold text-gray-500">
+                      <span>Order Subtotal + Shipping:</span>
+                      <span className="font-bold text-[#1A2C54]">{formatPrice(reviewTotal)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs font-semibold">
+                      <span className="text-gray-500">COD Handling Fee:</span>
+                      {selectedPayment === 'cod' ? (
+                        <span className="font-bold text-ruby">+₹80 (Added for Cash on Delivery)</span>
+                      ) : (
+                        <span className="font-bold text-emerald-600">₹0 (FREE with Online UPI)</span>
+                      )}
+                    </div>
+                    <div className="pt-3 border-t border-gray-200 flex justify-between items-center">
+                      <div>
+                        <span className="text-sm font-bold text-[#1A2C54] block">Final Payable Amount</span>
+                        <span className="text-[10px] text-gray-400 font-medium">
+                          {selectedPayment === 'cod' ? 'Includes ₹80 COD handling fee' : 'Zero extra payment charges'}
+                        </span>
+                      </div>
+                      <span className="text-2xl font-bold text-ruby">{formatPrice(payableTotal)}</span>
+                    </div>
+                  </div>
+
                   {/* COD Notice */}
-                  <AnimatePresence mode="wait">
-                    {selectedPayment === 'cod' && (
-                      <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        className="bg-ruby/5 border border-ruby/10 rounded-2xl p-4 flex items-start gap-3"
-                      >
-                        <div className="p-2 bg-white rounded-xl text-ruby shadow-sm">
-                          <Check size={16} />
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-xs font-bold text-ruby">COD Handling Fee Notice</p>
-                          <p className="text-[11px] text-[#1A2C54] leading-relaxed">
-                            ₹80 will be added for Cash on Delivery. To avoid this charge, please pay online using UPI or Cards.
-                          </p>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                  {selectedPayment === 'cod' && (
+                    <div className="bg-ruby/5 border border-ruby/10 rounded-2xl p-4 flex items-start gap-3 transition-all">
+                      <div className="p-2 bg-white rounded-xl text-ruby shadow-sm">
+                        <Check size={16} />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-xs font-bold text-ruby">Cash on Delivery Notice</p>
+                        <p className="text-[11px] text-[#1A2C54] leading-relaxed">
+                          ₹80 handling charge has been added to your total. To avoid this charge, please choose online UPI / Wallets above.
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Secure Badge */}
                   <div className="bg-white rounded-2xl p-4 flex items-center justify-center gap-2 text-gray-300 border border-gray-50">
@@ -1812,14 +1865,26 @@ export default function Checkout() {
                     <span className="text-[9px] font-bold uppercase tracking-widest">100% Secure Checkout • Powered by Razorpay</span>
                   </div>
 
-                  <div className="step-nav mt-8">
+                  <div className="step-nav mt-6 space-y-3">
                     <SwipeButton 
-                      price={finalTotal}
+                      price={payableTotal}
                       onConfirm={handlePlaceOrder}
                       isLoading={isProcessingPayment}
                       disabled={isProcessingPayment || isOrderConfirmed}
                       isConfirmed={isOrderConfirmed}
                     />
+                    <div className="text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                          setCurrentStep(3);
+                        }}
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500 hover:text-ruby transition-colors py-1 cursor-pointer"
+                      >
+                        <ChevronLeft size={14} /> Need to edit address or items? Back to Review Order
+                      </button>
+                    </div>
                   </div>
                 </motion.div>
               )}
