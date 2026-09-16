@@ -2860,6 +2860,26 @@ async function startServer() {
     let keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim() || null;
     let keySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)?.trim() || null;
 
+    // Direct check of persistent local configuration if env vars were not populated
+    if (!keyId || !keySecret) {
+      try {
+        const localConfigPath = path.join(process.cwd(), '.env.local.json');
+        if (fs.existsSync(localConfigPath)) {
+          const localConfig = JSON.parse(fs.readFileSync(localConfigPath, 'utf8'));
+          if (!keyId && (localConfig.VITE_RAZORPAY_KEY_ID || localConfig.razorpayKeyId)) {
+            keyId = String(localConfig.VITE_RAZORPAY_KEY_ID || localConfig.razorpayKeyId).trim();
+            process.env.VITE_RAZORPAY_KEY_ID = keyId;
+          }
+          if (!keySecret && (localConfig.RAZORPAY_KEY_SECRET || localConfig.razorpayKeySecret)) {
+            keySecret = String(localConfig.RAZORPAY_KEY_SECRET || localConfig.razorpayKeySecret).trim();
+            process.env.RAZORPAY_KEY_SECRET = keySecret;
+          }
+        }
+      } catch (e) {
+        console.warn("Could not read .env.local.json fallback:", e);
+      }
+    }
+
     try {
       const settings = await resilientGetSettings();
       if (settings) {
@@ -3038,7 +3058,10 @@ async function startServer() {
         currency,
         receipt,
       });
-      res.json(order);
+      res.json({
+        ...order,
+        keyId: keyId
+      });
     } catch (error: any) {
       console.error("Razorpay order creation error:", error);
       res.status(500).json({ error: error.message || "Failed to create Razorpay order" });

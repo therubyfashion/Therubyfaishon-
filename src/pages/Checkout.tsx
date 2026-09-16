@@ -23,7 +23,7 @@ const STEPS = [
 ];
 
 export default function Checkout() {
-  const { items, total, itemCount, appliedPromo, clearCart } = useCart();
+  const { items, total, subtotal: cartSubtotal, totalDiscount: cartDiscount, itemCount, appliedPromo, clearCart } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -37,10 +37,26 @@ export default function Checkout() {
         if (Array.isArray(parsed) && parsed.length > 0) return parsed.filter(Boolean);
       }
     } catch (e) {}
+    try {
+      const backup = sessionStorage.getItem('checkout_items_backup');
+      if (backup) {
+        const parsed = JSON.parse(backup);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed.filter(Boolean);
+      }
+    } catch (e) {}
     return [];
   }, []);
 
   const displayItems = (Array.isArray(items) && items.length > 0) ? items : cachedItems;
+
+  // Persist current checkout items so returning via Back button never results in an empty state
+  useEffect(() => {
+    if (displayItems && displayItems.length > 0) {
+      try {
+        sessionStorage.setItem('checkout_items_backup', JSON.stringify(displayItems));
+      } catch (e) {}
+    }
+  }, [displayItems]);
   
   // Track live checkout
   useEffect(() => {
@@ -290,16 +306,12 @@ export default function Checkout() {
     const validAddresses = addresses.filter(a => a && a.id && !String(a.id).startsWith('addr_default_') && a.id !== '1' && a.id !== '2' && a.name !== 'Priya Sharma' && a.name !== 'Rajesh Sharma');
     if (validAddresses.length > 0) {
       localStorage.setItem('user_addresses', JSON.stringify(validAddresses));
-    } else {
-      localStorage.removeItem('user_addresses');
     }
   }, [addresses]);
 
   useEffect(() => {
     if (selectedAddress) {
       localStorage.setItem('selected_address_id', selectedAddress);
-    } else {
-      localStorage.removeItem('selected_address_id');
     }
   }, [selectedAddress]);
   const [newAddress, setNewAddress] = useState({
@@ -319,14 +331,37 @@ export default function Checkout() {
     { id: 'express', label: '10 Day Delivery', time: 'Guaranteed in 10 days', price: '₹120', icon: '⚡', cost: 120 },
   ];
 
-  const selectedAddrObj = addresses.find(a => a.id === selectedAddress) || addresses[0] || null;
+  const cachedSelectedAddr = useMemo(() => {
+    try {
+      const b = sessionStorage.getItem('checkout_address_backup') || localStorage.getItem('checkout_address_backup');
+      return b ? JSON.parse(b) : null;
+    } catch (e) {
+      return null;
+    }
+  }, []);
+
+  const selectedAddrObj = addresses.find(a => a.id === selectedAddress) || addresses[0] || cachedSelectedAddr;
   const selectedShippingObj = shippingOptions.find(o => o.id === selectedShipping) || shippingOptions[0];
 
-  const subtotal = (Array.isArray(items) && items.length > 0)
-    ? (Number(total) || 0)
-    : displayItems.reduce((sum: number, it: any) => sum + (Number(it.price || 0) * Number(it.quantity || 1)), 0);
-  const discount = Number(appliedPromo ? appliedPromo.discount : 0);
+  useEffect(() => {
+    if (selectedAddrObj && selectedAddrObj.name) {
+      try {
+        sessionStorage.setItem('checkout_address_backup', JSON.stringify(selectedAddrObj));
+        localStorage.setItem('checkout_address_backup', JSON.stringify(selectedAddrObj));
+      } catch (e) {}
+    }
+  }, [selectedAddrObj]);
+
+  // Clean subtotal calculation: raw items price sum
+  const subtotal = Number(cartSubtotal) > 0
+    ? Number(cartSubtotal)
+    : (Array.isArray(items) && items.length > 0)
+      ? items.reduce((sum: number, it: any) => sum + (Number(it.price || 0) * Number(it.quantity || 1)), 0)
+      : displayItems.reduce((sum: number, it: any) => sum + (Number(it.price || 0) * Number(it.quantity || 1)), 0);
+
+  const discount = Number(cartDiscount || (appliedPromo ? appliedPromo.discount : 0));
   const shippingCost = Number(selectedShippingObj?.cost || 0);
+  
   // COD fee is strictly ₹80 when selectedPayment is 'cod', and ₹0 otherwise
   const codFee = Number(selectedPayment === 'cod' ? 80 : 0);
 
@@ -343,8 +378,10 @@ export default function Checkout() {
   // Total for Review step: explicitly excludes COD fee
   const reviewTotal = Math.max(0, subtotal - discount - pointsDiscount + shippingCost);
 
-  // Total for Payment step & order placement: dynamically includes COD fee only if user chose COD
-  const finalTotal = Math.max(0, subtotal - discount - pointsDiscount + shippingCost + codFee);
+  // Total for Payment step & order placement: strictly reviewTotal + codFee
+  // When UPI selected: reviewTotal + 0 = reviewTotal
+  // When COD selected: reviewTotal + 80 = reviewTotal + 80 (ONLY ₹80 is added)
+  const finalTotal = Math.max(0, reviewTotal + codFee);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -1100,29 +1137,18 @@ export default function Checkout() {
 
         let razorpayKey = (import.meta as any).env.VITE_RAZORPAY_KEY_ID;
         
-        // If not in env, try to fetch from server
+        // If not in env, fetch from server configuration endpoint
         if (!razorpayKey) {
           try {
             const configRes = await fetch('/api/payment-config');
-            const configData = await configRes.json();
-            razorpayKey = configData.razorpayKeyId;
-            
-            if (!razorpayKey) {
-              const { diagnostics } = configData;
-              let errorMsg = 'Razorpay Key ID is missing.';
-              
-              if (!diagnostics?.serverHasViteKey && !diagnostics?.serverHasSecretKey) {
-                errorMsg += ' Server sees NO Razorpay keys. Did you click DEPLOY after adding Secrets?';
-              } else if (!diagnostics?.serverHasSecretKey) {
-                errorMsg += ' Key ID found, but Secret Key is missing on server.';
+            if (configRes.ok) {
+              const configData = await configRes.json();
+              if (configData.razorpayKeyId) {
+                razorpayKey = configData.razorpayKeyId;
               }
-              
-              toast.error(errorMsg, { duration: 6000 });
-              setIsProcessingPayment(false);
-              return;
             }
           } catch (err) {
-            console.error("Failed to fetch payment config:", err);
+            console.warn("Pre-fetching payment config skipped:", err);
           }
         }
 
@@ -1144,8 +1170,13 @@ export default function Checkout() {
             throw new Error(orderData.error || 'Failed to create order');
           }
 
+          const activeKey = razorpayKey || orderData.keyId;
+          if (!activeKey) {
+            throw new Error('Razorpay Key ID is not configured on the server. Please check your AI Studio secrets.');
+          }
+
           const options = {
-            key: razorpayKey,
+            key: activeKey,
             amount: orderData.amount,
             currency: orderData.currency,
             name: storeSettings?.storeName || 'The Ruby Fashion',
@@ -1246,13 +1277,14 @@ export default function Checkout() {
             </div>
 
             {/* Step Content */}
-            <AnimatePresence mode="wait">
+            <AnimatePresence mode="popLayout" initial={false}>
               {currentStep === 1 ? (
                 <motion.div 
                   key="step1"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.18 }}
                   className="space-y-6"
                 >
                   <h2 className="text-xl font-bold text-[#1A2C54]">Delivery Address</h2>
@@ -1585,9 +1617,10 @@ export default function Checkout() {
               ) : currentStep === 2 ? (
                 <motion.div 
                   key="step2"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.18 }}
                   className="space-y-6"
                 >
                   <h2 className="text-xl font-bold text-[#1A2C54]">Shipping Method</h2>
@@ -1632,9 +1665,10 @@ export default function Checkout() {
               ) : currentStep === 3 ? (
                 <motion.div 
                   key="step3"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.18 }}
                   className="space-y-8"
                 >
                   <h2 className="text-xl font-bold text-[#1A2C54]">Review Your Order</h2>
@@ -1648,10 +1682,10 @@ export default function Checkout() {
                           <MapPin size={20} />
                         </div>
                         <div className="space-y-1">
-                          <p className="font-bold text-[#1A2C54] text-[16px]">{selectedAddrObj?.name}</p>
+                          <p className="font-bold text-[#1A2C54] text-[16px]">{selectedAddrObj?.name || 'Customer'}</p>
                           <p className="text-sm text-gray-400 font-medium leading-relaxed">
-                            {selectedAddrObj?.address}, {selectedAddrObj?.landmark && `${selectedAddrObj?.landmark}, `}
-                            {selectedAddrObj?.city}, {selectedAddrObj?.state} - {selectedAddrObj?.pincode}
+                            {selectedAddrObj?.address || 'Address provided at checkout'}, {selectedAddrObj?.landmark && `${selectedAddrObj?.landmark}, `}
+                            {selectedAddrObj?.city || ''}{selectedAddrObj?.state ? `, ${selectedAddrObj.state}` : ''}{selectedAddrObj?.pincode ? ` - ${selectedAddrObj.pincode}` : ''}
                           </p>
                         </div>
                       </div>
@@ -1661,9 +1695,9 @@ export default function Checkout() {
                     <div className="bg-gray-50 rounded-[2rem] p-8 space-y-4 border border-gray-100/50">
                       <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Shipping Method</p>
                       <div className="flex items-center gap-4">
-                        <div className="text-3xl">{selectedShippingObj?.icon}</div>
+                        <div className="text-3xl">{selectedShippingObj?.icon || '🚚'}</div>
                         <p className="text-sm font-bold text-[#1A2C54]">
-                          {selectedShippingObj?.label} • {selectedShippingObj?.time}
+                          {selectedShippingObj?.label || 'Free Delivery'} • {selectedShippingObj?.time || 'Standard'}
                         </p>
                       </div>
                     </div>
@@ -1672,29 +1706,36 @@ export default function Checkout() {
                     <div className="bg-gray-50 rounded-[2rem] p-8 space-y-6 border border-gray-100/50">
                       <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Order Items</p>
                       <div className="space-y-6">
-                        {displayItems.map((item) => {
-                          const itemImg = (item.images && item.images[0]) || item.image || '';
-                          return (
-                            <div key={`${item.id}-${item.selectedSize}-${item.selectedColor || ''}`} className="flex items-center gap-4">
-                              <div className="w-16 h-20 bg-white rounded-2xl overflow-hidden flex-shrink-0 shadow-sm">
-                                {itemImg ? (
-                                  <img src={itemImg} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-gray-200">
-                                    <ShoppingBag size={20} />
-                                  </div>
-                                )}
+                        {displayItems.length === 0 ? (
+                          <div className="text-center py-6">
+                            <p className="text-sm text-gray-400 font-medium">No items found in order.</p>
+                            <Link to="/shop" className="inline-block mt-3 px-5 py-2 rounded-full bg-ruby text-white text-xs font-bold uppercase tracking-wider">Return to Shop</Link>
+                          </div>
+                        ) : (
+                          displayItems.map((item) => {
+                            const itemImg = (item.images && item.images[0]) || item.image || '';
+                            return (
+                              <div key={`${item.id}-${item.selectedSize}-${item.selectedColor || ''}`} className="flex items-center gap-4">
+                                <div className="w-16 h-20 bg-white rounded-2xl overflow-hidden flex-shrink-0 shadow-sm">
+                                  {itemImg ? (
+                                    <img src={itemImg} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-gray-200">
+                                      <ShoppingBag size={20} />
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex-grow space-y-1">
+                                  <h4 className="text-sm font-bold text-[#1A2C54]">{item.name}</h4>
+                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                                    Size {item.selectedSize} • {item.selectedColor || 'Default'} • Qty {item.quantity}
+                                  </p>
+                                </div>
+                                <p className="text-sm font-bold text-ruby">{formatPrice(Number(item.price * item.quantity))}</p>
                               </div>
-                              <div className="flex-grow space-y-1">
-                                <h4 className="text-sm font-bold text-[#1A2C54]">{item.name}</h4>
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                                  Size {item.selectedSize} • {item.selectedColor || 'Default'} • Qty {item.quantity}
-                                </p>
-                              </div>
-                              <p className="text-sm font-bold text-ruby">{formatPrice(Number(item.price * item.quantity))}</p>
-                            </div>
-                          );
-                        })}
+                            );
+                          })
+                        )}
                       </div>
                     </div>
 
@@ -1798,26 +1839,26 @@ export default function Checkout() {
               ) : (
                 <motion.div 
                   key="step4"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  transition={{ duration: 0.2 }}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.18 }}
                   className="space-y-8"
                 >
                   <div className="space-y-4">
-                    {/* Prominent, easily tappable Change Review Button */}
-                    <button 
-                      id="btn-change-review"
-                      type="button"
-                      onClick={() => setCurrentStep(3)}
-                      className="inline-flex items-center gap-2.5 px-5 py-3 rounded-2xl bg-white border-2 border-ruby/30 hover:border-ruby text-[#1A2C54] hover:text-ruby text-xs sm:text-sm font-bold uppercase tracking-wider shadow-sm hover:shadow-md transition-all active:scale-95 cursor-pointer min-h-[44px]"
-                      title="Go back to Review Order"
-                    >
-                      <div className="w-6 h-6 rounded-full bg-ruby/10 flex items-center justify-center text-ruby shrink-0">
-                        <ChevronLeft size={16} strokeWidth={2.5} />
-                      </div>
-                      <span>Change / Edit Order Review</span>
-                    </button>
+                    {/* Compact Back Button fitted to text */}
+                    <div>
+                      <button 
+                        id="btn-back-to-review"
+                        type="button"
+                        onClick={() => setCurrentStep(3)}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white border border-gray-200 hover:border-ruby text-[#1A2C54] hover:text-ruby text-xs font-bold uppercase tracking-wider shadow-sm transition-all active:scale-95 cursor-pointer w-fit"
+                        title="Back to Review"
+                      >
+                        <ChevronLeft size={14} strokeWidth={2.5} />
+                        <span>BACK</span>
+                      </button>
+                    </div>
                     <div className="space-y-2">
                       <h2 className="text-xl font-bold text-[#1A2C54]">Payment Method</h2>
                       <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Select how you'd like to pay</p>
@@ -1826,6 +1867,7 @@ export default function Checkout() {
                   
                   <div className="payment-options flex flex-col gap-4">
                     <div
+                      id="payment-opt-upi"
                       onClick={() => setSelectedPayment('upi')}
                       className={cn(
                         "payment-opt p-6 border-[1.5px] rounded-[1.5rem] cursor-pointer flex items-center gap-4 transition-all duration-200",
@@ -1835,7 +1877,6 @@ export default function Checkout() {
                       <div className="payment-icon p-3 bg-white rounded-2xl text-ruby shadow-sm"><Smartphone size={24} /></div>
                       <div className="flex-grow">
                         <span className="payment-name block text-[16px] font-bold text-[#1A2C54]">UPI / Wallets</span>
-                        <span className="text-xs text-emerald-600 font-bold">Fast & Zero Extra Fees</span>
                       </div>
                       <div className={cn(
                         "pay-radio w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
@@ -1846,6 +1887,7 @@ export default function Checkout() {
                     </div>
 
                     <div
+                      id="payment-opt-cod"
                       onClick={() => setSelectedPayment('cod')}
                       className={cn(
                         "payment-opt p-6 border-[1.5px] rounded-[1.5rem] cursor-pointer flex items-center gap-4 transition-all duration-200",
@@ -1855,7 +1897,15 @@ export default function Checkout() {
                       <div className="payment-icon p-3 bg-white rounded-2xl text-ruby shadow-sm"><Handshake size={24} /></div>
                       <div className="flex-grow">
                         <span className="payment-name block text-[16px] font-bold text-[#1A2C54]">Cash on Delivery</span>
-                        <span className="text-xs text-ruby font-semibold">+₹80 Handling Fee applies</span>
+                        {selectedPayment === 'cod' && (
+                          <motion.span 
+                            initial={{ opacity: 0, y: 2 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="text-xs text-ruby font-semibold block mt-0.5"
+                          >
+                            +₹80 Handling Fee applies
+                          </motion.span>
+                        )}
                       </div>
                       <div className={cn(
                         "pay-radio w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
@@ -1866,10 +1916,10 @@ export default function Checkout() {
                     </div>
                   </div>
 
-                  {/* COD Notice - Clean conditional rendering without nested AnimatePresence */}
+                  {/* COD Notice - Only shown when COD is selected */}
                   {selectedPayment === 'cod' && (
                     <motion.div 
-                      initial={{ opacity: 0, y: 8 }}
+                      initial={{ opacity: 0, y: 6 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="bg-ruby/5 border border-ruby/15 rounded-2xl p-4 flex items-start gap-3"
                     >
@@ -1884,63 +1934,6 @@ export default function Checkout() {
                       </div>
                     </motion.div>
                   )}
-
-                  {/* Dynamic Payment Breakdown on Payment Step */}
-                  <div className="bg-gray-50 rounded-[2rem] p-6 sm:p-8 space-y-4 border border-gray-100/60">
-                    <div className="flex justify-between items-center pb-3 border-b border-gray-200/60">
-                      <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Payment Breakdown</span>
-                      <span className="text-xs font-bold text-[#1A2C54] bg-white px-3 py-1 rounded-full border border-gray-200">
-                        {selectedPayment === 'cod' ? 'Cash on Delivery' : 'Online Payment (UPI/Wallets)'}
-                      </span>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex justify-between text-sm font-medium text-gray-500">
-                        <span>Items Subtotal</span>
-                        <span className="font-bold text-[#1A2C54]">{formatPrice(subtotal)}</span>
-                      </div>
-
-                      {discount > 0 && (
-                        <div className="flex justify-between text-sm font-bold text-ruby">
-                          <span>Promo Discount</span>
-                          <span>-{formatPrice(discount)}</span>
-                        </div>
-                      )}
-
-                      {pointsDiscount > 0 && (
-                        <div className="flex justify-between text-sm font-bold text-emerald-600">
-                          <span>Loyalty Discount</span>
-                          <span>-{formatPrice(pointsDiscount)}</span>
-                        </div>
-                      )}
-
-                      <div className="flex justify-between text-sm font-medium text-gray-500">
-                        <span>Shipping</span>
-                        <span className={cn("font-bold", shippingCost === 0 ? "text-green-500" : "text-[#1A2C54]")}>
-                          {shippingCost === 0 ? 'FREE' : formatPrice(shippingCost)}
-                        </span>
-                      </div>
-
-                      {selectedPayment === 'cod' && (
-                        <div className="flex justify-between items-center text-sm font-bold text-amber-800 bg-amber-50 px-3.5 py-2.5 rounded-xl border border-amber-200">
-                          <span className="flex items-center gap-2">
-                            <Handshake size={16} className="text-amber-700" /> Cash on Delivery Charge
-                          </span>
-                          <span className="text-amber-900">+₹80</span>
-                        </div>
-                      )}
-
-                      <div className="pt-4 border-t border-gray-200 flex justify-between items-end">
-                        <div>
-                          <p className="text-base sm:text-lg font-bold text-[#1A2C54]">Total Amount to Pay</p>
-                          <p className="text-[11px] text-gray-400 font-medium">
-                            {selectedPayment === 'cod' ? 'Includes ₹80 COD handling fee' : 'Zero convenience or payment gateway fees'}
-                          </p>
-                        </div>
-                        <p className="text-2xl sm:text-3xl font-bold text-ruby">{formatPrice(finalTotal)}</p>
-                      </div>
-                    </div>
-                  </div>
 
                   {/* Secure Badge */}
                   <div className="bg-white rounded-2xl p-4 flex items-center justify-center gap-2 text-gray-300 border border-gray-50">
