@@ -164,9 +164,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
 
           setItems(mergedList);
-          localStorage.removeItem('ruby_cart');
+          try {
+            localStorage.setItem('ruby_cart', JSON.stringify(mergedList));
+          } catch (e) {}
         } else {
           setItems(dbItems);
+          try {
+            if (dbItems.length > 0) {
+              localStorage.setItem('ruby_cart', JSON.stringify(dbItems));
+            }
+          } catch (e) {}
         }
 
         lastFetchedUserId.current = user.uid;
@@ -181,16 +188,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     fetchAndMergeCart();
   }, [user, authLoading]);
 
-  // Save guest cart state locally
+  // Save cart state locally as continuous resilient backup cache across navigation
   useEffect(() => {
-    if (!user && Array.isArray(items)) {
+    if (Array.isArray(items) && items.length > 0) {
       try {
         localStorage.setItem('ruby_cart', JSON.stringify(items.filter(Boolean)));
       } catch (err) {
         console.warn("⚠️ LocalStorage quota exceeded, could not save cart state locally:", err);
       }
     }
-  }, [items, user]);
+  }, [items]);
 
   useEffect(() => {
     const fetchActivePromotions = async () => {
