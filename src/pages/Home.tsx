@@ -42,20 +42,6 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Detect successful login from Google OAuth redirect directly to Home
-  useEffect(() => {
-    const searchParams = new URLSearchParams(window.location.search);
-    const hasSuccessParam = searchParams.get('login_success') === 'true';
-    const hasCodeOrHash = searchParams.has('code') || window.location.hash.includes('access_token=');
-
-    if (hasSuccessParam || hasCodeOrHash) {
-      toast.success("Welcome back! Successfully logged in.");
-      // Clean up URL parameters without reloading
-      const cleanUrl = window.location.pathname;
-      window.history.replaceState({}, document.title, cleanUrl);
-    }
-  }, []);
-
   useEffect(() => {
     const timer = setTimeout(() => {
       setSafetyTimeoutActive(false);

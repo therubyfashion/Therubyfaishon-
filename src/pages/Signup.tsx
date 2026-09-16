@@ -41,8 +41,8 @@ export default function Signup() {
     setLoading(true);
     try {
       const redirectUrl = window.location.origin.includes('therubyfashion.shop')
-        ? 'https://therubyfashion.shop/?login_success=true'
-        : `${window.location.origin}/?login_success=true`;
+        ? 'https://therubyfashion.shop/auth/callback'
+        : `${window.location.origin}/auth/callback`;
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
