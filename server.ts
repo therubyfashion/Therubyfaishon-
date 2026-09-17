@@ -2899,19 +2899,18 @@ async function startServer() {
 
   app.get("/api/payment-config", async (req, res) => {
     const { keyId, keySecret } = await getRazorpayCredentials();
-    
-    // Diagnostic info
-    console.log("Payment Config Request:", {
-      foundKey: !!keyId,
-      foundSecret: !!keySecret
-    });
+
+    if (!keyId || !keySecret) {
+      return res.json({ 
+        configured: false,
+        razorpayKeyId: null
+      });
+    }
 
     res.json({ 
-      razorpayKeyId: keyId || null,
-      diagnostics: {
-        serverHasViteKey: !!keyId,
-        serverHasSecretKey: !!keySecret
-      }
+      configured: true,
+      razorpayKeyId: keyId,
+      keyId: keyId
     });
   });
 
@@ -3037,8 +3036,8 @@ async function startServer() {
 
     if (!keyId || !keySecret) {
       console.error("Razorpay keys missing in environment/settings. Available env keys:", Object.keys(process.env).filter(k => k.includes('RAZORPAY')));
-      return res.status(500).json({ 
-        error: "Razorpay API is not configured on the server. Please ensure you have added VITE_RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to your Settings or Secrets in AI Studio, and then click 'Deploy' to apply the changes." 
+      return res.status(503).json({ 
+        error: "Online payment is temporarily unavailable. Please try Cash on Delivery or contact support at support@therubyfashion.shop" 
       });
     }
 

@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import { cn, syncToGoogleSheets } from '../lib/utils';
 import { sendNotification } from '../lib/notifications';
-import { ChevronLeft, ShoppingBag, MapPin, Home, Briefcase, Plus, CheckCircle2, Lock, Smartphone, Building2, Handshake, Check, Sparkles } from 'lucide-react';
+import { ChevronLeft, ShoppingBag, MapPin, Home, Briefcase, Plus, CheckCircle2, Lock, Smartphone, Building2, Handshake, Check, Sparkles, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { io } from 'socket.io-client';
 import { LoadingSpinner } from '../components/Skeleton';
@@ -132,11 +132,19 @@ export default function Checkout() {
   const [selectedShipping, setSelectedShipping] = useState<string>(() => {
     return localStorage.getItem('selected_shipping_id') || 'standard';
   });
-  // Default to online payment (UPI) so COD fee is not applied prematurely
+  // Default to online payment (UPI) if available, or COD if Razorpay is not configured
   const [selectedPayment, setSelectedPayment] = useState<'upi' | 'cod'>('upi');
+  const [isRazorpayAvailable, setIsRazorpayAvailable] = useState<boolean>(true);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [isOrderConfirmed, setIsOrderConfirmed] = useState(false);
   const [paymentStep, setPaymentStep] = useState(1);
+
+  // Automatically switch to Cash on Delivery if Razorpay is unavailable
+  useEffect(() => {
+    if (!isRazorpayAvailable && selectedPayment === 'upi') {
+      setSelectedPayment('cod');
+    }
+  }, [isRazorpayAvailable, selectedPayment]);
 
   useEffect(() => {
     if (!isProcessingPayment) {
@@ -278,14 +286,24 @@ export default function Checkout() {
         const configRes = await fetch('/api/payment-config');
         if (configRes.ok) {
           const configData = await configRes.json();
+          const configured = configData.configured !== false && Boolean(configData.razorpayKeyId || (import.meta as any).env.VITE_RAZORPAY_KEY_ID);
+          setIsRazorpayAvailable(configured);
+          if (!configured) {
+            setSelectedPayment('cod');
+          }
           setStoreSettings({
             storeName: 'The Ruby Fashion',
             storeLogo: 'https://cdn-icons-png.flaticon.com/512/2909/2909813.png',
             ...configData
           });
+        } else {
+          setIsRazorpayAvailable(false);
+          setSelectedPayment('cod');
         }
       } catch (error) {
         console.error("Error fetching settings:", error);
+        setIsRazorpayAvailable(false);
+        setSelectedPayment('cod');
       }
     };
     fetchSettings();
@@ -1143,6 +1161,14 @@ export default function Checkout() {
             const configRes = await fetch('/api/payment-config');
             if (configRes.ok) {
               const configData = await configRes.json();
+              if (configData.configured === false) {
+                setIsRazorpayAvailable(false);
+                setSelectedPayment('cod');
+                toast.error("Online payment is temporarily unavailable. Please try Cash on Delivery or contact support at support@therubyfashion.shop");
+                setIsProcessingPayment(false);
+                setIsOrderConfirmed(false);
+                return;
+              }
               if (configData.razorpayKeyId) {
                 razorpayKey = configData.razorpayKeyId;
               }
@@ -1167,12 +1193,16 @@ export default function Checkout() {
           const orderData = await orderResponse.json();
 
           if (!orderResponse.ok) {
-            throw new Error(orderData.error || 'Failed to create order');
+            setIsRazorpayAvailable(false);
+            setSelectedPayment('cod');
+            throw new Error(orderData.error || 'Online payment is temporarily unavailable. Please try Cash on Delivery or contact support at support@therubyfashion.shop');
           }
 
           const activeKey = razorpayKey || orderData.keyId;
           if (!activeKey) {
-            throw new Error('Razorpay Key ID is not configured on the server. Please check your AI Studio secrets.');
+            setIsRazorpayAvailable(false);
+            setSelectedPayment('cod');
+            throw new Error('Online payment is temporarily unavailable. Please try Cash on Delivery or contact support at support@therubyfashion.shop');
           }
 
           const options = {
@@ -1212,8 +1242,12 @@ export default function Checkout() {
           rzp.open();
         } catch (e: any) {
           console.error('Razorpay initialization failed:', e);
-          toast.error(e.message || 'Failed to initialize payment gateway. Please try again.');
+          setIsRazorpayAvailable(false);
+          setSelectedPayment('cod');
+          const errMsg = "Online payment is temporarily unavailable. Please try Cash on Delivery or contact support at support@therubyfashion.shop";
+          toast.error(errMsg);
           setIsProcessingPayment(false);
+          setIsOrderConfirmed(false);
         }
       } else {
         // Cash on Delivery
@@ -1864,25 +1898,57 @@ export default function Checkout() {
                       <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Select how you'd like to pay</p>
                     </div>
                   </div>
+
+                  {!isRazorpayAvailable && (
+                    <div id="razorpay-unavailable-banner" className="bg-amber-50/90 border border-amber-200/80 rounded-2xl p-4 flex items-start gap-3">
+                      <div className="p-1.5 bg-amber-100 rounded-xl text-amber-700 shrink-0 mt-0.5">
+                        <AlertCircle size={18} />
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-bold text-amber-900">Payment Notice</p>
+                        <p className="text-xs text-amber-800 font-medium leading-relaxed">
+                          Online payment is temporarily unavailable. Please try Cash on Delivery or contact support at{' '}
+                          <a href="mailto:support@therubyfashion.shop" className="underline font-bold text-amber-900 hover:text-amber-950">
+                            support@therubyfashion.shop
+                          </a>
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   
                   <div className="payment-options flex flex-col gap-4">
                     <div
                       id="payment-opt-upi"
-                      onClick={() => setSelectedPayment('upi')}
+                      onClick={() => {
+                        if (!isRazorpayAvailable) {
+                          toast.error("Online payment is temporarily unavailable. Please try Cash on Delivery or contact support at support@therubyfashion.shop");
+                          setSelectedPayment('cod');
+                          return;
+                        }
+                        setSelectedPayment('upi');
+                      }}
                       className={cn(
-                        "payment-opt p-6 border-[1.5px] rounded-[1.5rem] cursor-pointer flex items-center gap-4 transition-all duration-200",
-                        selectedPayment === 'upi' ? "border-ruby bg-ruby/5 shadow-lg shadow-ruby/5" : "border-gray-100 hover:border-ruby/30"
+                        "payment-opt p-6 border-[1.5px] rounded-[1.5rem] flex items-center gap-4 transition-all duration-200",
+                        !isRazorpayAvailable ? "opacity-60 cursor-not-allowed bg-gray-50/70 border-gray-200" : "cursor-pointer",
+                        selectedPayment === 'upi' && isRazorpayAvailable ? "border-ruby bg-ruby/5 shadow-lg shadow-ruby/5" : "border-gray-100 hover:border-ruby/30"
                       )}
                     >
                       <div className="payment-icon p-3 bg-white rounded-2xl text-ruby shadow-sm"><Smartphone size={24} /></div>
                       <div className="flex-grow">
-                        <span className="payment-name block text-[16px] font-bold text-[#1A2C54]">UPI / Wallets</span>
+                        <div className="flex items-center gap-2">
+                          <span className="payment-name block text-[16px] font-bold text-[#1A2C54]">UPI / Wallets</span>
+                          {!isRazorpayAvailable && (
+                            <span className="text-[10px] uppercase tracking-wider font-bold text-amber-700 bg-amber-100/90 px-2 py-0.5 rounded-full">
+                              Unavailable
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className={cn(
                         "pay-radio w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
-                        selectedPayment === 'upi' ? "border-ruby bg-ruby" : "border-gray-200"
+                        selectedPayment === 'upi' && isRazorpayAvailable ? "border-ruby bg-ruby" : "border-gray-200"
                       )}>
-                        {selectedPayment === 'upi' && <div className="w-2 h-2 bg-white rounded-full" />}
+                        {selectedPayment === 'upi' && isRazorpayAvailable && <div className="w-2 h-2 bg-white rounded-full" />}
                       </div>
                     </div>
 
@@ -1929,7 +1995,10 @@ export default function Checkout() {
                       <div className="space-y-1">
                         <p className="text-xs font-bold text-ruby">COD Handling Fee Notice</p>
                         <p className="text-[12px] text-[#1A2C54] font-medium leading-relaxed">
-                          ₹80 cash-on-delivery handling charge has been added to your total. To save ₹80, switch to <strong>UPI / Wallets</strong> for instant, zero-fee payment.
+                          {isRazorpayAvailable 
+                            ? <span>₹80 cash-on-delivery handling charge has been added to your total. To save ₹80, switch to <strong>UPI / Wallets</strong> for instant, zero-fee payment.</span>
+                            : <span>₹80 cash-on-delivery handling charge has been added to your total for door-step collection.</span>
+                          }
                         </p>
                       </div>
                     </motion.div>
@@ -1938,7 +2007,9 @@ export default function Checkout() {
                   {/* Secure Badge */}
                   <div className="bg-white rounded-2xl p-4 flex items-center justify-center gap-2 text-gray-300 border border-gray-50">
                     <Lock size={14} />
-                    <span className="text-[9px] font-bold uppercase tracking-widest">100% Secure Checkout • Powered by Razorpay</span>
+                    <span className="text-[9px] font-bold uppercase tracking-widest">
+                      {isRazorpayAvailable ? "100% Secure Checkout • Powered by Razorpay" : "100% Secure & Encrypted Checkout"}
+                    </span>
                   </div>
 
                   <div className="step-nav mt-8">
