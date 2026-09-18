@@ -2857,7 +2857,7 @@ async function startServer() {
 
 
   async function getRazorpayCredentials() {
-    let keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim() || null;
+    let keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID || 'rzp_live_ScBsqG0Z4iTmAG')?.trim() || null;
     let keySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)?.trim() || null;
 
     // Direct check of persistent local configuration if env vars were not populated
