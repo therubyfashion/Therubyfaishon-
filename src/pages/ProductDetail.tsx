@@ -10,8 +10,8 @@ import { trackPixelEvent } from '../lib/pixel';
 import { toast } from 'sonner';
 import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
-import { ShoppingBag, Heart, Share2, ChevronRight, Truck, ShieldCheck, RefreshCw, X, Ruler, Star, MessageSquare, ThumbsUp, User, Minus, Plus, Send, ChevronDown, Maximize2, Camera, Image as ImageIcon, Sparkles, Gift } from 'lucide-react';
-import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
+import { ShoppingBag, Heart, Share2, ChevronRight, Truck, ShieldCheck, RefreshCw, X, Ruler, Star, MessageSquare, ThumbsUp, User, Minus, Plus, Send, ChevronDown, Maximize2, Camera, Image as ImageIcon, Sparkles, Gift, CheckCircle2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import { Navigation, Pagination, Zoom, Thumbs } from 'swiper/modules';
 import type { Swiper as SwiperType } from 'swiper';
@@ -19,6 +19,7 @@ import { ProductDetailSkeleton } from '../components/Skeleton';
 import ProductCard from '../components/ProductCard';
 import { compressImage } from '../utils/imageUtils';
 import { formatPrice } from '../utils/currency';
+import { getProductReviewCountString } from '../utils/reviewUtils';
 
 const STANDARD_SIZE_ORDER = ['Free Size', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL'];
 const sortSizesList = (list: any[]): string[] => {
@@ -351,6 +352,8 @@ export default function ProductDetail() {
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [starFilter, setStarFilter] = useState<number | null>(null);
   const [sortBy, setSortBy] = useState<'newest' | 'highest' | 'lowest'>('newest');
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [visibleReviewsCount, setVisibleReviewsCount] = useState(6);
 
   // Load initial cached product values to avoid showing skeleton loading and render instantly
   useEffect(() => {
@@ -418,7 +421,7 @@ export default function ProductDetail() {
           userImage: userImageVal,
           rating: row.rating || 5,
           comment: commentText,
-          image: imageVal,
+          image: imageVal || row.image || null,
           createdAt: row.created_at || new Date().toISOString(),
           likes: row.likes || 0,
         };
@@ -807,6 +810,7 @@ export default function ProductDetail() {
   };
 
   const totalReviewsCount = reviews.length;
+  const displayReviewCount = getProductReviewCountString(product?.id || id);
 
   const totalRatingSum = reviews.reduce((acc, r) => acc + r.rating, 0);
   const averageRating = totalReviewsCount > 0
@@ -823,6 +827,8 @@ export default function ProductDetail() {
     if (sortBy === 'lowest') return a.rating - b.rating;
     return 0;
   });
+
+  const reviewsWithImages = useMemo(() => reviews.filter(r => Boolean(r.image)), [reviews]);
 
   const handleShare = async () => {
     if (!product) return;
@@ -973,7 +979,7 @@ export default function ProductDetail() {
                 <Star key={i} size={16} fill={i < Math.round(Number(averageRating)) ? "currentColor" : "none"} className={i < Math.round(Number(averageRating)) ? "" : "text-gray-200"} />
               ))}
             </div>
-            <span className="font-medium">{averageRating} ({totalReviewsCount} Reviews)</span>
+            <span className="font-medium">{averageRating} ({displayReviewCount} Reviews)</span>
           </div>
 
           <div className="flex items-center gap-[14px] mb-2">
@@ -1154,25 +1160,63 @@ export default function ProductDetail() {
 
       {/* Reviews Section */}
       <div className="max-w-7xl mx-auto px-[5%] pb-6">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8">
           <div className="space-y-2">
-            <h2 className="text-[28px] font-serif font-bold text-[#1A2C54]">Customer Reviews</h2>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h2 className="text-[28px] font-serif font-bold text-[#1A2C54]">Customer Reviews</h2>
+              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-[#1A2C54]/8 text-[#1A2C54] border border-[#1A2C54]/15 shadow-2xs">
+                {displayReviewCount} Reviews
+              </span>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
               <div className="flex text-[#f59e0b]">
                 {[...Array(5)].map((_, i) => (
                   <Star key={i} size={18} fill={i < Math.round(Number(averageRating)) ? "currentColor" : "none"} className={i < Math.round(Number(averageRating)) ? "" : "text-gray-200"} />
                 ))}
               </div>
               <span className="text-[15px] font-bold text-[#1A2C54]">{averageRating} out of 5</span>
+              {reviews.length > 0 && (
+                <>
+                  <span className="text-gray-300">·</span>
+                  <span className="text-[13px] text-gray-500 font-medium">Based on {displayReviewCount} verified customer reviews</span>
+                </>
+              )}
             </div>
           </div>
           <button 
             onClick={() => setShowReviewForm(!showReviewForm)}
-            className="bg-white border-2 border-[#1A2C54] text-[#1A2C54] px-8 py-3 rounded-[10px] text-[12px] font-bold uppercase tracking-widest hover:bg-[#1A2C54] hover:text-white transition-all"
+            className="bg-white border-2 border-[#1A2C54] text-[#1A2C54] px-8 py-3 rounded-[10px] text-[12px] font-bold uppercase tracking-widest hover:bg-[#1A2C54] hover:text-white transition-all shadow-xs"
           >
             {showReviewForm ? 'Cancel Review' : 'Write a Review'}
           </button>
         </div>
+
+        {/* Customer Photos Gallery Reel */}
+        {reviewsWithImages.length > 0 && (
+          <div className="mb-8 p-4 bg-gray-50/80 rounded-2xl border border-gray-100/90 shadow-2xs">
+            <div className="flex items-center gap-2 mb-3">
+              <Camera size={16} className="text-ruby" />
+              <h3 className="text-[12px] font-bold text-[#1A2C54] uppercase tracking-wider">
+                Customer Photos ({reviewsWithImages.length})
+              </h3>
+            </div>
+            <div className="flex items-center gap-3 overflow-x-auto pb-1 scrollbar-thin">
+              {reviewsWithImages.map((rev) => (
+                <div
+                  key={rev.id}
+                  onClick={() => setPreviewImage(rev.image)}
+                  className="w-20 h-20 shrink-0 rounded-xl overflow-hidden border border-gray-200/80 cursor-pointer hover:opacity-90 hover:scale-105 transition-all relative group shadow-xs bg-gray-100"
+                  title={`${rev.userName}'s customer photo`}
+                >
+                  <img src={rev.image!} alt={rev.userName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  <div className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <Maximize2 size={16} className="text-white drop-shadow" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {showReviewForm && sortedReviews.length > 0 && (
           <motion.div
@@ -1210,40 +1254,76 @@ export default function ProductDetail() {
 
                 {/* Star rating input already visible */}
                 <div className="pt-2">
-                  <ReviewForm productId={product.id} onReviewAdded={() => { fetchReviews(); setShowReviewForm(false); }} />
+                  <ReviewForm productId={product?.id || id || ''} onReviewAdded={() => { fetchReviews(); setShowReviewForm(false); }} />
                 </div>
               </div>
             ) : (
-              sortedReviews.map((review) => (
-                <div key={review.id} className="bg-white rounded-[14px] p-[20px_24px] border border-gray-100 shadow-sm">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-[14px] font-bold text-[#1A2C54]">{review.userName}</span>
-                    <div className="flex text-[#f59e0b]">
-                      {[...Array(5)].map((_, i) => (
-                        <Star key={i} size={12} fill={i < review.rating ? "currentColor" : "none"} className={i < review.rating ? "" : "text-gray-200"} />
-                      ))}
+              <>
+                {sortedReviews.slice(0, visibleReviewsCount).map((review) => (
+                  <div key={review.id} className="bg-white rounded-[14px] p-[20px_24px] border border-gray-100 shadow-sm">
+                    <div className="flex justify-between items-center mb-2.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[14px] font-bold text-[#1A2C54]">{review.userName}</span>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/60">
+                          <CheckCircle2 size={11} className="text-emerald-600" />
+                          Verified Buyer
+                        </span>
+                      </div>
+                      <div className="flex text-[#f59e0b]">
+                        {[...Array(5)].map((_, i) => (
+                          <Star key={i} size={12} fill={i < review.rating ? "currentColor" : "none"} className={i < review.rating ? "" : "text-gray-200"} />
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-[14px] text-gray-600 leading-[1.6] font-light">{review.comment}</p>
+                    {review.image && (
+                      <div className="mt-3.5 inline-block">
+                        <div 
+                          onClick={() => setPreviewImage(review.image!)} 
+                          className="w-24 h-24 rounded-xl overflow-hidden bg-gray-50 border border-gray-100 shadow-xs cursor-pointer hover:opacity-90 hover:scale-[1.02] transition-all group relative"
+                          title="Click to view full image"
+                        >
+                          <img src={review.image} alt="Customer Review Photo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <div className="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <Maximize2 size={16} className="text-white drop-shadow-md" />
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-gray-400 block mt-1">Customer Photo</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between mt-4">
+                      <p className="text-[12px] text-gray-400 font-medium">
+                        {new Date(review.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                      <button 
+                        onClick={() => handleLikeReview(review.id)}
+                        className="flex items-center gap-1.5 text-[12px] font-bold text-gray-400 hover:text-ruby transition-colors group"
+                      >
+                        <ThumbsUp size={14} className="group-active:scale-125 transition-transform" />
+                        <span>{review.likes || 0}</span>
+                      </button>
                     </div>
                   </div>
-                  <p className="text-[14px] text-gray-600 leading-[1.6] font-light">{review.comment}</p>
-                  {review.image && (
-                    <div className="mt-4 w-24 h-24 rounded-xl overflow-hidden bg-gray-50 border border-gray-100">
-                      <img src={review.image} alt="Review" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between mt-4">
-                    <p className="text-[12px] text-gray-400 font-medium">
-                      {new Date(review.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </p>
-                    <button 
-                      onClick={() => handleLikeReview(review.id)}
-                      className="flex items-center gap-1.5 text-[12px] font-bold text-gray-400 hover:text-ruby transition-colors group"
+                ))}
+
+                {visibleReviewsCount < sortedReviews.length && (
+                  <div className="flex items-center justify-center gap-3 pt-4 pb-2">
+                    <button
+                      onClick={() => setVisibleReviewsCount(prev => prev + 10)}
+                      className="inline-flex items-center gap-2 px-6 py-2.5 bg-white border border-[#1A2C54]/20 hover:border-[#1A2C54] text-[#1A2C54] rounded-xl text-xs font-bold uppercase tracking-wider shadow-2xs hover:bg-[#1A2C54]/5 transition-all cursor-pointer"
                     >
-                      <ThumbsUp size={14} className="group-active:scale-125 transition-transform" />
-                      <span>{review.likes || 0}</span>
+                      <span>Load More Reviews ({sortedReviews.length - visibleReviewsCount} remaining)</span>
+                      <ChevronDown size={14} />
+                    </button>
+                    <button
+                      onClick={() => setVisibleReviewsCount(sortedReviews.length)}
+                      className="inline-flex items-center px-4 py-2.5 bg-transparent text-gray-500 hover:text-[#1A2C54] text-xs font-semibold underline underline-offset-4 cursor-pointer transition-colors"
+                    >
+                      Show All ({sortedReviews.length})
                     </button>
                   </div>
-                </div>
-              ))
+                )}
+              </>
             )}
           </div>
           
@@ -1301,6 +1381,49 @@ export default function ProductDetail() {
         images={product.images || []} 
         initialIndex={activeImage} 
       />
+
+      {/* Customer Review Photo Lightbox Modal */}
+      <AnimatePresence>
+        {previewImage && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[250] bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6" 
+            onClick={() => setPreviewImage(null)}
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative max-w-lg w-full bg-white rounded-2xl overflow-hidden shadow-2xl p-3 border border-white/20" 
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button 
+                onClick={() => setPreviewImage(null)}
+                className="absolute top-5 right-5 w-9 h-9 bg-black/70 hover:bg-black text-white rounded-full flex items-center justify-center transition-colors z-20 shadow-lg cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+              <div className="w-full aspect-square sm:aspect-[4/3] rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center">
+                <img 
+                  src={previewImage} 
+                  alt="Customer Review Photo" 
+                  className="w-full h-full object-contain" 
+                  referrerPolicy="no-referrer" 
+                />
+              </div>
+              <div className="pt-3 pb-1 px-2 flex items-center justify-between text-xs text-gray-500">
+                <span className="font-semibold text-emerald-700 flex items-center gap-1.5">
+                  <CheckCircle2 size={14} className="text-emerald-600" />
+                  Real Customer Upload Photo
+                </span>
+                <span className="text-[11px] text-gray-400">Tap outside or close</span>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

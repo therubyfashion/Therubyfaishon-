@@ -12,6 +12,7 @@ import Navbar from './components/Navbar';
 import ChatWidget from './components/ChatWidget';
 import SplashScreen from './components/SplashScreen';
 import PageLoader from './components/PageLoader';
+import ErrorBoundary from './components/ErrorBoundary';
 import { AnimatePresence } from 'framer-motion';
 import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
@@ -564,8 +565,9 @@ function AppContent() {
       {!isAdminPath && !isAuthCallback && <Navbar />}
 
       <main className="flex-grow">
-        <Suspense fallback={<PageLoader variant="minimal" message="Gathering Collections" />}>
-          <Routes>
+        <ErrorBoundary>
+          <Suspense fallback={<PageLoader variant="minimal" message="Gathering Collections" />}>
+            <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/shop" element={<Shop />} />
             <Route path="/product/:id" element={<ProductDetail />} />
@@ -610,6 +612,7 @@ function AppContent() {
             />
           </Routes>
         </Suspense>
+        </ErrorBoundary>
       </main>
       {!isAdminPath && !isAuthCallback && <Footer />}
       {!isAdminPath && !isAuthCallback && <BottomNav />}

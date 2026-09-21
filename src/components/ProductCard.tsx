@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { cn } from '../lib/utils';
 import { formatPrice } from '../utils/currency';
 import { supabase } from '../supabase';
+import { getProductReviewCountString } from '../utils/reviewUtils';
 
 interface ProductCardProps {
   product: Product;
@@ -169,7 +170,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
               <Star size={10} fill="currentColor" />
             </div>
             <span className="font-semibold text-gray-700">{reviewStats.average.toFixed(1)}</span>
-            <span className="text-[10px] text-gray-400 leading-none">({reviewStats.count})</span>
+            <span className="text-[10px] text-gray-400 leading-none">({getProductReviewCountString(product.id)})</span>
           </div>
         ) : (
           <div className="product-rating flex items-center gap-1 mt-1 text-[11px] text-gray-400 font-medium">
