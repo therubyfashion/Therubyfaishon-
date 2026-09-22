@@ -70,6 +70,7 @@ function ReviewForm({ productId, onReviewAdded }: { productId: string; onReviewA
           avatar_url: uImage,
           rating: rating,
           comment: comment,
+          image: image || null,
           likes: 0,
           created_at: new Date().toISOString()
         });
@@ -810,7 +811,7 @@ export default function ProductDetail() {
   };
 
   const totalReviewsCount = reviews.length;
-  const displayReviewCount = getProductReviewCountString(product?.id || id);
+  const displayReviewCount = getProductReviewCountString(product?.id || id, reviews.length);
 
   const totalRatingSum = reviews.reduce((acc, r) => acc + r.rating, 0);
   const averageRating = totalReviewsCount > 0
@@ -1224,7 +1225,7 @@ export default function ProductDetail() {
             animate={{ opacity: 1, y: 0 }}
             className="max-w-2xl mb-12"
           >
-            <ReviewForm productId={product.id} onReviewAdded={() => setShowReviewForm(false)} />
+            <ReviewForm productId={product.id} onReviewAdded={() => { fetchReviews(); setShowReviewForm(false); }} />
           </motion.div>
         )}
 
