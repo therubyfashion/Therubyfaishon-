@@ -20,6 +20,7 @@ import ProductCard from '../components/ProductCard';
 import { compressImage } from '../utils/imageUtils';
 import { formatPrice } from '../utils/currency';
 import { getProductReviewCountString } from '../utils/reviewUtils';
+import { getMasterProductById, saveMasterProducts } from '../utils/productStorage';
 
 const STANDARD_SIZE_ORDER = ['Free Size', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL'];
 const sortSizesList = (list: any[]): string[] => {
@@ -339,8 +340,18 @@ export default function ProductDetail() {
   const { addToCart } = useCart();
   const { toggleWishlist, isInWishlist } = useWishlist();
   const { user } = useAuth();
-  const [product, setProduct] = useState<Product | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [product, setProduct] = useState<Product | null>(() => {
+    if (id) {
+      return getMasterProductById(id) || null;
+    }
+    return null;
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    if (id) {
+      return !getMasterProductById(id);
+    }
+    return true;
+  });
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedColor, setSelectedColor] = useState('');
   const [activeImage, setActiveImage] = useState(0);
@@ -477,26 +488,23 @@ export default function ProductDetail() {
 
         // 1. Try to fetch from Supabase first
         try {
-          const { data: catData } = await supabase
-            .from('categories')
-            .select('*');
+          const [catRes, prodRes] = await Promise.all([
+            supabase.from('categories').select('*'),
+            supabase.from('products').select('*').eq('id', id).maybeSingle()
+          ]);
 
           const categoryMap: Record<string, string> = {};
-          if (catData) {
-            catData.forEach(c => {
+          if (catRes.data) {
+            catRes.data.forEach(c => {
               categoryMap[c.id] = c.name;
             });
           }
 
-          const { data: p, error: prodErr } = await supabase
-            .from('products')
-            .select('*')
-            .eq('id', id)
-            .maybeSingle();
-
-          if (prodErr) {
-            console.warn("Supabase single product fetch error:", prodErr);
+          if (prodRes.error) {
+            console.warn("Supabase single product fetch error:", prodRes.error);
           }
+
+          const p = prodRes.data;
 
           if (p) {
             data = {
@@ -505,7 +513,7 @@ export default function ProductDetail() {
               description: p.description || '',
               price: Number(p.price || 0),
               comparePrice: p.compare_price ? Number(p.compare_price) : undefined,
-              category: (p.category_ids || []).map((id: string) => categoryMap[id]).filter(Boolean),
+              category: (p.category_ids || []).map((cid: string) => categoryMap[cid]).filter(Boolean),
               sizes: Array.isArray(p.sizes) ? p.sizes : [],
               images: Array.isArray(p.images) ? p.images : [],
               stock: Number(p.stock ?? 0),
@@ -524,15 +532,12 @@ export default function ProductDetail() {
               wishlistCount: p.wishlist_count ?? 0,
             };
 
-            // Increment view count in Supabase
-            try {
-              await supabase
-                .from('products')
-                .update({ view_count: (p.view_count || 0) + 1 })
-                .eq('id', id);
-            } catch (vErr) {
-              console.warn("Failed to increment view count in Supabase:", vErr);
-            }
+            // Increment view count asynchronously (non-blocking)
+            supabase
+              .from('products')
+              .update({ view_count: (p.view_count || 0) + 1 })
+              .eq('id', id)
+              .then(() => {}, () => {});
 
             // Fetch Related Products from Supabase
             try {
@@ -557,7 +562,7 @@ export default function ProductDetail() {
                   description: rp.description || '',
                   price: Number(rp.price || 0),
                   comparePrice: rp.compare_price ? Number(rp.compare_price) : undefined,
-                  category: (rp.category_ids || []).map((id: string) => categoryMap[id]).filter(Boolean),
+                  category: (rp.category_ids || []).map((cid: string) => categoryMap[cid]).filter(Boolean),
                   sizes: Array.isArray(rp.sizes) ? rp.sizes : [],
                   images: Array.isArray(rp.images) ? rp.images : [],
                   stock: Number(rp.stock ?? 0),
@@ -593,10 +598,16 @@ export default function ProductDetail() {
           } catch (e) {
             console.warn("Cache fallback failed:", e);
           }
+          if (!data && id) {
+            const fallback = getMasterProductById(id);
+            if (fallback) data = fallback;
+          }
         }
 
         if (data) {
           setProduct(data);
+          setLoading(false);
+          saveMasterProducts([data]);
           
           // Preselect sizes/colors if not already set by cache or UI
           const fetchedVariantSizes = Array.from(new Set((data.variants || []).map((v: any) => v.size).filter(Boolean)));

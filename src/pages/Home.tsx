@@ -19,38 +19,59 @@ import OneSignal from 'onesignal-cordova-plugin';
 import { Capacitor } from '@capacitor/core';
 import { useNotifications } from '../contexts/NotificationContext';
 import { checkProductHealth, logProductDiagnostics } from '../utils/productHealthCheck';
+import { 
+  getMasterProducts, 
+  saveMasterProducts, 
+  getMasterCategories, 
+  saveMasterCategories, 
+  getMasterBanners, 
+  saveMasterBanners 
+} from '../utils/productStorage';
 
 export default function Home() {
   const { user, profile } = useAuth();
   const { unreadCount } = useNotifications();
-  const [trendingProducts, setTrendingProducts] = useState<Product[]>([]);
-  const [popularProducts, setPopularProducts] = useState<Product[]>([]);
-  const [promoConfig, setPromoConfig] = useState<any>({ promoEnabled: false, promoMessage: "Welcome to The Ruby Ethnic Wear Store! 🎉" });
-  const [categories, setCategories] = useState<any[]>([]);
-  const [banners, setBanners] = useState<any[]>([]);
   
-  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
-  const [productsLoaded, setProductsLoaded] = useState(false);
-  const [bannersLoaded, setBannersLoaded] = useState(false);
-  const [minLoadingActive, setMinLoadingActive] = useState(true);
-  const [safetyTimeoutActive, setSafetyTimeoutActive] = useState(true);
+  // Initialize immediately from persistent master store so products NEVER disappear
+  const [trendingProducts, setTrendingProducts] = useState<Product[]>(() => {
+    const all = getMasterProducts();
+    const trending = all.filter(p => p.isTrending);
+    return trending.length > 0 ? trending : all.slice(0, 4);
+  });
+  
+  const [popularProducts, setPopularProducts] = useState<Product[]>(() => {
+    const all = getMasterProducts();
+    const popular = all.filter(p => p.isPopular);
+    return popular.length > 0 ? popular : all.slice(0, 4);
+  });
+  
+  const [promoConfig, setPromoConfig] = useState<any>({ promoEnabled: false, promoMessage: "Welcome to The Ruby Ethnic Wear Store! 🎉" });
+  const [categories, setCategories] = useState<any[]>(() => getMasterCategories());
+  const [banners, setBanners] = useState<any[]>(() => getMasterBanners());
+  
+  const [categoriesLoaded, setCategoriesLoaded] = useState(true);
+  const [productsLoaded, setProductsLoaded] = useState(true);
+  const [bannersLoaded, setBannersLoaded] = useState(true);
+  const [minLoadingDone, setMinLoadingDone] = useState(false);
+  const [safetyTimeoutDone, setSafetyTimeoutDone] = useState(false);
 
   useEffect(() => {
+    // Brief 200ms polish timer
     const timer = setTimeout(() => {
-      setMinLoadingActive(false);
-    }, 450); // 450ms minimum loader duration for smooth page transition
+      setMinLoadingDone(true);
+    }, 200);
     return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setSafetyTimeoutActive(false);
-    }, 2500); // 2.5s safety timeout
+      setSafetyTimeoutDone(true);
+    }, 1500);
     return () => clearTimeout(timer);
   }, []);
 
-  const hasRealData = categories.length > 0 && trendingProducts.length > 0;
-  const loading = minLoadingActive || (!hasRealData && safetyTimeoutActive);
+  // Loading state: if products already exist in storage, never block the screen
+  const loading = trendingProducts.length === 0 && (!minLoadingDone || !safetyTimeoutDone);
   const [activeFilter, setActiveFilter] = useState('All');
   const [currentReview, setCurrentReview] = useState(0);
   const [currentBanner, setCurrentBanner] = useState(0);
@@ -162,18 +183,19 @@ export default function Home() {
 
     const fetchHomeSupabaseData = async () => {
       try {
-        // 1. Fetch Categories
-        const { data: catData, error: catErr } = await supabase
-          .from('categories')
-          .select('*')
-          .order('sort_order', { ascending: true });
+        // Fetch Categories, Banners, and Products concurrently in parallel for fastest response
+        const [catRes, bannerRes, prodRes] = await Promise.all([
+          supabase.from('categories').select('*').order('sort_order', { ascending: true }),
+          supabase.from('banners').select('*'),
+          supabase.from('products').select('*').order('created_at', { ascending: false })
+        ]);
 
-        if (catErr) {
-          console.warn("Home categories fetch error:", catErr);
-        }
+        if (catRes.error) console.warn("Home categories fetch error:", catRes.error);
+        if (bannerRes.error) console.warn("Home banners fetch error:", bannerRes.error);
+        if (prodRes.error) console.warn("Home products fetch error:", prodRes.error);
 
         const categoryMap: Record<string, string> = {};
-        const mappedCats = (catData || []).map(c => {
+        const mappedCats = (catRes.data || []).map(c => {
           categoryMap[c.id] = c.name;
           return {
             id: c.id,
@@ -183,20 +205,14 @@ export default function Home() {
             sortOrder: c.sort_order ?? 1000,
           };
         });
-        setCategories(mappedCats);
-        cacheAndSave('categories', mappedCats);
+        if (mappedCats.length > 0) {
+          setCategories(mappedCats);
+          saveMasterCategories(mappedCats);
+          cacheAndSave('categories', mappedCats);
+        }
         setCategoriesLoaded(true);
 
-        // 2. Fetch Banners
-        const { data: bannerData, error: bannerErr } = await supabase
-          .from('banners')
-          .select('*');
-
-        if (bannerErr) {
-          console.warn("Home banners fetch error:", bannerErr);
-        }
-
-        const mappedBanners = (bannerData || []).map(b => ({
+        const mappedBanners = (bannerRes.data || []).map(b => ({
           id: b.id,
           image: b.image || '',
           title: b.title || '',
@@ -207,22 +223,12 @@ export default function Home() {
         }));
 
         const activeBanners = mappedBanners.filter(b => b.active !== false);
-        setBanners(activeBanners);
-        cacheAndSave('banners', activeBanners);
+        if (activeBanners.length > 0) {
+          setBanners(activeBanners);
+          saveMasterBanners(activeBanners);
+          cacheAndSave('banners', activeBanners);
+        }
         setBannersLoaded(true);
-
-        // 3. Fetch Products - Trending and Popular sections with exact filters
-        const [trendingRes, popularRes] = await Promise.all([
-          supabase.from('products').select('*').eq('is_trending', true).order('created_at', { ascending: false }),
-          supabase.from('products').select('*').eq('is_popular', true).order('created_at', { ascending: false })
-        ]);
-
-        if (trendingRes.error) {
-          console.warn("Home trending products fetch error:", trendingRes.error);
-        }
-        if (popularRes.error) {
-          console.warn("Home popular products fetch error:", popularRes.error);
-        }
 
         const mapProduct = (p: any): Product => ({
           id: p.id,
@@ -249,25 +255,24 @@ export default function Home() {
           wishlistCount: p.wishlist_count ?? 0,
         });
 
-        const trendingData = (trendingRes.data || []).map(mapProduct);
-        const popularData = (popularRes.data || []).map(mapProduct);
+        const allMappedProducts = (prodRes.data || []).map(mapProduct);
+        if (allMappedProducts.length > 0) {
+          // Persist all products permanently in master storage
+          saveMasterProducts(allMappedProducts);
 
-        console.log(`[Product Diagnostic - Query Result Count] Trending: ${trendingData.length}, Popular: ${popularData.length}`);
+          const trending = allMappedProducts.filter(p => p.isTrending);
+          const finalTrending = trending.length > 0 ? trending : allMappedProducts.slice(0, 6);
 
-        // Run health checks & log diagnostics
-        [...trendingData, ...popularData].forEach(p => {
-          const health = checkProductHealth(p);
-          if (!health.isValid) {
-            console.warn(`[Product Diagnostic - Health Check Warning] Product "${p.name}" (${p.id}) has health issues:`, health.errors, health.warnings);
-          }
-          logProductDiagnostics('Rendered', p);
-        });
+          const popular = allMappedProducts.filter(p => p.isPopular);
+          const finalPopular = popular.length > 0 ? popular : allMappedProducts.slice(0, 6);
 
-        setTrendingProducts(trendingData);
-        setPopularProducts(popularData);
+          setTrendingProducts(finalTrending);
+          setPopularProducts(finalPopular);
+          cacheAndSave('trendingProducts', finalTrending);
+          cacheAndSave('popularProducts', finalPopular);
+        }
+
         setProductsLoaded(true);
-        cacheAndSave('trendingProducts', trendingData);
-        cacheAndSave('popularProducts', popularData);
         // Fetch reviews
         try {
           const { data: revData } = await supabase.from('reviews').select('*').order('created_at', { ascending: false });

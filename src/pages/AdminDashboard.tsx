@@ -5,6 +5,7 @@ import { sendNotification } from '../lib/notifications';
 import { Product, Category } from '../types';
 import { toast } from 'sonner';
 import { checkProductHealth, logProductDiagnostics } from '../utils/productHealthCheck';
+import { saveMasterProducts, deleteMasterProduct } from '../utils/productStorage';
 import { 
   LayoutDashboard, Package, Tags, ShoppingBag, Palette, Maximize2, 
   Ticket, Users, Settings, LogOut, Search, Bell, Menu, X, 
@@ -4319,6 +4320,7 @@ export default function AdminDashboard() {
         });
         const mapped = supProducts.map(p => mapSupabaseProduct(p, categoryMap));
         setProducts(mapped);
+        saveMasterProducts(mapped);
       }
       if (supabaseCategories.length > 0) {
         setCategories(supabaseCategories);
@@ -4552,6 +4554,7 @@ export default function AdminDashboard() {
 
       if (delErr) throw delErr;
 
+      deleteMasterProduct(productToDelete);
       console.log("Delete successful for:", productToDelete);
       toast.success("Product deleted", { id: deleteToast });
       fetchDashboardData();

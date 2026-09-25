@@ -6,12 +6,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { formatPrice } from '../utils/currency';
 import { checkProductHealth, logProductDiagnostics } from '../utils/productHealthCheck';
+import { getMasterProducts, saveMasterProducts } from '../utils/productStorage';
 
 export default function Search() {
   const [searchTerm, setSearchTerm] = useState('');
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<Product[]>(() => getMasterProducts());
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -71,7 +72,10 @@ export default function Search() {
           logProductDiagnostics('Rendered', p);
         });
 
-        setProducts(productsData);
+        if (productsData.length > 0) {
+          saveMasterProducts(productsData);
+          setProducts(productsData);
+        }
       } catch (error) {
         console.error("Error fetching products:", error);
       } finally {

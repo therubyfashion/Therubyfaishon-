@@ -5,7 +5,7 @@ interface SkeletonProps {
 }
 
 export const Skeleton: React.FC<SkeletonProps> = ({ className }) => (
-  <div className={`animate-pulse bg-gray-200 rounded-lg ${className}`} />
+  <div className={`animate-pulse bg-gradient-to-r from-gray-200/80 via-gray-100 to-gray-200/80 rounded-lg ${className}`} />
 );
 
 export const ProductCardSkeleton = () => (

@@ -6,6 +6,12 @@ import ProductCard from '../components/ProductCard';
 import { ProductCardSkeleton } from '../components/Skeleton';
 import { Filter, ChevronDown, SlidersHorizontal, Truck, RefreshCw, ShieldCheck } from 'lucide-react';
 import { checkProductHealth, logProductDiagnostics } from '../utils/productHealthCheck';
+import { 
+  getMasterProducts, 
+  saveMasterProducts, 
+  getMasterCategories, 
+  saveMasterCategories 
+} from '../utils/productStorage';
 
 const mapSupabaseProduct = (p: any, categoryMap: Record<string, string>): Product => {
   const mappedCategory = (p.category_ids || [])
@@ -39,10 +45,13 @@ const mapSupabaseProduct = (p: any, categoryMap: Record<string, string>): Produc
 };
 
 export default function Shop() {
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [categories, setCategories] = useState<string[]>(['All']);
+  const [allProducts, setAllProducts] = useState<Product[]>(() => getMasterProducts());
+  const [products, setProducts] = useState<Product[]>(() => getMasterProducts());
+  const [loading, setLoading] = useState(false);
+  const [categories, setCategories] = useState<string[]>(() => {
+    const cats = getMasterCategories().map(c => c.name);
+    return ['All', ...cats.filter(c => c !== 'All')];
+  });
   const [activeCategory, setActiveCategory] = useState<string>(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -118,19 +127,18 @@ export default function Shop() {
 
     const fetchAllData = async () => {
       try {
-        // 1. Fetch categories
-        const { data: catData, error: catErr } = await supabase
-          .from('categories')
-          .select('*')
-          .order('sort_order', { ascending: true });
+        // Fetch categories and products in parallel
+        const [catRes, prodRes] = await Promise.all([
+          supabase.from('categories').select('*').order('sort_order', { ascending: true }),
+          supabase.from('products').select('*').order('created_at', { ascending: false })
+        ]);
 
-        if (catErr) {
-          console.warn("Shop categories error:", catErr);
-        }
+        if (catRes.error) console.warn("Shop categories error:", catRes.error);
+        if (prodRes.error) console.warn("Shop products error:", prodRes.error);
 
         const categoryMap: Record<string, string> = {};
         const catNames: string[] = [];
-        (catData || []).forEach(c => {
+        (catRes.data || []).forEach(c => {
           if (c.id && c.name) {
             categoryMap[c.id] = c.name;
             catNames.push(c.name);
@@ -141,20 +149,13 @@ export default function Shop() {
         setCategories(finalCategories);
         saveToCache('categories', finalCategories);
 
-        // 2. Fetch products
-        const { data: prodData, error: prodErr } = await supabase
-          .from('products')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (prodErr) {
-          console.warn("Shop products error:", prodErr);
-        }
-
-        const rawProds = (prodData || []).map(p => mapSupabaseProduct(p, categoryMap));
+        const rawProds = (prodRes.data || []).map(p => mapSupabaseProduct(p, categoryMap));
         console.log(`[Product Diagnostic - Query Result Count] Total products fetched from Supabase: ${rawProds.length}`);
 
-        setAllProducts(rawProds);
+        if (rawProds.length > 0) {
+          saveMasterProducts(rawProds);
+          setAllProducts(rawProds);
+        }
       } catch (err) {
         console.warn("Error inside Supabase data fetch:", err);
       } finally {
