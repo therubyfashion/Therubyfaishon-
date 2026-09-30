@@ -13,7 +13,6 @@ export default defineConfig(({ mode }) => {
     base: '/',
     plugins: [react(), tailwindcss()],
     define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'process.env.VITE_RAZORPAY_KEY_ID': JSON.stringify(env.VITE_RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || 'rzp_live_ScBsqG0Z4iTmAG'),
     },
     resolve: {
@@ -23,7 +22,7 @@ export default defineConfig(({ mode }) => {
       dedupe: ['react', 'react-dom', 'react-router-dom']
     },
     optimizeDeps: {
-      include: ['react', 'react-dom', 'react-router-dom', 'react-helmet-async', 'recharts', 'framer-motion', 'lucide-react', 'sonner'],
+      include: ['react', 'react-dom', 'react-router-dom', 'recharts', 'framer-motion', 'lucide-react', 'sonner'],
       exclude: ['swiper'],
     },
     server: {

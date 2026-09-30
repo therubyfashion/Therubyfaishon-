@@ -317,6 +317,7 @@ export default function Checkout() {
   }, [selectedAddress]);
   const [newAddress, setNewAddress] = useState({
     name: '',
+    email: '',
     number: '',
     address: '',
     landmark: '',
@@ -616,14 +617,14 @@ export default function Checkout() {
     
     if (showAddressForm) {
       const isFormDirty = !!(
-        newAddress.name.trim() ||
-        newAddress.email.trim() ||
-        newAddress.number.trim() ||
-        newAddress.address.trim() ||
-        newAddress.landmark.trim() ||
-        newAddress.state.trim() ||
-        newAddress.city.trim() ||
-        newAddress.pincode.trim()
+        newAddress.name?.trim() ||
+        newAddress.email?.trim() ||
+        newAddress.number?.trim() ||
+        newAddress.address?.trim() ||
+        newAddress.landmark?.trim() ||
+        newAddress.state?.trim() ||
+        newAddress.city?.trim() ||
+        newAddress.pincode?.trim()
       );
 
       if (isFormDirty) {
@@ -758,6 +759,32 @@ export default function Checkout() {
             } else {
               console.log("Supabase order insert success!");
               setIsOrderConfirmed(true);
+
+              // Decrement product stock in Supabase upon successful order placement
+              try {
+                for (const item of finalOrderData.items) {
+                  if (item.id) {
+                    const { data: pData } = await supabase
+                      .from('products')
+                      .select('id, stock')
+                      .eq('id', item.id)
+                      .maybeSingle();
+
+                    if (pData && typeof pData.stock === 'number') {
+                      const updatedStock = Math.max(0, pData.stock - (item.quantity || 1));
+                      await supabase
+                        .from('products')
+                        .update({ 
+                          stock: updatedStock,
+                          stock_status: updatedStock <= 0 ? 'Out of Stock' : (updatedStock < 5 ? 'Low Stock' : 'In Stock')
+                        })
+                        .eq('id', item.id);
+                    }
+                  }
+                }
+              } catch (stockErr) {
+                console.warn("Stock decrement non-blocking warning:", stockErr);
+              }
 
               // Deduct redeemed loyalty points immediately on successful order placement
               if (pointsToRedeem > 0 && user?.uid) {
@@ -1197,7 +1224,30 @@ export default function Checkout() {
             image: storeSettings?.storeLogo || 'https://cdn-icons-png.flaticon.com/512/2909/2909813.png',
             order_id: orderData.id,
             handler: async function (response: any) {
-              await completeOrder(response.razorpay_payment_id);
+              try {
+                // Verify payment HMAC signature with backend before accepting order
+                const verifyRes = await fetch('/api/verify-razorpay-payment', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    razorpay_order_id: response.razorpay_order_id,
+                    razorpay_payment_id: response.razorpay_payment_id,
+                    razorpay_signature: response.razorpay_signature
+                  })
+                });
+
+                const verifyData = await verifyRes.json();
+                if (!verifyRes.ok || !verifyData.verified) {
+                  throw new Error(verifyData.error || 'Payment signature verification failed.');
+                }
+
+                await completeOrder(response.razorpay_payment_id);
+              } catch (verifyErr: any) {
+                console.error("Payment verification failed:", verifyErr);
+                toast.error(verifyErr.message || "Payment verification failed. If money was debited, contact support.");
+                setIsOrderConfirmed(false);
+                setIsProcessingPayment(false);
+              }
             },
             prefill: {
               name: selectedAddrObj?.name,

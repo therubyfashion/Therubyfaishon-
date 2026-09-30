@@ -113,7 +113,7 @@ export default function Signup() {
         throw new Error(errData.error || "Failed to generate verification code securely.");
       }
 
-      const { otp } = await otpRes.json();
+      await otpRes.json().catch(() => {});
 
       // Notify Admin about new user registration
       try {

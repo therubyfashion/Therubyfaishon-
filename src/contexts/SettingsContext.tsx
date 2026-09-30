@@ -40,9 +40,20 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       try {
         const { data } = await supabase.from('settings').select('*').limit(1);
         if (data && data.length > 0) {
+          const raw = data[0];
+          // Strip sensitive credentials so they are never held in client React state
+          const { 
+            resendApiKey, 
+            smtpPass, 
+            razorpayKeySecret, 
+            oneSignalRestApiKey,
+            google_sheet_api_key,
+            ...safePublicSettings 
+          } = raw;
+
           setSettings({
             ...DEFAULT_CLIENT_SETTINGS,
-            ...data[0]
+            ...safePublicSettings
           });
         } else {
           setSettings(DEFAULT_CLIENT_SETTINGS);

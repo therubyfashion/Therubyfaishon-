@@ -14,6 +14,8 @@ import axios from 'axios';
 import * as OneSignal from 'onesignal-node';
 import nodemailer from 'nodemailer';
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
+import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
 
@@ -2957,7 +2959,7 @@ async function startServer() {
 
       res.json({
         status: "ok",
-        otp: otp
+        message: "Verification OTP sent successfully to your email."
       });
     } catch (err: any) {
       console.error("Error in /api/auth/send-otp:", err);
@@ -3064,6 +3066,80 @@ async function startServer() {
     } catch (error: any) {
       console.error("Razorpay order creation error:", error);
       res.status(500).json({ error: error.message || "Failed to create Razorpay order" });
+    }
+  });
+
+  // Secure Server-side Razorpay Payment Signature Verification
+  app.post("/api/verify-razorpay-payment", async (req, res) => {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ 
+        verified: false, 
+        error: "Missing required payment verification details." 
+      });
+    }
+
+    try {
+      const { keySecret } = await getRazorpayCredentials();
+      if (!keySecret) {
+        return res.status(500).json({ 
+          verified: false, 
+          error: "Payment configuration error: Secret key missing." 
+        });
+      }
+
+      const generatedSignature = crypto
+        .createHmac("sha256", keySecret)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+        .digest("hex");
+
+      const isSignatureValid = crypto.timingSafeEqual(
+        Buffer.from(generatedSignature, "utf-8"),
+        Buffer.from(razorpay_signature, "utf-8")
+      );
+
+      if (!isSignatureValid) {
+        console.error("❌ Invalid Razorpay signature detected!", { razorpay_order_id, razorpay_payment_id });
+        return res.status(400).json({ 
+          verified: false, 
+          error: "Payment verification failed: Invalid signature." 
+        });
+      }
+
+      console.log("✅ Razorpay payment signature verified successfully:", { razorpay_order_id, razorpay_payment_id });
+      res.json({ verified: true, paymentId: razorpay_payment_id });
+    } catch (err: any) {
+      console.error("Error during payment signature verification:", err);
+      res.status(500).json({ verified: false, error: err.message || "Verification server error." });
+    }
+  });
+
+  // Secure Server-side Gemini AI Proxy (Keeps API key secure on backend)
+  app.post("/api/ai/generate", async (req, res) => {
+    const { prompt, model = "gemini-2.5-flash" } = req.body;
+    if (!prompt) {
+      return res.status(400).json({ error: "Prompt is required." });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: "Gemini API key is not configured on the server." });
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt
+      });
+
+      res.json({
+        text: response.text || ""
+      });
+    } catch (aiErr: any) {
+      console.error("Gemini AI generation error:", aiErr);
+      res.status(500).json({ error: aiErr.message || "Failed to generate AI response." });
     }
   });
 

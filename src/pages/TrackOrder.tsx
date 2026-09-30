@@ -233,44 +233,47 @@ export default function TrackOrder() {
       });
     }
 
-    // FALLBACK TO GENERATED TIMELINE
+    // REALISTIC TIMELINE DERIVED FROM ORDER CREATION AND STATUS
     const orderDate = order.createdAt ? (order.createdAt.toDate ? order.createdAt.toDate() : new Date(order.createdAt)) : new Date();
+    const formattedOrderDate = isNaN(orderDate.getTime()) ? 'Recently' : orderDate.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+    const formattedOrderTime = isNaN(orderDate.getTime()) ? '--:--' : orderDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+
     const items = [
       {
-        title: 'Verified Payments',
-        date: orderDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        time: '10:04 AM',
-        location: 'Payment Gateway Secure Server',
+        title: 'Order Placed & Verified',
+        date: formattedOrderDate,
+        time: formattedOrderTime,
+        location: 'Online Store',
         completed: true
       }
     ];
 
     if (currentStatusIdx >= 0) {
       items.unshift({
-        title: 'Order is in Packing',
-        date: orderDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        time: '10:25 AM',
-        location: 'Main Warehouse, Mumbai, IN',
+        title: 'Order Confirmed',
+        date: formattedOrderDate,
+        time: formattedOrderTime,
+        location: 'Fulfillment Center',
         completed: currentStatusIdx >= 0
       });
     }
 
     if (currentStatusIdx >= 1) {
       items.unshift({
-        title: 'Orders are Shipped',
-        date: new Date(orderDate.getTime() + 3600000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        time: '11:30 AM',
-        location: 'Logistics Hub, Ahmedabad, IN',
+        title: 'Packed & Ready for Courier',
+        date: formattedOrderDate,
+        time: 'In Process',
+        location: 'Warehouse',
         completed: currentStatusIdx >= 1
       });
     }
 
     if (currentStatusIdx >= 2) {
       items.unshift({
-        title: 'Order In Transit',
-        date: new Date(orderDate.getTime() + 86400000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        time: '15:20 PM',
-        location: order.address?.city || 'Local Delivery Center',
+        title: 'Handed Over to Courier / In Transit',
+        date: 'In Transit',
+        time: '--:--',
+        location: order.address?.city || order.shipping_city || 'Regional Hub',
         completed: currentStatusIdx >= 2
       });
     }
@@ -278,9 +281,9 @@ export default function TrackOrder() {
     if (currentStatusIdx >= 3) {
       items.unshift({
         title: 'Package Delivered',
-        date: new Date(orderDate.getTime() + 172800000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        time: '18:45 PM',
-        location: order.address?.name || 'Customer Location',
+        date: 'Delivered',
+        time: '--:--',
+        location: order.address?.name || order.shipping_full_name || 'Delivery Address',
         completed: true
       });
     }

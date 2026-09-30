@@ -24,7 +24,6 @@ import {
 } from 'recharts';
 import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
-import { GoogleGenAI, Type } from "@google/genai";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -377,8 +376,6 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
 
     setIsGeneratingAI(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
       const prompt = `Write a professional, attractive, and "kadak" (strong) product description for an e-commerce store.
       Product Name: ${formData.name}
       Category: ${formData.category}
@@ -395,12 +392,19 @@ function AddProductPage({ formData, setFormData, onSave, onCancel, isEditing, ca
       
       Return ONLY the HTML content.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt
+      const aiRes = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, model: 'gemini-2.5-flash' })
       });
 
-      const text = response.text.replace(/```html|```/g, '').trim();
+      if (!aiRes.ok) {
+        const errJson = await aiRes.json().catch(() => ({}));
+        throw new Error(errJson.error || "Failed to generate AI description");
+      }
+
+      const aiData = await aiRes.json();
+      const text = (aiData.text || '').replace(/```html|```/g, '').trim();
       
       setFormData({ ...formData, description: text });
       toast.success('AI Description Generated!');
@@ -4874,8 +4878,6 @@ export default function AdminDashboard() {
     const genToast = toast.loading("AI is analyzing data and generating campaign ideas...");
     
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      
       const lowStockCount = products.filter(p => p.stock < 5).length;
       const topSelling = products.sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)).slice(0, 3).map(p => p.name).join(", ");
       const cartCount = abandonedCarts.length;
@@ -4891,30 +4893,22 @@ export default function AdminDashboard() {
       2. Suggest a specific Sale Campaign (e.g. "Weekend Wardrobe Refresh").
       3. Recommend a targeted discount percentage for specific categories.
       
-      Return the result as a detailed JSON object.`;
+      Return ONLY a raw JSON object with keys: "saleName", "saleLogic", "suggestedDiscount", "adCaptions" (array of strings), "marketingTip". Do not include markdown codeblocks.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              saleName: { type: Type.STRING },
-              saleLogic: { type: Type.STRING },
-              suggestedDiscount: { type: Type.NUMBER },
-              adCaptions: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              },
-              marketingTip: { type: Type.STRING }
-            }
-          }
-        }
+      const aiRes = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, model: 'gemini-2.5-flash' })
       });
 
-      const data = JSON.parse(response.text);
+      if (!aiRes.ok) {
+        const errJson = await aiRes.json().catch(() => ({}));
+        throw new Error(errJson.error || "Failed to generate AI campaign insights");
+      }
+
+      const aiData = await aiRes.json();
+      const cleanedJson = (aiData.text || '').replace(/```json|```/g, '').trim();
+      const data = JSON.parse(cleanedJson);
       setCampaignResult(data);
       toast.success("Marketing campaign generated!", { id: genToast });
     } catch (error) {

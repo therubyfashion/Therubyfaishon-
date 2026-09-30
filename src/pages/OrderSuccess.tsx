@@ -254,10 +254,10 @@ export default function OrderSuccess() {
           <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Order Status</p>
           <div className="space-y-8">
             {[
-              { label: 'Order Confirmed', time: 'Just now • Payment received', icon: <CheckCircle2 size={18} />, active: true, done: true },
-              { label: 'Processing', time: 'Within 24 hours', icon: <Package size={18} />, active: false, done: false },
-              { label: 'Shipped', time: 'Apr 3, 2025', icon: <Truck size={18} />, active: false, done: false },
-              { label: 'Delivered', time: orderData.deliveryDate, icon: <Home size={18} />, active: false, done: false },
+              { label: 'Order Confirmed', time: 'Just now • Order received', icon: <CheckCircle2 size={18} />, active: true, done: true },
+              { label: 'Processing', time: 'Dispatched within 24-48 hours', icon: <Package size={18} />, active: false, done: false },
+              { label: 'Shipped', time: 'Tracking details will be emailed', icon: <Truck size={18} />, active: false, done: false },
+              { label: 'Delivered', time: orderData.deliveryDate || 'Expected in 3-7 business days', icon: <Home size={18} />, active: false, done: false },
             ].map((status, idx) => (
               <div key={idx} className="flex items-start gap-4 relative">
                 {idx < 3 && (

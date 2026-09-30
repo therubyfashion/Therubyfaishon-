@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Helmet } from 'react-helmet-async';
+import { useDocumentTitle } from '../utils/seo';
 import { supabase } from '../supabase';
 import { Product, Review } from '../types';
 import { useCart } from '../contexts/CartContext';
@@ -366,6 +366,13 @@ export default function ProductDetail() {
   const [sortBy, setSortBy] = useState<'newest' | 'highest' | 'lowest'>('newest');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [visibleReviewsCount, setVisibleReviewsCount] = useState(6);
+
+  useDocumentTitle(
+    product ? `${product.name} | The Ruby Fashion` : 'The Ruby Fashion',
+    product ? product.description.replace(/<[^>]*>/g, '').substring(0, 160) : undefined,
+    product?.images?.[0] || '',
+    product ? `https://therubyfashion.shop/product/${product.id}` : undefined
+  );
 
   // Load initial cached product values to avoid showing skeleton loading and render instantly
   useEffect(() => {
@@ -894,15 +901,6 @@ export default function ProductDetail() {
 
   return (
     <div id="product-detail" className="bg-gray-50 min-h-screen pb-20">
-      <Helmet>
-        <title>{`${product.name} | The Ruby Fashion`}</title>
-        <meta name="description" content={product.description.replace(/<[^>]*>/g, '').substring(0, 160)} />
-        <meta property="og:title" content={`${product.name} | The Ruby Fashion`} />
-        <meta property="og:description" content={product.description.replace(/<[^>]*>/g, '').substring(0, 160)} />
-        <meta property="og:image" content={product.images?.[0] || ''} />
-        <meta property="og:url" content={`https://therubyfashion.shop/product/${product.id}`} />
-        <link rel="canonical" href={`https://therubyfashion.shop/product/${product.id}`} />
-      </Helmet>
       {/* Breadcrumb */}
       <div className="max-w-7xl mx-auto px-[5%] py-5 flex items-center gap-2 text-[13px] text-gray-400 font-medium">
         <button onClick={() => navigate('/')} className="hover:text-ruby transition-colors">Home</button>
