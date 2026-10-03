@@ -6,20 +6,52 @@ import {
   Trash2, 
   Edit2, 
   CheckCircle2, 
-  X, 
-  ChevronLeft,
-  Smartphone,
-  Mail,
-  User,
-  LocateFixed,
-  Search
+  ChevronLeft
 } from 'lucide-react';
 import { supabase } from '../supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
-import { Capacitor } from '@capacitor/core';
+
+export const INDIAN_STATES = [
+  'Andhra Pradesh',
+  'Arunachal Pradesh',
+  'Assam',
+  'Bihar',
+  'Chhattisgarh',
+  'Goa',
+  'Gujarat',
+  'Haryana',
+  'Himachal Pradesh',
+  'Jharkhand',
+  'Karnataka',
+  'Kerala',
+  'Madhya Pradesh',
+  'Maharashtra',
+  'Manipur',
+  'Meghalaya',
+  'Mizoram',
+  'Nagaland',
+  'Odisha',
+  'Punjab',
+  'Rajasthan',
+  'Sikkim',
+  'Tamil Nadu',
+  'Telangana',
+  'Tripura',
+  'Uttar Pradesh',
+  'Uttarakhand',
+  'West Bengal',
+  'Andaman and Nicobar Islands',
+  'Chandigarh',
+  'Dadra and Nagar Haveli and Daman and Diu',
+  'Delhi',
+  'Jammu and Kashmir',
+  'Ladakh',
+  'Lakshadweep',
+  'Puducherry'
+];
 
 interface Address {
   id: string;
@@ -30,7 +62,7 @@ interface Address {
   state: string;
   city: string;
   pincode: string;
-  label: 'Home' | 'Office' | 'Other';
+  label?: 'Home' | 'Office' | 'Other';
   isDefault: boolean;
 }
 
@@ -41,15 +73,15 @@ export default function Addresses() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingAddress, setEditingAddress] = useState<Address | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [formData, setFormData] = useState({
     name: '',
     number: '',
     address: '',
-    landmark: '',
-    state: '',
     city: '',
-    pincode: '',
-    label: 'Home' as 'Home' | 'Office' | 'Other'
+    state: '',
+    pincode: ''
   });
 
   const deserializeAddress = (row: any): Address => {
@@ -57,7 +89,6 @@ export default function Addresses() {
     let landmarkText = row.landmark || '';
     let labelVal: 'Home' | 'Office' | 'Other' = (row.label as any) || 'Home';
 
-    // fallback for old JSON format if any
     if (addressText.startsWith('{') && addressText.endsWith('}')) {
       try {
         const parsed = JSON.parse(addressText);
@@ -66,9 +97,7 @@ export default function Addresses() {
           landmarkText = parsed.landmark || landmarkText;
           labelVal = parsed.label || labelVal;
         }
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
     }
 
     return {
@@ -90,11 +119,13 @@ export default function Addresses() {
       fetchAddresses();
     } else {
       setLoading(false);
+      setShowForm(true);
     }
   }, [user]);
 
   const fetchAddresses = async () => {
-    if (!user) {
+    const userId = user?.id || user?.uid;
+    if (!userId) {
       setLoading(false);
       return;
     }
@@ -102,7 +133,7 @@ export default function Addresses() {
       const { data, error } = await supabase
         .from('addresses')
         .select('*')
-        .eq('user_id', user.uid)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -113,7 +144,11 @@ export default function Addresses() {
       const fetched = (data || [])
         .map(deserializeAddress)
         .filter(a => a && a.id && !String(a.id).startsWith('addr_default_') && a.id !== '1' && a.id !== '2' && a.name !== 'Priya Sharma' && a.name !== 'Rajesh Sharma');
+      
       setAddresses(fetched);
+      if (fetched.length === 0) {
+        setShowForm(true);
+      }
     } catch (error) {
       console.error("Error fetching addresses:", error);
     } finally {
@@ -123,61 +158,78 @@ export default function Addresses() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!formData.name.trim() || !formData.number.trim() || !formData.address.trim() || !formData.city.trim() || !formData.state.trim() || !formData.pincode.trim()) {
+      toast.error("Please fill all required fields");
+      return;
+    }
+
+    setIsSubmitting(true);
+    const userId = user?.id || user?.uid;
 
     try {
       if (editingAddress) {
-        const { error } = await supabase
-          .from('addresses')
-          .update({
-            full_name: formData.name,
-            phone: formData.number,
-            address_line: formData.address,
-            landmark: formData.landmark,
-            label: formData.label,
-            city: formData.city,
-            state: formData.state,
-            zip: formData.pincode,
-          })
-          .eq('id', editingAddress.id);
+        if (userId) {
+          const { error } = await supabase
+            .from('addresses')
+            .update({
+              full_name: formData.name.trim(),
+              phone: formData.number.trim(),
+              address_line: formData.address.trim(),
+              city: formData.city.trim(),
+              state: formData.state.trim(),
+              zip: formData.pincode.trim(),
+            })
+            .eq('id', editingAddress.id);
 
-        if (error) throw error;
+          if (error) throw error;
+        }
+
         toast.success("Address updated successfully!");
       } else {
-        const { error } = await supabase
-          .from('addresses')
-          .insert({
-            user_id: user.uid,
-            full_name: formData.name,
-            phone: formData.number,
-            address_line: formData.address,
-            landmark: formData.landmark,
-            label: formData.label,
-            city: formData.city,
-            state: formData.state,
-            zip: formData.pincode,
-            country: 'India',
-            is_default: addresses.length === 0,
-            created_at: new Date().toISOString()
-          });
+        if (userId) {
+          const { error } = await supabase
+            .from('addresses')
+            .insert({
+              user_id: userId,
+              full_name: formData.name.trim(),
+              phone: formData.number.trim(),
+              address_line: formData.address.trim(),
+              city: formData.city.trim(),
+              state: formData.state.trim(),
+              zip: formData.pincode.trim(),
+              country: 'India',
+              is_default: addresses.length === 0,
+              created_at: new Date().toISOString()
+            });
 
-        if (error) throw error;
+          if (error) throw error;
+        }
+
         toast.success("Address added successfully!");
       }
+
       setShowForm(false);
       setEditingAddress(null);
       setFormData({
-        name: '', number: '', address: '', landmark: '', state: '', city: '', pincode: '', label: 'Home'
+        name: '',
+        number: '',
+        address: '',
+        city: '',
+        state: '',
+        pincode: ''
       });
       fetchAddresses();
     } catch (error) {
       console.error("Error saving address:", error);
       toast.error("Failed to save address.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!user) return;
+    const userId = user?.id || user?.uid;
+    if (!userId) return;
     try {
       const { error } = await supabase
         .from('addresses')
@@ -194,12 +246,13 @@ export default function Addresses() {
   };
 
   const handleSetDefault = async (id: string) => {
-    if (!user) return;
+    const userId = user?.id || user?.uid;
+    if (!userId) return;
     try {
       const { error: resetErr } = await supabase
         .from('addresses')
         .update({ is_default: false })
-        .eq('user_id', user.uid);
+        .eq('user_id', userId);
 
       if (resetErr) throw resetErr;
 
@@ -224,217 +277,287 @@ export default function Addresses() {
       name: address.name,
       number: address.number,
       address: address.address,
-      landmark: address.landmark || '',
-      state: address.state,
       city: address.city,
-      pincode: address.pincode,
-      label: address.label
+      state: address.state,
+      pincode: address.pincode
     });
     setShowForm(true);
   };
 
-  if (loading) return <div className="h-screen flex items-center justify-center">Loading...</div>;
+  const handleBack = () => {
+    if (showForm && addresses.length > 0) {
+      setShowForm(false);
+      setEditingAddress(null);
+    } else {
+      navigate(-1);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#f7f7f8] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-ruby border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-[#FAFAFA] pt-24 pb-32 px-4">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="flex items-center justify-between px-2">
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => navigate('/profile')}
-              className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-[#1A2C54] shadow-sm hover:text-ruby transition-colors"
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <h1 className="text-3xl font-serif font-bold text-[#1A2C54]">My <span className="text-ruby italic">Addresses</span></h1>
-          </div>
-          <div className="h-1 w-12 bg-ruby rounded-full" />
-        </div>
-
+    <div className="min-h-screen bg-[#f7f7f8] text-[#171717] flex justify-center py-10 px-3 sm:px-5">
+      <div className="w-full max-w-[520px]">
         <AnimatePresence mode="wait">
           {showForm ? (
+            /* EXACT Address Form Template Provided by User */
             <motion.div
-              key="form"
-              initial={{ opacity: 0, y: 20 }}
+              key="address-form"
+              initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="bg-white p-8 rounded-[2.5rem] shadow-[0_20px_50px_-20px_rgba(0,0,0,0.08)] border border-gray-50 space-y-6"
+              exit={{ opacity: 0, y: -12 }}
+              className="w-full max-w-[520px] bg-white rounded-[14px] sm:rounded-[6px] p-[23px_18px] sm:p-[30px]"
             >
-              <div className="flex items-center justify-between">
-                <h3 className="text-xl font-serif font-bold text-[#1A2C54]">
-                  {editingAddress ? 'Edit Address' : 'Add New Address'}
-                </h3>
-                <button 
-                  onClick={() => { setShowForm(false); setEditingAddress(null); }}
-                  className="p-2 hover:bg-gray-50 rounded-xl transition-colors"
+              {/* HEADER */}
+              <div className="flex items-center gap-[13px] mb-[26px]">
+                <button
+                  type="button"
+                  onClick={handleBack}
+                  aria-label="Go back"
+                  className="w-[36px] h-[36px] min-w-[36px] p-0 border-none rounded-full bg-[#f1f1f1] text-[#171717] grid place-items-center font-sans text-[19px] font-normal leading-none cursor-pointer hover:bg-[#e8e8e8] active:scale-[0.94] transition-all"
                 >
-                  <X size={20} className="text-gray-400" />
+                  &#8592;
                 </button>
+
+                <div>
+                  <h2 className="text-[21px] sm:text-[23px] font-[650] tracking-[-0.4px] text-[#171717]">
+                    {editingAddress ? 'Edit Address' : 'Add Address'}
+                  </h2>
+                  <p className="mt-[6px] text-[#777] text-[14px]">
+                    Enter your delivery details below.
+                  </p>
+                </div>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Full Name</label>
-                  <div className="relative">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                    <input 
-                      type="text" required value={formData.name}
-                      onChange={e => setFormData({...formData, name: e.target.value})}
-                      className="w-full bg-gray-50 border-none rounded-2xl py-4 pl-12 pr-4 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20"
-                      placeholder="Receiver's Name"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Phone</label>
-                  <div className="relative">
-                    <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                    <input 
-                      type="tel" required value={formData.number}
-                      onChange={e => setFormData({...formData, number: e.target.value})}
-                      className="w-full bg-gray-50 border-none rounded-2xl py-4 pl-12 pr-4 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20"
-                      placeholder="10-digit number"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Full Address</label>
-                  <textarea 
-                    required value={formData.address}
-                    onChange={e => setFormData({...formData, address: e.target.value})}
-                    className="w-full bg-gray-50 border-none rounded-2xl py-4 px-6 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20 min-h-[100px]"
-                    placeholder="House No, Street, Area..."
+              {/* ADDRESS FORM */}
+              <form onSubmit={handleSubmit}>
+                {/* Full Name */}
+                <div className="mb-[17px]">
+                  <label htmlFor="name" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    id="name"
+                    placeholder="Enter your full name"
+                    autoComplete="name"
+                    required
+                    value={formData.name}
+                    onChange={e => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">City</label>
-                    <input 
-                      type="text" required value={formData.city}
-                      onChange={e => setFormData({...formData, city: e.target.value})}
-                      className="w-full bg-gray-50 border-none rounded-2xl py-4 px-6 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20"
+                {/* Phone */}
+                <div className="mb-[17px]">
+                  <label htmlFor="phone" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
+                    Phone Number
+                  </label>
+                  <input
+                    type="tel"
+                    id="phone"
+                    placeholder="10-digit mobile number"
+                    maxLength={10}
+                    inputMode="numeric"
+                    autoComplete="tel"
+                    required
+                    value={formData.number}
+                    onChange={e => {
+                      const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                      setFormData({ ...formData, number: val });
+                    }}
+                    className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
+                  />
+                </div>
+
+                {/* Address */}
+                <div className="mb-[17px]">
+                  <label htmlFor="address" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
+                    Address
+                  </label>
+                  <input
+                    type="text"
+                    id="address"
+                    placeholder="House no., street, area"
+                    autoComplete="street-address"
+                    required
+                    value={formData.address}
+                    onChange={e => setFormData({ ...formData, address: e.target.value })}
+                    className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
+                  />
+                </div>
+
+                {/* City + State */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-0 sm:gap-[14px]">
+                  {/* City */}
+                  <div className="mb-[17px]">
+                    <label htmlFor="city" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
+                      City
+                    </label>
+                    <input
+                      type="text"
+                      id="city"
+                      placeholder="Enter city"
+                      autoComplete="address-level2"
+                      required
+                      value={formData.city}
+                      onChange={e => setFormData({ ...formData, city: e.target.value })}
+                      className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Pincode</label>
-                    <input 
-                      type="text" required value={formData.pincode}
-                      onChange={e => setFormData({...formData, pincode: e.target.value})}
-                      className="w-full bg-gray-50 border-none rounded-2xl py-4 px-6 text-sm font-bold text-[#1A2C54] focus:ring-2 focus:ring-ruby/20"
-                    />
+
+                  {/* State */}
+                  <div className="mb-[17px]">
+                    <label htmlFor="state" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
+                      State
+                    </label>
+                    <select
+                      id="state"
+                      required
+                      value={formData.state}
+                      onChange={e => setFormData({ ...formData, state: e.target.value })}
+                      className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
+                    >
+                      <option value="">Choose state</option>
+                      {INDIAN_STATES.map(st => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2">Save As</label>
-                  <div className="flex gap-3">
-                    {(['Home', 'Office', 'Other'] as const).map((label) => (
-                      <button
-                        key={label}
-                        type="button"
-                        onClick={() => setFormData({ ...formData, label })}
-                        className={cn(
-                          "flex-1 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest border transition-all",
-                          formData.label === label 
-                            ? "bg-ruby text-white border-ruby shadow-lg shadow-ruby/20" 
-                            : "bg-white text-gray-400 border-gray-100"
-                        )}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
+                {/* PIN Code */}
+                <div className="mb-[17px]">
+                  <label htmlFor="pincode" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
+                    PIN Code
+                  </label>
+                  <input
+                    type="text"
+                    id="pincode"
+                    placeholder="6-digit PIN code"
+                    maxLength={6}
+                    inputMode="numeric"
+                    autoComplete="postal-code"
+                    required
+                    value={formData.pincode}
+                    onChange={e => {
+                      const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                      setFormData({ ...formData, pincode: val });
+                    }}
+                    className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
+                  />
                 </div>
 
-                <button 
-                  type="submit" 
-                  className="w-full bg-[#1A2C54] text-white py-5 rounded-2xl text-xs font-bold uppercase tracking-[0.2em] hover:bg-ruby transition-all shadow-xl shadow-[#1A2C54]/10 mt-4"
+                {/* Save (Brand Red Background as explicitly requested) */}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full h-[47px] mt-[6px] border-none rounded-[9px] bg-ruby text-white text-[14px] font-[600] cursor-pointer hover:bg-ruby-dark active:scale-[0.99] transition-all flex items-center justify-center disabled:opacity-75 shadow-sm"
                 >
-                  {editingAddress ? 'Update Address' : 'Save Address'}
+                  {isSubmitting ? 'Saving...' : 'Save Address'}
                 </button>
               </form>
             </motion.div>
           ) : (
+            /* Saved Addresses View */
             <motion.div
-              key="list"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="space-y-4"
+              key="address-list"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              className="w-full max-w-[520px] bg-white rounded-[14px] sm:rounded-[6px] p-[23px_18px] sm:p-[30px]"
             >
-              {addresses.length === 0 ? (
-                <div className="text-center p-16 bg-white rounded-[2.5rem] border border-dashed border-gray-200">
-                  <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                    <MapPin size={32} className="text-gray-200" />
-                  </div>
-                  <p className="text-sm text-gray-400 font-medium">No saved addresses yet.</p>
-                </div>
-              ) : (
-                addresses.map((addr) => (
-                  <motion.div 
-                    key={addr.id}
-                    layout
-                    className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-50 flex items-center justify-between group hover:shadow-md transition-all"
+              {/* Header */}
+              <div className="flex items-center justify-between mb-[24px]">
+                <div className="flex items-center gap-[13px]">
+                  <button
+                    type="button"
+                    onClick={() => navigate(-1)}
+                    aria-label="Go back"
+                    className="w-[36px] h-[36px] min-w-[36px] p-0 border-none rounded-full bg-[#f1f1f1] text-[#171717] grid place-items-center font-sans text-[19px] font-normal leading-none cursor-pointer hover:bg-[#e8e8e8] active:scale-[0.94] transition-all"
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-2xl bg-gray-50 flex items-center justify-center text-[#1A2C54]">
-                        <MapPin size={20} />
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold text-[#1A2C54]">{addr.name}</span>
-                          <span className="bg-ruby/10 text-ruby text-[8px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                            {addr.label}
+                    &#8592;
+                  </button>
+                  <div>
+                    <h2 className="text-[21px] sm:text-[23px] font-[650] tracking-[-0.4px] text-[#171717]">
+                      Saved Addresses
+                    </h2>
+                    <p className="mt-[4px] text-[#777] text-[13px]">
+                      Manage your delivery locations
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    setEditingAddress(null);
+                    setFormData({ name: '', number: '', address: '', city: '', state: '', pincode: '' });
+                    setShowForm(true);
+                  }}
+                  className="px-3.5 py-2 rounded-[9px] bg-ruby text-white text-xs font-semibold hover:bg-ruby-dark transition-all flex items-center gap-1.5 shadow-sm"
+                >
+                  <Plus size={15} />
+                  <span>Add New</span>
+                </button>
+              </div>
+
+              {/* Address Cards */}
+              <div className="space-y-3.5">
+                {addresses.map((addr) => (
+                  <div
+                    key={addr.id}
+                    className="p-4 rounded-[10px] border border-[#e5e5e5] bg-[#fafafa] flex items-start justify-between gap-3 hover:border-ruby/30 transition-all"
+                  >
+                    <div className="space-y-1 text-left flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[14px] font-[650] text-[#171717] truncate">{addr.name}</span>
+                        {addr.isDefault && (
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <CheckCircle2 size={11} /> Default
                           </span>
-                          {addr.isDefault && (
-                            <CheckCircle2 size={12} className="text-green-500" />
-                          )}
-                        </div>
-                        <p className="text-[11px] text-gray-400 leading-relaxed max-w-[200px] truncate">
-                          {addr.address}, {addr.city}
-                        </p>
+                        )}
                       </div>
+                      <p className="text-[12px] text-[#555] font-medium">{addr.number}</p>
+                      <p className="text-[13px] text-[#666] leading-relaxed break-words">
+                        {addr.address}, {addr.city}, {addr.state} - {addr.pincode}
+                      </p>
                     </div>
-                    
-                    <div className="flex items-center gap-2">
+
+                    <div className="flex items-center gap-1.5 flex-shrink-0 pt-0.5">
                       {!addr.isDefault && (
                         <button
                           onClick={() => handleSetDefault(addr.id)}
-                          className="px-3 py-2 rounded-xl bg-gray-50 text-[10px] font-bold text-gray-400 hover:text-green-500 hover:bg-green-50 transition-all uppercase tracking-wider"
+                          className="text-[11px] font-semibold text-slate-500 hover:text-emerald-600 px-2 py-1 rounded-md hover:bg-white transition-all"
                         >
-                          Set Default
+                          Make Default
                         </button>
                       )}
-                      <button 
+                      <button
                         onClick={() => handleEdit(addr)}
-                        className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 hover:text-ruby hover:bg-ruby/5 transition-all"
+                        className="w-8 h-8 rounded-lg bg-white border border-[#e0e0e0] text-[#444] hover:text-ruby hover:border-ruby flex items-center justify-center transition-all"
+                        title="Edit Address"
                       >
-                        <Edit2 size={16} />
+                        <Edit2 size={13} />
                       </button>
-                      <button 
+                      <button
                         onClick={() => handleDelete(addr.id)}
-                        className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 hover:text-ruby hover:bg-ruby/5 transition-all"
+                        className="w-8 h-8 rounded-lg bg-white border border-[#e0e0e0] text-[#444] hover:text-rose-600 hover:border-rose-300 flex items-center justify-center transition-all"
+                        title="Delete Address"
                       >
-                        <Trash2 size={16} />
+                        <Trash2 size={13} />
                       </button>
                     </div>
-                  </motion.div>
-                ))
-              )}
-
-              {/* Add Address Button at bottom */}
-              <button 
-                onClick={() => setShowForm(true)}
-                className="w-full bg-white border-2 border-dashed border-gray-200 p-6 rounded-[2rem] flex items-center justify-center gap-3 text-[#1A2C54] hover:border-ruby/30 hover:bg-ruby/5 transition-all group"
-              >
-                <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center group-hover:bg-ruby group-hover:text-white transition-all">
-                  <Plus size={20} />
-                </div>
-                <span className="text-sm font-bold uppercase tracking-widest">Add New Address</span>
-              </button>
+                  </div>
+                ))}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

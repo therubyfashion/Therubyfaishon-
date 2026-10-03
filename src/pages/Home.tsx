@@ -32,46 +32,14 @@ export default function Home() {
   const { user, profile } = useAuth();
   const { unreadCount } = useNotifications();
   
-  // Initialize immediately from persistent master store so products NEVER disappear
-  const [trendingProducts, setTrendingProducts] = useState<Product[]>(() => {
-    const all = getMasterProducts();
-    const trending = all.filter(p => p.isTrending);
-    return trending.length > 0 ? trending : all.slice(0, 4);
-  });
-  
-  const [popularProducts, setPopularProducts] = useState<Product[]>(() => {
-    const all = getMasterProducts();
-    const popular = all.filter(p => p.isPopular);
-    return popular.length > 0 ? popular : all.slice(0, 4);
-  });
-  
+  // State initialized purely empty to ensure 100% fresh data from Supabase DB every time
+  const [trendingProducts, setTrendingProducts] = useState<Product[]>([]);
+  const [popularProducts, setPopularProducts] = useState<Product[]>([]);
   const [promoConfig, setPromoConfig] = useState<any>({ promoEnabled: false, promoMessage: "Welcome to The Ruby Ethnic Wear Store! 🎉" });
-  const [categories, setCategories] = useState<any[]>(() => getMasterCategories());
-  const [banners, setBanners] = useState<any[]>(() => getMasterBanners());
-  
-  const [categoriesLoaded, setCategoriesLoaded] = useState(true);
-  const [productsLoaded, setProductsLoaded] = useState(true);
-  const [bannersLoaded, setBannersLoaded] = useState(true);
-  const [minLoadingDone, setMinLoadingDone] = useState(false);
-  const [safetyTimeoutDone, setSafetyTimeoutDone] = useState(false);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [banners, setBanners] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    // Brief 200ms polish timer
-    const timer = setTimeout(() => {
-      setMinLoadingDone(true);
-    }, 200);
-    return () => clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSafetyTimeoutDone(true);
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Loading state: if products already exist in storage, never block the screen
-  const loading = trendingProducts.length === 0 && (!minLoadingDone || !safetyTimeoutDone);
   const [activeFilter, setActiveFilter] = useState('All');
   const [currentReview, setCurrentReview] = useState(0);
   const [currentBanner, setCurrentBanner] = useState(0);
@@ -82,6 +50,17 @@ export default function Home() {
   const [reviewLoading, setReviewLoading] = useState(false);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const navigate = useNavigate();
+
+  // Eradicate any old stale local cache on startup
+  useEffect(() => {
+    try {
+      localStorage.removeItem('ruby_home_cache_v2');
+      localStorage.removeItem('ruby_home_cache');
+      localStorage.removeItem('ruby_master_products_v2');
+      localStorage.removeItem('ruby_master_categories_v2');
+      localStorage.removeItem('ruby_master_banners_v2');
+    } catch (e) {}
+  }, []);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -116,103 +95,44 @@ export default function Home() {
     }
   ];
 
-  // Load initial cached values to avoid showing skeleton loading and render instantly
-  useEffect(() => {
-    try {
-      const cached = localStorage.getItem('ruby_home_cache_v2');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        // Clean cache of old fallback items to prevent flash of dummy data
-        const hasDummy = (parsed.trendingProducts && parsed.trendingProducts.some((p: any) => !p.id || String(p.id).length < 10 || String(p.id).startsWith('fp') || String(p.id).startsWith('fb_'))) ||
-                         (parsed.popularProducts && parsed.popularProducts.some((p: any) => !p.id || String(p.id).length < 10 || String(p.id).startsWith('fp') || String(p.id).startsWith('fb_'))) ||
-                         (parsed.categories && parsed.categories.some((c: any) => !c.id || String(c.id).length < 10 || String(c.id).startsWith('fb_')));
-        if (hasDummy) {
-          localStorage.removeItem('ruby_home_cache_v2');
-        } else {
-          if (parsed.trendingProducts && parsed.trendingProducts.length > 0) setTrendingProducts(parsed.trendingProducts);
-          if (parsed.popularProducts && parsed.popularProducts.length > 0) setPopularProducts(parsed.popularProducts);
-          if (parsed.categories && parsed.categories.length > 0) {
-            setCategories(parsed.categories);
-          }
-          if (parsed.banners && parsed.banners.length > 0) setBanners(parsed.banners);
-          if (parsed.reviews && parsed.reviews.length > 0) setReviews(parsed.reviews);
-          if (parsed.promoConfig) setPromoConfig(parsed.promoConfig);
-          setCategoriesLoaded(true);
-          setProductsLoaded(true);
-          setBannersLoaded(true);
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to load home cache:", e);
-    }
-  }, []);
-
   useEffect(() => {
     // Scroll to top
     window.scrollTo(0, 0);
   }, []);
 
-  useEffect(() => {
-    let finalReviews: any[] = [];
-    let promoConfigData: any = null;
+  const fetchHomeSupabaseData = async () => {
+    try {
+      // Fetch Categories, Banners, Products, Reviews, and Settings concurrently directly from Supabase
+      const [catRes, bannerRes, prodRes, revRes, settsRes] = await Promise.all([
+        supabase.from('categories').select('*').order('sort_order', { ascending: true }),
+        supabase.from('banners').select('*').order('created_at', { ascending: false }),
+        supabase.from('products').select('*').order('created_at', { ascending: false }),
+        supabase.from('reviews').select('*').order('created_at', { ascending: false }),
+        supabase.from('settings').select('*').limit(1)
+      ]);
 
-    const cacheAndSave = (key: string, data: any) => {
-      try {
-        const cached = localStorage.getItem('ruby_home_cache_v2');
-        const parsed = cached ? JSON.parse(cached) : {};
-        parsed[key] = data;
-        parsed.cachedAt = Date.now();
-        const dataStr = JSON.stringify(parsed);
-        if (dataStr.length < 3 * 1024 * 1024) {
-          try {
-            localStorage.setItem('ruby_home_cache_v2', dataStr);
-          } catch (e) {
-            console.warn('localStorage full, clearing cache...');
-            Object.keys(localStorage)
-              .filter(k => k.startsWith('ruby_product_cache_'))
-              .forEach(k => localStorage.removeItem(k));
-            try {
-              localStorage.setItem('ruby_home_cache_v2', dataStr);
-            } catch {}
-          }
-        }
-      } catch (e) {
-        console.warn("Failed to write home cache:", e);
-      }
-    };
+      if (catRes.error) console.warn("Home categories fetch error:", catRes.error);
+      if (bannerRes.error) console.warn("Home banners fetch error:", bannerRes.error);
+      if (prodRes.error) console.warn("Home products fetch error:", prodRes.error);
 
-    const fetchHomeSupabaseData = async () => {
-      try {
-        // Fetch Categories, Banners, and Products concurrently in parallel for fastest response
-        const [catRes, bannerRes, prodRes] = await Promise.all([
-          supabase.from('categories').select('*').order('sort_order', { ascending: true }),
-          supabase.from('banners').select('*'),
-          supabase.from('products').select('*').order('created_at', { ascending: false })
-        ]);
+      // Categories
+      const categoryMap: Record<string, string> = {};
+      const mappedCats = (catRes.data || []).map(c => {
+        categoryMap[c.id] = c.name;
+        return {
+          id: c.id,
+          name: c.name,
+          slug: c.slug,
+          image: c.image || null,
+          sortOrder: c.sort_order ?? 1000,
+        };
+      });
+      setCategories(mappedCats);
 
-        if (catRes.error) console.warn("Home categories fetch error:", catRes.error);
-        if (bannerRes.error) console.warn("Home banners fetch error:", bannerRes.error);
-        if (prodRes.error) console.warn("Home products fetch error:", prodRes.error);
-
-        const categoryMap: Record<string, string> = {};
-        const mappedCats = (catRes.data || []).map(c => {
-          categoryMap[c.id] = c.name;
-          return {
-            id: c.id,
-            name: c.name,
-            slug: c.slug,
-            image: c.image || null,
-            sortOrder: c.sort_order ?? 1000,
-          };
-        });
-        if (mappedCats.length > 0) {
-          setCategories(mappedCats);
-          saveMasterCategories(mappedCats);
-          cacheAndSave('categories', mappedCats);
-        }
-        setCategoriesLoaded(true);
-
-        const mappedBanners = (bannerRes.data || []).map(b => ({
+      // Banners
+      const mappedBanners = (bannerRes.data || [])
+        .filter(b => b.active !== false)
+        .map(b => ({
           id: b.id,
           image: b.image || '',
           title: b.title || '',
@@ -221,116 +141,86 @@ export default function Home() {
           active: b.active ?? true,
           createdAt: b.created_at || new Date().toISOString()
         }));
+      setBanners(mappedBanners);
 
-        const activeBanners = mappedBanners.filter(b => b.active !== false);
-        if (activeBanners.length > 0) {
-          setBanners(activeBanners);
-          saveMasterBanners(activeBanners);
-          cacheAndSave('banners', activeBanners);
-        }
-        setBannersLoaded(true);
+      // Products
+      const mapProduct = (p: any): Product => ({
+        id: p.id,
+        name: p.name || '',
+        description: p.description || '',
+        price: Number(p.price || 0),
+        comparePrice: p.compare_price ? Number(p.compare_price) : undefined,
+        category: (p.category_ids || []).map((id: string) => categoryMap[id]).filter(Boolean),
+        sizes: Array.isArray(p.sizes) ? p.sizes : [],
+        images: Array.isArray(p.images) ? p.images : [],
+        stock: Number(p.stock ?? 0),
+        stockStatus: p.stock_status || undefined,
+        createdAt: p.created_at || new Date().toISOString(),
+        isTrending: p.is_trending ?? false,
+        isPopular: p.is_popular ?? false,
+        sku: p.sku || undefined,
+        barcode: p.barcode || undefined,
+        weight: p.weight || undefined,
+        dimensions: p.dimensions || undefined,
+        seoTitle: p.seo_title || undefined,
+        seoDescription: p.seo_description || undefined,
+        variants: p.variants || [],
+        viewCount: p.view_count ?? 0,
+        wishlistCount: p.wishlist_count ?? 0,
+      });
 
-        const mapProduct = (p: any): Product => ({
-          id: p.id,
-          name: p.name || '',
-          description: p.description || '',
-          price: Number(p.price || 0),
-          comparePrice: p.compare_price ? Number(p.compare_price) : undefined,
-          category: (p.category_ids || []).map((id: string) => categoryMap[id]).filter(Boolean),
-          sizes: Array.isArray(p.sizes) ? p.sizes : [],
-          images: Array.isArray(p.images) ? p.images : [],
-          stock: Number(p.stock ?? 0),
-          stockStatus: p.stock_status || undefined,
-          createdAt: p.created_at || new Date().toISOString(),
-          isTrending: p.is_trending ?? false,
-          isPopular: p.is_popular ?? false,
-          sku: p.sku || undefined,
-          barcode: p.barcode || undefined,
-          weight: p.weight || undefined,
-          dimensions: p.dimensions || undefined,
-          seoTitle: p.seo_title || undefined,
-          seoDescription: p.seo_description || undefined,
-          variants: p.variants || [],
-          viewCount: p.view_count ?? 0,
-          wishlistCount: p.wishlist_count ?? 0,
-        });
+      const allMappedProducts = (prodRes.data || []).map(mapProduct);
+      const trending = allMappedProducts.filter(p => p.isTrending);
+      setTrendingProducts(trending.length > 0 ? trending : allMappedProducts.slice(0, 8));
 
-        const allMappedProducts = (prodRes.data || []).map(mapProduct);
-        if (allMappedProducts.length > 0) {
-          // Persist all products permanently in master storage
-          saveMasterProducts(allMappedProducts);
+      const popular = allMappedProducts.filter(p => p.isPopular);
+      setPopularProducts(popular.length > 0 ? popular : allMappedProducts.slice(0, 8));
 
-          const trending = allMappedProducts.filter(p => p.isTrending);
-          const finalTrending = trending.length > 0 ? trending : allMappedProducts.slice(0, 6);
-
-          const popular = allMappedProducts.filter(p => p.isPopular);
-          const finalPopular = popular.length > 0 ? popular : allMappedProducts.slice(0, 6);
-
-          setTrendingProducts(finalTrending);
-          setPopularProducts(finalPopular);
-          cacheAndSave('trendingProducts', finalTrending);
-          cacheAndSave('popularProducts', finalPopular);
-        }
-
-        setProductsLoaded(true);
-        // Fetch reviews
-        try {
-          const { data: revData } = await supabase.from('reviews').select('*').order('created_at', { ascending: false });
-          if (revData) {
-            const formattedRevs = revData.map((a: any) => ({
-              id: a.id,
-              name: a.user_name || a.name || 'Anonymous User',
-              initials: (a.user_name || a.name || 'U').charAt(0).toUpperCase(),
-              color: a.color || '#5a4fcf',
-              rating: a.rating || 5,
-              text: a.comment || a.text || '',
-              tag: a.tag || 'Fabric',
-              image: a.image || null,
-              date: new Date(a.created_at || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-              likes: a.likes || 0,
-              dislikes: a.dislikes || 0,
-              createdAt: a.created_at
-            }));
-            setReviews(formattedRevs);
-            cacheAndSave('reviews', formattedRevs);
-          }
-        } catch (e) {
-          console.warn("Error fetching reviews:", e);
-        }
-
-        // Fetch settings
-        try {
-          const { data: settsData } = await supabase.from('settings').select('*').limit(1);
-          if (settsData && settsData.length > 0) {
-            const rawSettings = settsData[0];
-            promoConfigData = {
-              promoEnabled: rawSettings.promo_enabled ?? rawSettings.promoEnabled ?? false,
-              promoType: rawSettings.promo_type ?? rawSettings.promoType ?? 'timer',
-              promoMessage: rawSettings.promo_message ?? rawSettings.promoMessage ?? '🔥 Mega Sale Ends In:',
-              promoEndDate: rawSettings.promo_end_date ?? rawSettings.promoEndDate ?? '',
-              promoScrolling: rawSettings.promo_scrolling ?? rawSettings.promoScrolling ?? false,
-              promoBgColor: rawSettings.promo_bg_color ?? rawSettings.promoBgColor ?? '#A11B35',
-              promoTextColor: rawSettings.promo_text_color ?? rawSettings.promoTextColor ?? '#FFFFFF',
-            };
-            setPromoConfig(promoConfigData);
-            cacheAndSave('promoConfig', promoConfigData);
-          }
-        } catch (e) {
-          console.warn("Error fetching settings:", e);
-        }
-      } catch (error) {
-        console.warn("Error loading home data from Supabase:", error);
-        setCategoriesLoaded(true);
-        setBannersLoaded(true);
-        setProductsLoaded(true);
+      // Reviews
+      if (revRes.data) {
+        const formattedRevs = revRes.data.map((a: any) => ({
+          id: a.id,
+          name: a.user_name || a.name || 'Anonymous User',
+          initials: (a.user_name || a.name || 'U').charAt(0).toUpperCase(),
+          color: a.color || '#5a4fcf',
+          rating: a.rating || 5,
+          text: a.comment || a.text || '',
+          tag: a.tag || 'Fabric',
+          image: a.image || null,
+          date: new Date(a.created_at || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          likes: a.likes || 0,
+          dislikes: a.dislikes || 0,
+          createdAt: a.created_at
+        }));
+        setReviews(formattedRevs);
       }
-    };
 
+      // Settings
+      if (settsRes.data && settsRes.data.length > 0) {
+        const rawSettings = settsRes.data[0];
+        setPromoConfig({
+          promoEnabled: rawSettings.promo_enabled ?? rawSettings.promoEnabled ?? false,
+          promoType: rawSettings.promo_type ?? rawSettings.promoType ?? 'timer',
+          promoMessage: rawSettings.promo_message ?? rawSettings.promoMessage ?? '🔥 Mega Sale Ends In:',
+          promoEndDate: rawSettings.promo_end_date ?? rawSettings.promoEndDate ?? '',
+          promoScrolling: rawSettings.promo_scrolling ?? rawSettings.promoScrolling ?? false,
+          promoBgColor: rawSettings.promo_bg_color ?? rawSettings.promoBgColor ?? '#A11B35',
+          promoTextColor: rawSettings.promo_text_color ?? rawSettings.promoTextColor ?? '#FFFFFF',
+        });
+      }
+    } catch (error) {
+      console.warn("Error loading fresh home data from Supabase:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchHomeSupabaseData();
 
-    // Set up real-time postgres changes channel for Home
+    // Set up real-time postgres changes channel for Home to ensure live fresh updates
     const homeChannel = supabase
-      .channel('home-db-changes')
+      .channel('home-live-db-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => { fetchHomeSupabaseData(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'banners' }, () => { fetchHomeSupabaseData(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => { fetchHomeSupabaseData(); })
@@ -338,8 +228,19 @@ export default function Home() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => { fetchHomeSupabaseData(); })
       .subscribe();
 
+    // Refetch fresh data whenever tab/window gets focus or user returns to app
+    const handleRevalidate = () => {
+      if (document.visibilityState === 'visible') {
+        fetchHomeSupabaseData();
+      }
+    };
+    window.addEventListener('focus', handleRevalidate);
+    document.addEventListener('visibilitychange', handleRevalidate);
+
     return () => {
       supabase.removeChannel(homeChannel);
+      window.removeEventListener('focus', handleRevalidate);
+      document.removeEventListener('visibilitychange', handleRevalidate);
     };
   }, []);
 

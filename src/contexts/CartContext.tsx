@@ -22,14 +22,94 @@ interface CartContextType {
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
+// Tombstone tracking to guarantee deleted items never resurrect on page reload or sync
+const getRemovedTombstones = (): Array<{ productId: string; size: string; color: string; timestamp: number }> => {
+  try {
+    const raw = localStorage.getItem('ruby_cart_removed_items');
+    if (!raw) return [];
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return [];
+    const now = Date.now();
+    return list.filter((r: any) => now - (Number(r.timestamp) || 0) < 7 * 86400000); // 7 days retention
+  } catch (e) {
+    return [];
+  }
+};
+
+const addRemovedTombstone = (productId: string, size?: string, color?: string) => {
+  try {
+    const list = getRemovedTombstones();
+    const cleanSize = (size || '').trim().toLowerCase();
+    const cleanColor = (color || '').trim().toLowerCase();
+    const updated = [
+      ...list.filter(r => !(r.productId === productId && r.size === cleanSize && r.color === cleanColor)),
+      { productId, size: cleanSize, color: cleanColor, timestamp: Date.now() }
+    ];
+    localStorage.setItem('ruby_cart_removed_items', JSON.stringify(updated));
+  } catch (e) {}
+};
+
+const clearRemovedTombstone = (productId: string, size?: string, color?: string) => {
+  try {
+    const list = getRemovedTombstones();
+    const cleanSize = (size || '').trim().toLowerCase();
+    const cleanColor = (color || '').trim().toLowerCase();
+    const updated = list.filter(r => !(r.productId === productId && (!cleanSize || r.size === cleanSize) && (!cleanColor || r.color === cleanColor)));
+    localStorage.setItem('ruby_cart_removed_items', JSON.stringify(updated));
+  } catch (e) {}
+};
+
+const isItemTombstoned = (productId: string, size?: string, color?: string, tombstones?: Array<{ productId: string; size: string; color: string }>): boolean => {
+  const list = tombstones || getRemovedTombstones();
+  const cleanSize = (size || '').trim().toLowerCase();
+  const cleanColor = (color || '').trim().toLowerCase();
+  return list.some(r => 
+    r.productId === productId && 
+    (!r.size || r.size === cleanSize) && 
+    (!r.color || r.color === cleanColor)
+  );
+};
+
+export const deduplicateCartItems = (list: CartItem[]): CartItem[] => {
+  const merged: CartItem[] = [];
+  for (const item of list) {
+    if (!item || !item.id) continue;
+    const sSize = (item.selectedSize || '').trim();
+    const sColor = (item.selectedColor || '').trim();
+    const existingIndex = merged.findIndex(m => 
+      m && m.id === item.id && 
+      (m.selectedSize || '').trim() === sSize && 
+      (m.selectedColor || '').trim().toLowerCase() === sColor.toLowerCase()
+    );
+    if (existingIndex !== -1) {
+      const existingQty = Number(merged[existingIndex].quantity) || 1;
+      const addedQty = Number(item.quantity) || 1;
+      const stockLimit = merged[existingIndex].stock !== undefined && merged[existingIndex].stock !== null 
+        ? Number(merged[existingIndex].stock) 
+        : 99;
+      merged[existingIndex].quantity = Math.min(stockLimit, existingQty + addedQty);
+      if (item.cartItemId && !merged[existingIndex].cartItemId) {
+        merged[existingIndex].cartItemId = item.cartItemId;
+      }
+    } else {
+      merged.push({ ...item, selectedSize: sSize, selectedColor: sColor });
+    }
+  }
+  return merged;
+};
+
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading: authLoading } = useAuth();
   const [items, setItems] = useState<CartItem[]>(() => {
     try {
+      const tombstones = getRemovedTombstones();
       const saved = localStorage.getItem('ruby_cart');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed.filter(Boolean);
+        if (Array.isArray(parsed)) {
+          const filtered = parsed.filter(Boolean).filter(i => !isItemTombstoned(i.id, i.selectedSize, i.selectedColor, tombstones));
+          return deduplicateCartItems(filtered);
+        }
       }
       return [];
     } catch (e) {
@@ -59,11 +139,17 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const fetchAndMergeCart = async () => {
       try {
+        const userId = user?.id || user?.uid;
+        if (!userId) {
+          setCartLoaded(true);
+          return;
+        }
+
         // 1. Fetch existing cart items from Supabase
         const { data: dbItemsData, error: dbItemsErr } = await supabase
           .from('cart_items')
           .select('*, products(*)')
-          .eq('user_id', user.uid);
+          .eq('user_id', userId);
 
         if (dbItemsErr) {
           console.error("Error fetching cart items from Supabase:", dbItemsErr);
@@ -71,14 +157,27 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        // Parse db items
-        const dbItems: CartItem[] = (dbItemsData || []).map(row => {
+        const tombstones = getRemovedTombstones();
+
+        // Parse db items and filter against tombstones
+        const cleanedRawDbItems: CartItem[] = [];
+        for (const row of (dbItemsData || [])) {
           const p = Array.isArray(row.products) ? row.products[0] : row.products;
-          if (!p) return null;
-          
-          return {
+          if (!p) continue;
+
+          const sSize = (row.size || '').trim();
+          const sColor = (row.color || '').trim();
+
+          // If this item was deleted by the user, delete it from Supabase in background and do not restore it
+          if (isItemTombstoned(p.id, sSize, sColor, tombstones)) {
+            supabase.from('cart_items').delete().eq('id', row.id).then(() => {});
+            continue;
+          }
+
+          cleanedRawDbItems.push({
             ...p,
             id: p.id,
+            cartItemId: row.id,
             name: p.name || '',
             description: p.description || '',
             price: Number(p.price || 0),
@@ -100,83 +199,104 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             viewCount: p.view_count ?? 0,
             category: p.category_ids || [],
             
-            selectedSize: row.size || '',
-            selectedColor: row.color || '',
+            selectedSize: sSize,
+            selectedColor: sColor,
             quantity: Number(row.quantity) || 1
-          } as CartItem;
-        }).filter(Boolean) as CartItem[];
-
-        // 2. Read local guest items
-        const localSaved = localStorage.getItem('ruby_cart');
-        let localItems: CartItem[] = [];
-        if (localSaved) {
-          try {
-            const parsed = JSON.parse(localSaved);
-            if (Array.isArray(parsed)) {
-              localItems = parsed.filter(Boolean);
-            }
-          } catch (e) {
-            console.warn("Failed to parse local cart:", e);
-          }
+          } as CartItem);
         }
 
-        if (localItems.length > 0) {
-          console.log("Merging guest cart into Supabase cart...");
-          const mergedList = [...dbItems];
+        const dbItems = deduplicateCartItems(cleanedRawDbItems);
 
-          for (const localItem of localItems) {
-            const existingIndex = mergedList.findIndex(i =>
-              i.id === localItem.id &&
-              i.selectedSize === localItem.selectedSize &&
-              i.selectedColor === localItem.selectedColor
-            );
+        // Check if guest cart needs to be merged (ONLY once per user login ever)
+        const syncKey = `ruby_cart_synced_${userId}`;
+        const alreadySynced = localStorage.getItem(syncKey) === 'true';
 
-            if (existingIndex !== -1) {
-              const newQty = Math.max(mergedList[existingIndex].quantity, localItem.quantity);
-              mergedList[existingIndex].quantity = newQty;
-
-              const dbRow = dbItemsData?.find(r => 
-                r.product_id === localItem.id &&
-                r.size === localItem.selectedSize &&
-                r.color === (localItem.selectedColor || '')
-              );
-              if (dbRow) {
-                await supabase
-                  .from('cart_items')
-                  .update({ quantity: newQty, updated_at: new Date().toISOString() })
-                  .eq('id', dbRow.id);
+        if (!alreadySynced) {
+          // 2. Read local guest items for initial login merge
+          const localSaved = localStorage.getItem('ruby_cart');
+          let localItems: CartItem[] = [];
+          if (localSaved) {
+            try {
+              const parsed = JSON.parse(localSaved);
+              if (Array.isArray(parsed)) {
+                localItems = parsed.filter(Boolean).filter(i => !isItemTombstoned(i.id, i.selectedSize, i.selectedColor, tombstones));
               }
-            } else {
-              mergedList.push(localItem);
-
-              await supabase
-                .from('cart_items')
-                .insert({
-                  user_id: user.uid,
-                  product_id: localItem.id,
-                  size: localItem.selectedSize,
-                  color: localItem.selectedColor || '',
-                  quantity: localItem.quantity,
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                });
+            } catch (e) {
+              console.warn("Failed to parse local cart:", e);
             }
           }
 
-          setItems(mergedList);
-          try {
-            localStorage.setItem('ruby_cart', JSON.stringify(mergedList));
-          } catch (e) {}
+          if (localItems.length > 0) {
+            const mergedList = [...dbItems];
+
+            for (const localItem of localItems) {
+              const safeLocalSize = (localItem.selectedSize || '').trim();
+              const safeLocalColor = (localItem.selectedColor || '').trim();
+
+              const existingIndex = mergedList.findIndex(i =>
+                i.id === localItem.id &&
+                (i.selectedSize || '').trim() === safeLocalSize &&
+                (i.selectedColor || '').trim().toLowerCase() === safeLocalColor.toLowerCase()
+              );
+
+              if (existingIndex !== -1) {
+                const newQty = Math.max(mergedList[existingIndex].quantity, localItem.quantity);
+                mergedList[existingIndex].quantity = newQty;
+
+                const dbRow = dbItemsData?.find(r => 
+                  r.product_id === localItem.id &&
+                  (r.size || '').trim() === safeLocalSize &&
+                  (r.color || '').trim().toLowerCase() === safeLocalColor.toLowerCase()
+                );
+                if (dbRow) {
+                  await supabase
+                    .from('cart_items')
+                    .update({ quantity: newQty, updated_at: new Date().toISOString() })
+                    .eq('id', dbRow.id);
+                }
+              } else {
+                const { data: insertedRow } = await supabase
+                  .from('cart_items')
+                  .insert({
+                    user_id: userId,
+                    product_id: localItem.id,
+                    size: safeLocalSize,
+                    color: safeLocalColor,
+                    quantity: localItem.quantity,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                  })
+                  .select('id')
+                  .single();
+
+                mergedList.push({
+                  ...localItem,
+                  cartItemId: insertedRow?.id || localItem.cartItemId
+                });
+              }
+            }
+
+            const dedupedMerged = deduplicateCartItems(mergedList);
+            setItems(dedupedMerged);
+            try {
+              localStorage.setItem('ruby_cart', JSON.stringify(dedupedMerged));
+            } catch (e) {}
+          } else {
+            setItems(dbItems);
+            try {
+              localStorage.setItem('ruby_cart', JSON.stringify(dbItems));
+            } catch (e) {}
+          }
+          localStorage.setItem(syncKey, 'true');
         } else {
+          // Already logged in session: Supabase is authoritative, never resurrect deleted items
           setItems(dbItems);
           try {
-            if (dbItems.length > 0) {
-              localStorage.setItem('ruby_cart', JSON.stringify(dbItems));
-            }
+            localStorage.setItem('ruby_cart', JSON.stringify(dbItems));
           } catch (e) {}
         }
 
-        lastFetchedUserId.current = user.uid;
+        lastFetchedUserId.current = userId;
       } catch (err) {
         console.error("Error loading/merging cart from Supabase:", err);
       } finally {
@@ -190,12 +310,12 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Save cart state locally as continuous resilient backup cache across navigation
   useEffect(() => {
-    if (Array.isArray(items) && items.length > 0) {
-      try {
+    try {
+      if (Array.isArray(items)) {
         localStorage.setItem('ruby_cart', JSON.stringify(items.filter(Boolean)));
-      } catch (err) {
-        console.warn("⚠️ LocalStorage quota exceeded, could not save cart state locally:", err);
       }
+    } catch (err) {
+      // Silent
     }
   }, [items]);
 
@@ -233,58 +353,80 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const safeQuantity = isNaN(Number(quantity)) || Number(quantity) < 1 ? 1 : Number(quantity);
     const productStockValue = product.stock !== undefined && product.stock !== null ? Number(product.stock) : 99;
     const stockLimit = isNaN(productStockValue) ? 99 : productStockValue;
+    const safeSize = (size || '').trim();
+    const safeColor = (color || '').trim();
     
+    // Clear any tombstone so re-adding intentionally works
+    clearRemovedTombstone(product.id, safeSize, safeColor);
+
     setItems(prev => {
-      const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
-      const existing = safePrev.find(i => 
+      const safePrev = deduplicateCartItems(Array.isArray(prev) ? prev.filter(Boolean) : []);
+      const existingIndex = safePrev.findIndex(i => 
         i && i.id === product.id && 
-        i.selectedSize === size && 
-        i.selectedColor === color
+        (i.selectedSize || '').trim() === safeSize && 
+        (i.selectedColor || '').trim().toLowerCase() === safeColor.toLowerCase()
       );
-      if (existing) {
-        const existingQty = isNaN(Number(existing.quantity)) ? 1 : Number(existing.quantity);
+      if (existingIndex !== -1) {
+        const existingQty = isNaN(Number(safePrev[existingIndex].quantity)) ? 1 : Number(safePrev[existingIndex].quantity);
         const newQuantity = Math.min(stockLimit, existingQty + safeQuantity);
         
-        return safePrev.map(i => 
-          (i && i.id === product.id && i.selectedSize === size && i.selectedColor === color) 
+        return safePrev.map((i, idx) => 
+          idx === existingIndex 
             ? { ...i, quantity: newQuantity } 
             : i
         );
       }
       const initialQuantity = Math.min(stockLimit, safeQuantity);
-      return [...safePrev, { ...product, selectedSize: size, selectedColor: color, quantity: initialQuantity }];
+      return [...safePrev, { ...product, selectedSize: safeSize, selectedColor: safeColor, quantity: initialQuantity }];
     });
 
-    if (user) {
+    const userId = user?.id || user?.uid || (user as any)?.sub;
+    if (userId) {
       try {
-        const { data: existingData } = await supabase
+        const { data: existingRows } = await supabase
           .from('cart_items')
-          .select('id, quantity')
-          .eq('user_id', user.uid)
+          .select('id, quantity, color')
+          .eq('user_id', userId)
           .eq('product_id', product.id)
-          .eq('size', size)
-          .eq('color', color || '')
-          .maybeSingle();
+          .eq('size', safeSize);
 
-        if (existingData) {
-          const newQty = Math.min(stockLimit, (existingData.quantity || 1) + safeQuantity);
+        const matchingRow = (existingRows || []).find((r: any) => (r.color || '').trim().toLowerCase() === safeColor.toLowerCase());
+
+        if (matchingRow) {
+          const newQty = Math.min(stockLimit, (matchingRow.quantity || 1) + safeQuantity);
           await supabase
             .from('cart_items')
             .update({ quantity: newQty, updated_at: new Date().toISOString() })
-            .eq('id', existingData.id);
+            .eq('id', matchingRow.id);
+
+          // Clean up any extra duplicates if any exist in DB
+          const dupes = (existingRows || []).filter((r: any) => r.id !== matchingRow.id && (r.color || '').trim().toLowerCase() === safeColor.toLowerCase());
+          for (const d of dupes) {
+            await supabase.from('cart_items').delete().eq('id', d.id);
+          }
         } else {
           const initialQuantity = Math.min(stockLimit, safeQuantity);
-          await supabase
+          const { data: newRow } = await supabase
             .from('cart_items')
             .insert({
-              user_id: user.uid,
+              user_id: userId,
               product_id: product.id,
-              size: size,
-              color: color || '',
+              size: safeSize,
+              color: safeColor,
               quantity: initialQuantity,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
-            });
+            })
+            .select('id')
+            .single();
+
+          if (newRow?.id) {
+            setItems(prev => prev.map(i => 
+              (i && i.id === product.id && (i.selectedSize || '').trim() === safeSize && (i.selectedColor || '').trim().toLowerCase() === safeColor.toLowerCase())
+                ? { ...i, cartItemId: newRow.id }
+                : i
+            ));
+          }
         }
       } catch (err) {
         console.error("Error adding to Supabase cart:", err);
@@ -294,22 +436,71 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const removeFromCart = async (productId: string, size: string, color?: string) => {
     if (!productId) return;
+    const targetSize = (size || '').trim().toLowerCase();
+    const targetColor = (color || '').trim().toLowerCase();
+
+    // 1. Add permanent tombstone to guarantee deleted product NEVER resurrects on reload or sync
+    addRemovedTombstone(productId, targetSize, targetColor);
+
+    const idsToDeleteFromDb: string[] = [];
+
+    // 2. Synchronously filter state and local storage immediately
     setItems(prev => {
-      const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
-      return safePrev.filter(i => 
-        !(i && i.id === productId && i.selectedSize === size && i.selectedColor === color)
-      );
+      const currentList = Array.isArray(prev) ? prev.filter(Boolean) : [];
+      const updated = currentList.filter(i => {
+        if (!i || !i.id) return false;
+        if (i.id !== productId) return true;
+
+        const iSize = (i.selectedSize || '').trim().toLowerCase();
+        const iColor = (i.selectedColor || '').trim().toLowerCase();
+
+        const sizeMatches = !targetSize || iSize === targetSize;
+        const colorMatches = !targetColor || iColor === targetColor;
+
+        if (sizeMatches && colorMatches) {
+          if (i.cartItemId) {
+            idsToDeleteFromDb.push(i.cartItemId);
+          }
+          return false; // Remove this item!
+        }
+        return true;
+      });
+
+      try {
+        localStorage.setItem('ruby_cart', JSON.stringify(updated));
+      } catch (e) {}
+
+      return updated;
     });
 
-    if (user) {
+    // 3. Delete from Supabase robustly using multiple targeted operations
+    const userId = user?.id || user?.uid || (user as any)?.sub;
+    if (userId) {
       try {
-        await supabase
+        // Delete by tracked cartItemId
+        for (const cid of idsToDeleteFromDb) {
+          await supabase.from('cart_items').delete().eq('id', cid);
+        }
+
+        // Query database to find and delete any matching rows by user_id + product_id
+        const { data: dbRows } = await supabase
           .from('cart_items')
-          .delete()
-          .eq('user_id', user.uid)
-          .eq('product_id', productId)
-          .eq('size', size)
-          .eq('color', color || '');
+          .select('id, size, color')
+          .eq('user_id', userId)
+          .eq('product_id', productId);
+
+        if (dbRows && dbRows.length > 0) {
+          for (const row of dbRows) {
+            const rSize = (row.size || '').trim().toLowerCase();
+            const rColor = (row.color || '').trim().toLowerCase();
+            const sizeMatches = !targetSize || rSize === targetSize;
+            const colorMatches = !targetColor || rColor === targetColor;
+
+            if (sizeMatches && colorMatches) {
+              await supabase.from('cart_items').delete().eq('id', row.id);
+            }
+          }
+        }
       } catch (err) {
         console.error("Error removing from Supabase cart:", err);
       }
@@ -318,12 +509,18 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateQuantity = async (productId: string, size: string, quantity: number, color?: string) => {
     if (!productId) return;
+    if (quantity <= 0) {
+      removeFromCart(productId, size, color);
+      return;
+    }
     const cleanQty = isNaN(Number(quantity)) || Number(quantity) < 1 ? 1 : Number(quantity);
+    const safeSize = (size || '').trim().toLowerCase();
+    const safeColor = (color || '').trim().toLowerCase();
     
     setItems(prev => {
       const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
-      return safePrev.map(i => {
-        if (i && i.id === productId && i.selectedSize === size && i.selectedColor === color) {
+      const updated = safePrev.map(i => {
+        if (i && i.id === productId && (i.selectedSize || '').trim().toLowerCase() === safeSize && (i.selectedColor || '').trim().toLowerCase() === safeColor) {
           const productStockValue = i.stock !== undefined && i.stock !== null ? Number(i.stock) : 99;
           const stockLimit = isNaN(productStockValue) ? 99 : productStockValue;
           const finalQuantity = Math.min(stockLimit, cleanQty);
@@ -331,14 +528,21 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         return i;
       });
+
+      try {
+        localStorage.setItem('ruby_cart', JSON.stringify(updated));
+      } catch (e) {}
+
+      return updated;
     });
 
-    if (user) {
+    const userId = user?.id || user?.uid || (user as any)?.sub;
+    if (userId) {
       try {
         const { data: existingData } = await supabase
           .from('cart_items')
           .select('id, stock:products(stock)')
-          .eq('user_id', user.uid)
+          .eq('user_id', userId)
           .eq('product_id', productId)
           .eq('size', size)
           .eq('color', color || '')
@@ -362,15 +566,26 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const clearCart = async () => {
+    // Add all current items to tombstones so they cannot resurrect
+    for (const item of items) {
+      if (item && item.id) {
+        addRemovedTombstone(item.id, item.selectedSize, item.selectedColor);
+      }
+    }
+
     setItems([]);
     setAppliedPromo(null);
+    try {
+      localStorage.setItem('ruby_cart', JSON.stringify([]));
+    } catch (e) {}
 
-    if (user) {
+    const userId = user?.id || user?.uid || (user as any)?.sub;
+    if (userId) {
       try {
         await supabase
           .from('cart_items')
           .delete()
-          .eq('user_id', user.uid);
+          .eq('user_id', userId);
       } catch (err) {
         console.error("Error clearing Supabase cart:", err);
       }

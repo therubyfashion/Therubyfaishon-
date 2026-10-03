@@ -188,9 +188,9 @@ export default function Cart() {
             {/* Items List */}
             <div className="space-y-6">
           <AnimatePresence mode="popLayout">
-            {items.map((item) => (
+            {items.map((item, idx) => (
               <motion.div 
-                key={`${item.id}-${item.selectedSize}-${item.selectedColor || ''}`}
+                key={item.cartItemId ? `cart-${item.cartItemId}` : `${item.id}-${item.selectedSize}-${item.selectedColor || ''}-${idx}`}
                 layout
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}

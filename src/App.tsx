@@ -21,13 +21,13 @@ import { supabase } from './supabase';
 import { useVisitorTracking } from './hooks/useVisitorTracking';
 import { trackPixelEvent } from './lib/pixel';
 
-// Lazy load pages
+// E-commerce core pages imported directly to ensure unified React runtime
 import Home from './pages/Home';
+import Cart from './pages/Cart';
+import Checkout from './pages/Checkout';
 const Shop = React.lazy(() => import('./pages/Shop'));
 const ProductDetail = React.lazy(() => import('./pages/ProductDetail'));
-const Cart = React.lazy(() => import('./pages/Cart'));
 const Wishlist = React.lazy(() => import('./pages/Wishlist'));
-const Checkout = React.lazy(() => import('./pages/Checkout'));
 const Login = React.lazy(() => import('./pages/Login'));
 const Signup = React.lazy(() => import('./pages/Signup'));
 const About = React.lazy(() => import('./pages/About'));

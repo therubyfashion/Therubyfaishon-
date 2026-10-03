@@ -457,15 +457,13 @@ export default function ProductDetail() {
           const parsed = JSON.parse(rawCache);
           parsed.reviews = fetchedReviews;
           const data = JSON.stringify(parsed);
-          if (data.length < 3 * 1024 * 1024) { // only save if under 3MB
+          if (data.length < 300 * 1024) {
             try {
               localStorage.setItem(cacheKey, data);
             } catch (e) {
-              console.warn('localStorage full, clearing cache...');
-              // Clear old caches
               Object.keys(localStorage)
-                .filter(k => k.startsWith('ruby_product_cache_'))
-                .forEach(k => localStorage.removeItem(k));
+                .filter(k => k.startsWith('ruby_product_cache_') || k.startsWith('ruby_shop_cache_'))
+                .forEach(k => { try { localStorage.removeItem(k); } catch {} });
               try {
                 localStorage.setItem(cacheKey, data);
               } catch {}
@@ -668,17 +666,15 @@ export default function ProductDetail() {
             try {
               localStorage.setItem('recentlyViewed', rvData);
             } catch (e) {
-              console.warn('localStorage full, clearing cache...');
-              // Clear old caches
               Object.keys(localStorage)
                 .filter(k => k.startsWith('ruby_product_cache_'))
-                .forEach(k => localStorage.removeItem(k));
+                .forEach(k => { try { localStorage.removeItem(k); } catch {} });
               try {
                 localStorage.setItem('recentlyViewed', rvData);
               } catch {}
             }
           } catch (e) {
-            console.warn("Error updating recently viewed:", e);
+            // Silent
           }
 
           // Save fresh details to cache
@@ -691,15 +687,13 @@ export default function ProductDetail() {
               savedAt: Date.now()
             });
 
-            if (dataToCache.length < 3 * 1024 * 1024) { // only save if under 3MB
+            if (dataToCache.length < 300 * 1024) {
               try {
                 localStorage.setItem(cacheKey, dataToCache);
               } catch (e) {
-                console.warn('localStorage full, clearing cache...');
-                // Clear old caches
                 Object.keys(localStorage)
-                  .filter(k => k.startsWith('ruby_product_cache_'))
-                  .forEach(k => localStorage.removeItem(k));
+                  .filter(k => k.startsWith('ruby_product_cache_') || k.startsWith('ruby_shop_cache_'))
+                  .forEach(k => { try { localStorage.removeItem(k); } catch {} });
                 try {
                   localStorage.setItem(cacheKey, dataToCache);
                 } catch {

@@ -17,9 +17,7 @@ import { supabase } from '../supabase';
 
 const STEPS = [
   { id: 1, label: 'Address' },
-  { id: 2, label: 'Shipping' },
-  { id: 3, label: 'Review' },
-  { id: 4, label: 'Payment' }
+  { id: 2, label: 'Payment' }
 ];
 
 export default function Checkout() {
@@ -82,22 +80,23 @@ export default function Checkout() {
     };
   }, [user]);
 
-  // Synchronized step state across React, localStorage, and URL search parameters (?step=3)
+  // Synchronized step state across React, localStorage, and URL search parameters (?step=2)
   const [currentStep, setCurrentStepState] = useState<number>(() => {
     const urlStep = searchParams.get('step');
     if (urlStep) {
       const parsed = parseInt(urlStep, 10);
-      if (parsed >= 1 && parsed <= 4) return parsed;
+      if (parsed === 1 || parsed === 2) return parsed;
     }
     const saved = localStorage.getItem('checkout_step');
     const parsedSaved = saved ? parseInt(saved, 10) : 1;
-    return parsedSaved >= 1 && parsedSaved <= 4 ? parsedSaved : 1;
+    return parsedSaved === 1 || parsedSaved === 2 ? parsedSaved : 1;
   });
 
   const setCurrentStep = (step: number) => {
-    setCurrentStepState(step);
-    localStorage.setItem('checkout_step', step.toString());
-    setSearchParams({ step: step.toString() }, { replace: true });
+    const validStep = step === 2 ? 2 : 1;
+    setCurrentStepState(validStep);
+    localStorage.setItem('checkout_step', validStep.toString());
+    setSearchParams({ step: validStep.toString() }, { replace: true });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -106,9 +105,10 @@ export default function Checkout() {
     const urlStep = searchParams.get('step');
     if (urlStep) {
       const parsed = parseInt(urlStep, 10);
-      if (parsed >= 1 && parsed <= 4 && parsed !== currentStep) {
-        setCurrentStepState(parsed);
-        localStorage.setItem('checkout_step', parsed.toString());
+      const validStep = parsed === 2 ? 2 : 1;
+      if (validStep !== currentStep) {
+        setCurrentStepState(validStep);
+        localStorage.setItem('checkout_step', validStep.toString());
       }
     }
   }, [searchParams]);
@@ -362,7 +362,7 @@ export default function Checkout() {
       : displayItems.reduce((sum: number, it: any) => sum + (Number(it.price || 0) * Number(it.quantity || 1)), 0);
 
   const discount = Number(cartDiscount || (appliedPromo ? appliedPromo.discount : 0));
-  const shippingCost = Number(selectedShippingObj?.cost || 0);
+  const shippingCost = 0; // Free Delivery
   
   // COD fee is strictly ₹80 when selectedPayment is 'cod', and ₹0 otherwise
   const codFee = Number(selectedPayment === 'cod' ? 80 : 0);
@@ -377,13 +377,13 @@ export default function Checkout() {
     : 0;
   const pointsDiscount = Math.floor(pointsToRedeem / 10);
 
-  // Total for Review step: explicitly excludes COD fee
-  const reviewTotal = Math.max(0, subtotal - discount - pointsDiscount + shippingCost);
+  // Base total before COD fee
+  const baseTotal = Math.max(0, subtotal - discount - pointsDiscount + shippingCost);
 
-  // Total for Payment step & order placement: strictly reviewTotal + codFee
-  // When UPI selected: reviewTotal + 0 = reviewTotal
-  // When COD selected: reviewTotal + 80 = reviewTotal + 80 (ONLY ₹80 is added)
-  const finalTotal = Math.max(0, reviewTotal + codFee);
+  // Total for Payment step & order placement: strictly baseTotal + codFee
+  // When UPI selected: baseTotal + 0 = baseTotal
+  // When COD selected: baseTotal + 80 = baseTotal + 80 (ONLY ₹80 is added)
+  const finalTotal = Math.max(0, baseTotal + codFee);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -612,7 +612,7 @@ export default function Checkout() {
     }
   };
 
-  const handleContinueToShipping = async (e: React.MouseEvent) => {
+  const handleContinueToPayment = async (e: React.MouseEvent) => {
     e.preventDefault();
     
     if (showAddressForm) {
@@ -628,7 +628,7 @@ export default function Checkout() {
       );
 
       if (isFormDirty) {
-        // Form is partially or fully filled out, validate and save it, then advance to step 2
+        // Form is partially or fully filled out, validate and save it, then advance to step 2 (Payment)
         await handleAddAddress(e as any, true);
       } else {
         // Form is completely empty, user likely opened it by accident or changed their mind
@@ -1404,180 +1404,190 @@ export default function Checkout() {
                         <span className="font-bold uppercase tracking-widest">Add New Address</span>
                       </button>
                     ) : (
-                      <motion.form 
+                      <motion.div 
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        onSubmit={handleAddAddress}
-                        className="bg-white border border-ruby/20 rounded-[2rem] p-8 space-y-6 shadow-xl shadow-ruby/5"
+                        className="w-full max-w-[520px] mx-auto bg-white rounded-[14px] sm:rounded-[6px] p-[23px_18px] sm:p-[30px] border border-gray-100"
                       >
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-lg font-bold text-[#1A2C54]">Add New Address</h3>
-                          <button 
+                        {/* HEADER */}
+                        <div className="flex items-center gap-[13px] mb-[26px]">
+                          <button
                             type="button"
                             onClick={() => setShowAddressForm(false)}
-                            className="text-[10px] font-bold uppercase tracking-widest text-gray-400 hover:text-ruby"
+                            aria-label="Go back"
+                            className="w-[36px] h-[36px] min-w-[36px] p-0 border-none rounded-full bg-[#f1f1f1] text-[#171717] grid place-items-center font-sans text-[19px] font-normal leading-none cursor-pointer hover:bg-[#e8e8e8] active:scale-[0.94] transition-all"
                           >
-                            Cancel
+                            &#8592;
                           </button>
+
+                          <div>
+                            <h2 className="text-[21px] sm:text-[23px] font-[650] tracking-[-0.4px] text-[#171717]">
+                              Add Address
+                            </h2>
+                            <p className="mt-[6px] text-[#777] text-[14px]">
+                              Enter your delivery details below.
+                            </p>
+                          </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Full Name</label>
-                            <input 
-                              type="text" 
+                        {/* ADDRESS FORM */}
+                        <form onSubmit={handleAddAddress}>
+                          {/* Full Name */}
+                          <div className="mb-[17px]">
+                            <label htmlFor="checkout_name" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
+                              Full Name
+                            </label>
+                            <input
+                              type="text"
+                              id="checkout_name"
+                              placeholder="Enter your full name"
+                              autoComplete="name"
                               required
                               value={newAddress.name}
                               onChange={e => {
-                                setNewAddress({...newAddress, name: e.target.value});
-                                if (errors.name) setErrors({...errors, name: ''});
+                                setNewAddress({ ...newAddress, name: e.target.value });
+                                if (errors.name) setErrors({ ...errors, name: '' });
                               }}
-                              className={cn(
-                                "w-full bg-gray-50 border px-6 py-4 rounded-2xl text-sm focus:outline-none focus:ring-2 transition-all",
-                                errors.name ? "border-ruby ring-ruby/10" : "border-gray-100 focus:ring-ruby/10"
-                              )}
-                              placeholder="Enter your name"
+                              className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
                             />
-                            {errors.name && <p className="text-[9px] font-bold text-ruby uppercase tracking-widest">{errors.name}</p>}
+                            {errors.name && <p className="text-[10px] font-bold text-ruby mt-1">{errors.name}</p>}
                           </div>
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Phone Number</label>
-                            <input 
-                              type="tel" 
+
+                          {/* Phone */}
+                          <div className="mb-[17px]">
+                            <label htmlFor="checkout_phone" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
+                              Phone Number
+                            </label>
+                            <input
+                              type="tel"
+                              id="checkout_phone"
+                              placeholder="10-digit mobile number"
+                              maxLength={10}
+                              inputMode="numeric"
+                              autoComplete="tel"
                               required
                               value={newAddress.number}
                               onChange={e => {
-                                setNewAddress({...newAddress, number: e.target.value});
-                                if (errors.number) setErrors({...errors, number: ''});
+                                const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                                setNewAddress({ ...newAddress, number: val });
+                                if (errors.number) setErrors({ ...errors, number: '' });
                               }}
-                              className={cn(
-                                "w-full bg-gray-50 border px-6 py-4 rounded-2xl text-sm focus:outline-none focus:ring-2 transition-all",
-                                errors.number ? "border-ruby ring-ruby/10" : "border-gray-100 focus:ring-ruby/10"
-                              )}
-                              placeholder="10-digit mobile number"
+                              className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
                             />
-                            {errors.number && <p className="text-[9px] font-bold text-ruby uppercase tracking-widest">{errors.number}</p>}
+                            {errors.number && <p className="text-[10px] font-bold text-ruby mt-1">{errors.number}</p>}
                           </div>
-                        </div>
 
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Address</label>
-                          <textarea 
-                            required
-                            value={newAddress.address}
-                            onChange={e => {
-                              setNewAddress({...newAddress, address: e.target.value});
-                              if (errors.address) setErrors({...errors, address: ''});
-                            }}
-                            className={cn(
-                              "w-full bg-gray-50 border px-6 py-4 rounded-2xl text-sm focus:outline-none focus:ring-2 transition-all min-h-[100px]",
-                              errors.address ? "border-ruby ring-ruby/10" : "border-gray-100 focus:ring-ruby/10"
-                            )}
-                            placeholder="House No, Building, Street"
-                          />
-                          {errors.address && <p className="text-[9px] font-bold text-ruby uppercase tracking-widest">{errors.address}</p>}
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Landmark</label>
-                            <input 
-                              type="text" 
-                              value={newAddress.landmark}
-                              onChange={e => setNewAddress({...newAddress, landmark: e.target.value})}
-                              className="w-full bg-gray-50 border border-gray-100 px-6 py-4 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-ruby/10 transition-all"
-                              placeholder="E.g. Near Apollo Hospital"
+                          {/* Address */}
+                          <div className="mb-[17px]">
+                            <label htmlFor="checkout_address" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
+                              Address
+                            </label>
+                            <input
+                              type="text"
+                              id="checkout_address"
+                              placeholder="House no., street, area"
+                              autoComplete="street-address"
+                              required
+                              value={newAddress.address}
+                              onChange={e => {
+                                setNewAddress({ ...newAddress, address: e.target.value });
+                                if (errors.address) setErrors({ ...errors, address: '' });
+                              }}
+                              className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
                             />
+                            {errors.address && <p className="text-[10px] font-bold text-ruby mt-1">{errors.address}</p>}
                           </div>
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Pincode</label>
-                            <input 
-                              type="number" 
+
+                          {/* City + State */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-0 sm:gap-[14px]">
+                            {/* City */}
+                            <div className="mb-[17px]">
+                              <label htmlFor="checkout_city" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
+                                City
+                              </label>
+                              <input
+                                type="text"
+                                id="checkout_city"
+                                placeholder="Enter city"
+                                autoComplete="address-level2"
+                                required
+                                value={newAddress.city}
+                                onChange={e => {
+                                  setNewAddress({ ...newAddress, city: e.target.value });
+                                  if (errors.city) setErrors({ ...errors, city: '' });
+                                }}
+                                className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
+                              />
+                              {errors.city && <p className="text-[10px] font-bold text-ruby mt-1">{errors.city}</p>}
+                            </div>
+
+                            {/* State */}
+                            <div className="mb-[17px]">
+                              <label htmlFor="checkout_state" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
+                                State
+                              </label>
+                              <select
+                                id="checkout_state"
+                                required
+                                value={newAddress.state}
+                                onChange={e => {
+                                  setNewAddress({ ...newAddress, state: e.target.value });
+                                  if (errors.state) setErrors({ ...errors, state: '' });
+                                }}
+                                className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
+                              >
+                                <option value="">Choose state</option>
+                                {[
+                                  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa',
+                                  'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala',
+                                  'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland',
+                                  'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura',
+                                  'Uttar Pradesh', 'Uttarakhand', 'West Bengal', 'Andaman and Nicobar Islands',
+                                  'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi',
+                                  'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry'
+                                ].map(st => (
+                                  <option key={st} value={st}>
+                                    {st}
+                                  </option>
+                                ))}
+                              </select>
+                              {errors.state && <p className="text-[10px] font-bold text-ruby mt-1">{errors.state}</p>}
+                            </div>
+                          </div>
+
+                          {/* PIN Code */}
+                          <div className="mb-[17px]">
+                            <label htmlFor="checkout_pincode" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
+                              PIN Code
+                            </label>
+                            <input
+                              type="text"
+                              id="checkout_pincode"
+                              placeholder="6-digit PIN code"
+                              maxLength={6}
+                              inputMode="numeric"
+                              autoComplete="postal-code"
                               required
                               value={newAddress.pincode}
                               onChange={e => {
-                                setNewAddress({...newAddress, pincode: e.target.value});
-                                if (errors.pincode) setErrors({...errors, pincode: ''});
+                                const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                                setNewAddress({ ...newAddress, pincode: val });
+                                if (errors.pincode) setErrors({ ...errors, pincode: '' });
                               }}
-                              className={cn(
-                                "w-full bg-gray-50 border px-6 py-4 rounded-2xl text-sm focus:outline-none focus:ring-2 transition-all",
-                                errors.pincode ? "border-ruby ring-ruby/10" : "border-gray-100 focus:ring-ruby/10"
-                              )}
-                              placeholder="6-digit pincode"
+                              className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
                             />
-                            {errors.pincode && <p className="text-[9px] font-bold text-ruby uppercase tracking-widest">{errors.pincode}</p>}
+                            {errors.pincode && <p className="text-[10px] font-bold text-ruby mt-1">{errors.pincode}</p>}
                           </div>
-                        </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">City</label>
-                            <input 
-                              type="text" 
-                              required
-                              value={newAddress.city}
-                              onChange={e => {
-                                setNewAddress({...newAddress, city: e.target.value});
-                                if (errors.city) setErrors({...errors, city: ''});
-                              }}
-                              className={cn(
-                                "w-full bg-gray-50 border px-6 py-4 rounded-2xl text-sm focus:outline-none focus:ring-2 transition-all",
-                                errors.city ? "border-ruby ring-ruby/10" : "border-gray-100 focus:ring-ruby/10"
-                              )}
-                              placeholder="Enter city"
-                            />
-                            {errors.city && <p className="text-[9px] font-bold text-ruby uppercase tracking-widest">{errors.city}</p>}
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">State</label>
-                            <input 
-                              type="text" 
-                              required
-                              value={newAddress.state}
-                              onChange={e => {
-                                setNewAddress({...newAddress, state: e.target.value});
-                                if (errors.state) setErrors({...errors, state: ''});
-                              }}
-                              className={cn(
-                                "w-full bg-gray-50 border px-6 py-4 rounded-2xl text-sm focus:outline-none focus:ring-2 transition-all",
-                                errors.state ? "border-ruby ring-ruby/10" : "border-gray-100 focus:ring-ruby/10"
-                              )}
-                              placeholder="Enter state"
-                            />
-                            {errors.state && <p className="text-[9px] font-bold text-ruby uppercase tracking-widest">{errors.state}</p>}
-                          </div>
-                        </div>
-
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Address Label</label>
-                          <div className="flex gap-3">
-                            {(['Home', 'Office', 'Other'] as const).map((label) => (
-                              <button
-                                key={label}
-                                type="button"
-                                onClick={() => setNewAddress({ ...newAddress, label })}
-                                className={cn(
-                                  "flex-1 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest border transition-all",
-                                  newAddress.label === label 
-                                    ? "bg-ruby text-white border-ruby shadow-lg shadow-ruby/20" 
-                                    : "bg-gray-50 text-gray-400 border-gray-100 hover:border-ruby/30"
-                                )}
-                              >
-                                {label === 'Home' && <Home size={14} className="inline mr-2 mb-0.5" />}
-                                {label === 'Office' && <Briefcase size={14} className="inline mr-2 mb-0.5" />}
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <button 
-                          type="submit"
-                          className="w-full bg-ruby text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95"
-                        >
-                          Save Address
-                        </button>
-                      </motion.form>
+                          {/* Save (Red background as explicitly requested) */}
+                          <button
+                            type="submit"
+                            className="w-full h-[47px] mt-[6px] border-none rounded-[9px] bg-ruby text-white text-[14px] font-[600] cursor-pointer hover:bg-ruby-dark active:scale-[0.99] transition-all flex items-center justify-center shadow-sm"
+                          >
+                            Save Address
+                          </button>
+                        </form>
+                      </motion.div>
                     )}
 
                     {/* Phone OTP Verification Modal */}
@@ -1674,230 +1684,8 @@ export default function Checkout() {
 
                   <div className="step-nav flex gap-4 mt-8 pt-8 border-t border-gray-100">
                     <button 
-                      onClick={handleContinueToShipping}
-                      className="flex-1 bg-ruby text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95"
-                    >
-                      Continue to Shipping
-                    </button>
-                  </div>
-                </motion.div>
-              ) : currentStep === 2 ? (
-                <motion.div 
-                  key="step2"
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  transition={{ duration: 0.18 }}
-                  className="space-y-6"
-                >
-                  <h2 className="text-xl font-bold text-[#1A2C54]">Shipping Method</h2>
-                  
-                  <div className="shipping-options flex flex-col gap-4">
-                    {shippingOptions.map((option) => (
-                      <div
-                        key={option.id}
-                        onClick={() => setSelectedShipping(option.id)}
-                        className={cn(
-                          "shipping-opt p-6 border-[1.5px] rounded-[1.5rem] cursor-pointer flex items-center gap-6 transition-all duration-200",
-                          selectedShipping === option.id ? "border-ruby bg-ruby/5 shadow-lg shadow-ruby/5" : "border-gray-100 hover:border-ruby/30"
-                        )}
-                      >
-                        <div className="shipping-icon text-3xl">{option.icon}</div>
-                        <div className="flex-grow">
-                          <h4 className="shipping-name text-[16px] font-bold text-[#1A2C54]">{option.label}</h4>
-                          <p className="shipping-days text-sm text-gray-400 font-medium">{option.time}</p>
-                        </div>
-                        <div className="shipping-price text-[16px] font-bold text-ruby">
-                          {option.price}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="step-nav flex gap-4 mt-8 pt-8 border-t border-gray-100">
-                    <button 
-                      onClick={() => setCurrentStep(1)}
-                      className="flex-1 bg-white border border-gray-100 text-[#1A2C54] py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-gray-50 transition-all"
-                    >
-                      Back
-                    </button>
-                    <button 
-                      onClick={() => setCurrentStep(3)}
-                      className="flex-1 bg-ruby text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95"
-                    >
-                      Review Order
-                    </button>
-                  </div>
-                </motion.div>
-              ) : currentStep === 3 ? (
-                <motion.div 
-                  key="step3"
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  transition={{ duration: 0.18 }}
-                  className="space-y-8"
-                >
-                  <h2 className="text-xl font-bold text-[#1A2C54]">Review Your Order</h2>
-                  
-                  <div className="space-y-6">
-                    {/* Delivery Address Review */}
-                    <div className="bg-gray-50 rounded-[2rem] p-8 space-y-4 border border-gray-100/50">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Delivery Address</p>
-                      <div className="flex items-start gap-4">
-                        <div className="p-3 bg-white rounded-2xl text-ruby shadow-sm">
-                          <MapPin size={20} />
-                        </div>
-                        <div className="space-y-1">
-                          <p className="font-bold text-[#1A2C54] text-[16px]">{selectedAddrObj?.name || 'Customer'}</p>
-                          <p className="text-sm text-gray-400 font-medium leading-relaxed">
-                            {selectedAddrObj?.address || 'Address provided at checkout'}, {selectedAddrObj?.landmark && `${selectedAddrObj?.landmark}, `}
-                            {selectedAddrObj?.city || ''}{selectedAddrObj?.state ? `, ${selectedAddrObj.state}` : ''}{selectedAddrObj?.pincode ? ` - ${selectedAddrObj.pincode}` : ''}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Shipping Method Review */}
-                    <div className="bg-gray-50 rounded-[2rem] p-8 space-y-4 border border-gray-100/50">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Shipping Method</p>
-                      <div className="flex items-center gap-4">
-                        <div className="text-3xl">{selectedShippingObj?.icon || '🚚'}</div>
-                        <p className="text-sm font-bold text-[#1A2C54]">
-                          {selectedShippingObj?.label || 'Free Delivery'} • {selectedShippingObj?.time || 'Standard'}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Order Items Review - MOVED FROM SIDEBAR */}
-                    <div className="bg-gray-50 rounded-[2rem] p-8 space-y-6 border border-gray-100/50">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Order Items</p>
-                      <div className="space-y-6">
-                        {displayItems.length === 0 ? (
-                          <div className="text-center py-6">
-                            <p className="text-sm text-gray-400 font-medium">No items found in order.</p>
-                            <Link to="/shop" className="inline-block mt-3 px-5 py-2 rounded-full bg-ruby text-white text-xs font-bold uppercase tracking-wider">Return to Shop</Link>
-                          </div>
-                        ) : (
-                          displayItems.map((item) => {
-                            const itemImg = (item.images && item.images[0]) || item.image || '';
-                            return (
-                              <div key={`${item.id}-${item.selectedSize}-${item.selectedColor || ''}`} className="flex items-center gap-4">
-                                <div className="w-16 h-20 bg-white rounded-2xl overflow-hidden flex-shrink-0 shadow-sm">
-                                  {itemImg ? (
-                                    <img src={itemImg} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                                  ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-gray-200">
-                                      <ShoppingBag size={20} />
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="flex-grow space-y-1">
-                                  <h4 className="text-sm font-bold text-[#1A2C54]">{item.name}</h4>
-                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                                    Size {item.selectedSize} • {item.selectedColor || 'Default'} • Qty {item.quantity}
-                                  </p>
-                                </div>
-                                <p className="text-sm font-bold text-ruby">{formatPrice(Number(item.price * item.quantity))}</p>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Loyalty Points Redemption Toggle Card */}
-                    {user && (
-                      <div className="bg-gradient-to-br from-amber-50 to-orange-50/40 rounded-[2rem] p-6 border border-amber-200/60 shadow-sm space-y-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold">
-                              <Sparkles size={20} />
-                            </div>
-                            <div>
-                              <h4 className="text-sm font-bold text-[#1A2C54]">Use Loyalty Points</h4>
-                              <p className="text-xs text-amber-800 font-medium">Available: <strong className="text-amber-900 font-black">{userPoints} pts</strong></p>
-                            </div>
-                          </div>
-                          
-                          {canRedeemPoints ? (
-                            <label className="relative inline-flex items-center cursor-pointer">
-                              <input 
-                                type="checkbox" 
-                                checked={useLoyaltyPoints} 
-                                onChange={(e) => setUseLoyaltyPoints(e.target.checked)} 
-                                className="sr-only peer"
-                              />
-                              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
-                            </label>
-                          ) : (
-                            <span className="text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2.5 py-1 rounded-full uppercase tracking-wider">
-                              Min 100 pts
-                            </span>
-                          )}
-                        </div>
-
-                        {canRedeemPoints && useLoyaltyPoints && (
-                          <div className="bg-white/90 rounded-xl p-3 border border-amber-200 flex items-center justify-between text-xs text-amber-900 font-semibold shadow-sm">
-                            <span>Redeeming {pointsToRedeem} points for discount</span>
-                            <span className="text-emerald-600 font-bold font-syne text-sm">-₹{pointsDiscount} OFF</span>
-                          </div>
-                        )}
-
-                        {!canRedeemPoints && (
-                          <p className="text-[11px] text-amber-700/90 leading-relaxed font-medium">
-                            You need at least 100 loyalty points to redeem discounts at checkout (100 pts = ₹10 off). Earn points on every delivered order!
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Price Breakdown Review - No COD fee prematurely */}
-                    <div className="bg-gray-50 rounded-[2rem] p-8 space-y-6 border border-gray-100/50">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Price Breakdown</p>
-                      <div className="space-y-4">
-                        <div className="flex justify-between text-sm font-medium text-gray-400">
-                          <span>Subtotal</span>
-                          <span className="font-bold text-[#1A2C54]">{formatPrice(subtotal)}</span>
-                        </div>
-                        {discount > 0 && (
-                          <div className="flex justify-between text-sm font-bold text-ruby">
-                            <span>Promo Discount</span>
-                            <span>-{formatPrice(discount)}</span>
-                          </div>
-                        )}
-                        {pointsDiscount > 0 && (
-                          <div className="flex justify-between text-sm font-bold text-emerald-600">
-                            <span className="flex items-center gap-1.5">
-                              <Sparkles size={14} /> Loyalty Discount ({pointsToRedeem} pts)
-                            </span>
-                            <span>-{formatPrice(pointsDiscount)}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between text-sm font-medium text-gray-400">
-                          <span>Shipping</span>
-                          <span className={cn("font-bold", shippingCost === 0 ? "text-green-500" : "text-[#1A2C54]")}>
-                            {shippingCost === 0 ? 'FREE' : formatPrice(shippingCost)}
-                          </span>
-                        </div>
-                        <div className="pt-6 border-t border-gray-200 flex justify-between items-end">
-                          <p className="text-lg font-bold text-[#1A2C54]">Order Total</p>
-                          <p className="text-2xl font-bold text-ruby">{formatPrice(reviewTotal)}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="step-nav flex gap-4 mt-8 pt-8 border-t border-gray-100">
-                    <button 
-                      onClick={() => setCurrentStep(2)}
-                      className="flex-1 bg-white border border-gray-100 text-[#1A2C54] py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-gray-50 transition-all"
-                    >
-                      Back
-                    </button>
-                    <button 
-                      onClick={() => setCurrentStep(4)}
-                      className="flex-1 bg-ruby text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95"
+                      onClick={handleContinueToPayment}
+                      className="flex-1 bg-ruby text-white py-5 rounded-2xl text-sm font-bold uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-ruby/20 active:scale-95 cursor-pointer"
                     >
                       Continue to Payment
                     </button>
@@ -1905,7 +1693,7 @@ export default function Checkout() {
                 </motion.div>
               ) : (
                 <motion.div 
-                  key="step4"
+                  key="step2"
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -6 }}
@@ -1916,11 +1704,11 @@ export default function Checkout() {
                     {/* Compact Back Button fitted to text */}
                     <div>
                       <button 
-                        id="btn-back-to-review"
+                        id="btn-back-to-address"
                         type="button"
-                        onClick={() => setCurrentStep(3)}
+                        onClick={() => setCurrentStep(1)}
                         className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white border border-gray-200 hover:border-ruby text-[#1A2C54] hover:text-ruby text-xs font-bold uppercase tracking-wider shadow-sm transition-all active:scale-95 cursor-pointer w-fit"
-                        title="Back to Review"
+                        title="Back to Address"
                       >
                         <ChevronLeft size={14} strokeWidth={2.5} />
                         <span>BACK</span>

@@ -34,10 +34,9 @@ export const useVisitorTracking = () => {
         try {
           localStorage.setItem('visitor_session_id', sessionId);
         } catch (e) {
-          console.warn('localStorage full, clearing cache...');
           Object.keys(localStorage)
             .filter(k => k.startsWith('ruby_product_cache_'))
-            .forEach(k => localStorage.removeItem(k));
+            .forEach(k => { try { localStorage.removeItem(k); } catch {} });
           try {
             localStorage.setItem('visitor_session_id', sessionId);
           } catch {
