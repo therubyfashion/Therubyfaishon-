@@ -37,6 +37,7 @@ const OrderSuccess = React.lazy(() => import('./pages/OrderSuccess'));
 const TrackOrder = React.lazy(() => import('./pages/TrackOrder'));
 const Notifications = React.lazy(() => import('./pages/Notifications'));
 import AdminDashboard from './pages/AdminDashboard';
+import AdminAccessGate from './components/AdminAccessGate';
 const Search = React.lazy(() => import('./pages/Search'));
 import Profile from './pages/Profile';
 const Settings = React.lazy(() => import('./pages/Settings'));
@@ -63,7 +64,7 @@ const ScrollToTop = () => {
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAdmin, loading } = useAuth();
   if (loading) return <PageLoader variant="minimal" message="Verifying access" />;
-  return isAdmin ? <>{children}</> : <Navigate to="/" />;
+  return isAdmin ? <>{children}</> : <AdminAccessGate />;
 };
 
 export default function App() {
