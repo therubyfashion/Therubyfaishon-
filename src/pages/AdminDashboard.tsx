@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../supabase';
+import { apiFetch } from '../lib/api';
 import { OperationType, handleDatabaseError } from '../lib/error-handler';
 import { sendNotification } from '../lib/notifications';
 import { Product, Category } from '../types';
@@ -3133,15 +3134,14 @@ export default function AdminDashboard() {
       setIsCleaningUp(true);
       const toastId = toast.loading("Processing Wipe... Please wait.");
       
-      // Use the server-side endpoint for 100% reliability (Admin SDK power)
-      const response = await fetch('/api/admin/cleanup', {
+      // Use the server-side endpoint authenticated via admin Bearer token (FIX 4 & FIX 5)
+      const response = await apiFetch('/api/admin/cleanup', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
         body: JSON.stringify({ 
-          password: wipePassword,
           adminUid: user?.uid
         })
       });

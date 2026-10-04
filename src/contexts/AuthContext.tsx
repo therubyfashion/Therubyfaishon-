@@ -230,7 +230,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const grantAdminAccess = (passcode?: string): boolean => {
-    const validPasscodes = ['RUBY_ADMIN_2026', '786786', 'theruby2026', 'RESET_THE_RUBY_Launch_2026'];
+    const validPasscodes = ['RUBY_ADMIN_2026', '786786', 'theruby2026'];
     if (!passcode || validPasscodes.includes(passcode.trim())) {
       try {
         localStorage.setItem('ruby_admin_override', 'true');

@@ -16,19 +16,47 @@ import nodemailer from 'nodemailer';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 
 dotenv.config();
 
-// Supabase administrative client helper
+// Rate Limiters (FIX 6)
+const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // limit each IP to 20 requests per 15 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many authentication requests from this IP. Please try again after 15 minutes." }
+});
+
+const otpRateLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 10, // limit each IP to 10 OTP requests per 10 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many OTP attempts. Please wait a few minutes before requesting another OTP." }
+});
+
+const aiRateLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 30, // limit each IP to 30 AI generations per 10 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "AI generation rate limit reached. Please wait a few minutes before trying again." }
+});
+
+// Supabase administrative client helper (FIX 8: No anon fallback, no hardcoded secrets)
 let supabaseAdmin: any = null;
 const getSupabaseAdmin = () => {
   if (supabaseAdmin) return supabaseAdmin;
 
-  const url = process.env.VITE_SUPABASE_URL || 'https://sisadgjewaccylwyyvar.supabase.co';
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable__YF1MVR1Y-893LjkuiNgQg_RYlCOfgX';
+  const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.warn("⚠️ SUPABASE_SERVICE_ROLE_KEY is not defined in environment. Falling back to anon/key. RLS may block operations.");
+  if (!url || !serviceKey) {
+    console.error("❌ CRITICAL: SUPABASE_SERVICE_ROLE_KEY or VITE_SUPABASE_URL is missing in environment. Administrative operations cannot proceed. Set SUPABASE_SERVICE_ROLE_KEY on your host.");
+    return null;
   }
 
   supabaseAdmin = createClient(url, serviceKey, {
@@ -40,7 +68,80 @@ const getSupabaseAdmin = () => {
   return supabaseAdmin;
 };
 
-const supabase = getSupabaseAdmin();
+// Safe proxy for code calling supabase.from(...)
+const supabase: any = new Proxy({}, {
+  get(_target, prop) {
+    const admin = getSupabaseAdmin();
+    if (!admin) {
+      throw new Error("SUPABASE_SERVICE_ROLE_KEY is missing on the server. Please configure SUPABASE_SERVICE_ROLE_KEY in your hosting environment.");
+    }
+    return (admin as any)[prop];
+  }
+});
+
+// Middleware: requireAuth (FIX 1a)
+const requireAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Unauthorized: Missing or malformed Authorization header." });
+    }
+
+    const token = authHeader.split(" ")[1]?.trim();
+    if (!token) {
+      return res.status(401).json({ error: "Unauthorized: Token missing." });
+    }
+
+    const adminClient = getSupabaseAdmin();
+    if (!adminClient) {
+      return res.status(500).json({ error: "Server configuration error: Supabase admin not configured." });
+    }
+
+    const { data: { user }, error } = await adminClient.auth.getUser(token);
+    if (error || !user) {
+      return res.status(401).json({ error: "Unauthorized: Invalid or expired token." });
+    }
+
+    (req as any).user = user;
+    next();
+  } catch (err: any) {
+    console.error("requireAuth error:", err);
+    return res.status(401).json({ error: "Unauthorized: Authentication failed." });
+  }
+};
+
+// Middleware: requireAdmin (FIX 1b)
+const requireAdmin = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  requireAuth(req, res, async () => {
+    try {
+      const user = (req as any).user;
+      if (!user?.id) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const adminClient = getSupabaseAdmin();
+      if (!adminClient) {
+        return res.status(500).json({ error: "Server configuration error: Supabase admin not configured." });
+      }
+
+      const { data: profile, error } = await adminClient
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (error || !profile || profile.role !== 'admin') {
+        return res.status(403).json({ error: "Forbidden: Administrator privileges required." });
+      }
+
+      (req as any).userRole = 'admin';
+      next();
+    } catch (err: any) {
+      console.error("requireAdmin error:", err);
+      return res.status(403).json({ error: "Forbidden: Failed to verify administrator privileges." });
+    }
+  });
+};
 
 // Central Configuration for Email Integrity
 const VERIFIED_DOMAIN = "therubyfashion.shop";
@@ -2408,8 +2509,18 @@ async function startServer() {
   console.log(`🚀 Starting server setup...`);
   const httpServer = createServer(app);
   console.log(`✅ HTTP Server created.`);
+  const allowedSocketOrigins = [
+    "https://therubyfashion.shop",
+    "https://www.therubyfashion.shop",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    ...(process.env.APP_URL ? [process.env.APP_URL] : [])
+  ];
   const io = new Server(httpServer, {
-    cors: { origin: "*" }
+    cors: { 
+      origin: allowedSocketOrigins,
+      credentials: true
+    }
   });
   console.log(`✅ Socket.IO initialized.`);
   const PORT = Number(process.env.PORT) || 3000;
@@ -2581,8 +2692,18 @@ async function startServer() {
   }
 
   console.log("⚙️  Applying middleware...");
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  // Security Headers via Helmet (FIX 7: CSP disabled to avoid breaking Razorpay checkout, OneSignal, Google Auth)
+  app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false
+  }));
+
+  // JSON Body Parser limit reduced to 2mb (FIX 6)
+  app.use(express.json({ limit: '2mb' }));
+  app.use(express.urlencoded({ limit: '2mb', extended: true }));
+
+  // Apply rate limiting on auth endpoints (FIX 6)
+  app.use('/api/auth', authRateLimiter);
   
   // Debug Middleware
   app.use((req, res, next) => {
@@ -2594,16 +2715,10 @@ async function startServer() {
   
   console.log("✅ Middleware applied.");
 
-  // CRITICAL: Cleanup Route placed early and using a very specific handler to avoid SPA fallback
-  app.post("/api/admin/cleanup", async (req, res) => {
-    console.log("🧹 [SERVER-CLEANUP] Request received");
+  // CRITICAL: Cleanup Route placed early and protected with requireAdmin (FIX 2 & FIX 4)
+  app.post("/api/admin/cleanup", requireAdmin, async (req, res) => {
+    console.log("🧹 [SERVER-CLEANUP] Request received from authorized admin");
     res.setHeader('Content-Type', 'application/json');
-    const { password } = req.body || {};
-    
-    if (password !== "RESET_THE_RUBY_Launch_2026") {
-      console.warn("❌ [SERVER-CLEANUP] Invalid password");
-      return res.status(403).json({ error: "Invalid password." });
-    }
 
     try {
       console.log("🧹 [SERVER-CLEANUP] Cleaning active_sessions, cart_items, carts, notification_locks...");
@@ -2617,8 +2732,8 @@ async function startServer() {
     }
   });
 
-  // Backward compatibility handled directly without redirect
-  app.post("/api/clear-production-data", async (req, res) => {
+  // Backward compatibility handled with requireAdmin (FIX 2)
+  app.post("/api/clear-production-data", requireAdmin, async (req, res) => {
      // Just forward to the same logic
      req.url = "/api/admin/cleanup";
      return app._router.handle(req, res, () => {});
@@ -2686,7 +2801,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/firebase-status", async (req, res) => {
+  app.get("/api/firebase-status", requireAdmin, async (req, res) => {
     try {
       const forceRefresh = req.query.force === 'true';
       if (forceRefresh) {
@@ -2726,7 +2841,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/config", (req, res) => {
+  app.post("/api/config", requireAdmin, (req, res) => {
     const { 
       resendApiKey, 
       razorpayKeyId, 
@@ -2785,7 +2900,7 @@ async function startServer() {
     res.json({ status: "ok", message: "Configs persisted locally" });
   });
 
-  app.get("/api/system-health", async (req, res) => {
+  app.get("/api/system-health", requireAdmin, async (req, res) => {
     // Dynamically retrieve database configuration settings
     let emailStatus = (process.env.SMTP_USER || process.env.RESEND_API_KEY) ? "Configured ✅" : "Not Configured ❌";
     let activeEmailProvider = process.env.SMTP_USER ? "Gmail SMTP" : (process.env.RESEND_API_KEY ? "Resend API" : "None");
@@ -3115,8 +3230,8 @@ async function startServer() {
     }
   });
 
-  // Secure Server-side Gemini AI Proxy (Keeps API key secure on backend)
-  app.post("/api/ai/generate", async (req, res) => {
+  // Secure Server-side Gemini AI Proxy (Protected: requireAuth + aiRateLimiter)
+  app.post("/api/ai/generate", requireAuth, aiRateLimiter, async (req, res) => {
     const { prompt, model = "gemini-2.5-flash" } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required." });
@@ -3177,11 +3292,22 @@ async function startServer() {
     }
   });
 
-  app.post('/api/user/upload-profile-image', async (req, res) => {
+  // Upload user profile image (Protected: requireAuth with 10mb specific limit, caller may only upload for own account unless admin)
+  app.post('/api/user/upload-profile-image', express.json({ limit: '10mb' }), requireAuth, async (req, res) => {
     const { uid, photo } = req.body;
+    const callerUser = (req as any).user;
     
     if (!uid || !photo) {
       return res.status(400).json({ error: "Missing uid or photo content." });
+    }
+
+    // A user may upload ONLY their own image unless admin
+    if (callerUser?.id !== uid) {
+      const adminClient = getSupabaseAdmin();
+      const { data: profile } = await adminClient?.from('profiles').select('role').eq('id', callerUser.id).maybeSingle() || {};
+      if (profile?.role !== 'admin') {
+        return res.status(403).json({ error: "Forbidden: You may only upload your own profile image." });
+      }
     }
 
     try {
@@ -3201,10 +3327,21 @@ async function startServer() {
     }
   });
 
-  app.post("/api/delete-user", async (req, res) => {
+  // Delete user from Auth (Protected: requireAuth, user may delete ONLY their own account unless admin)
+  app.post("/api/delete-user", requireAuth, async (req, res) => {
     const { uid } = req.body;
+    const callerUser = (req as any).user;
     if (!uid) {
       return res.status(400).json({ error: "Missing uid" });
+    }
+
+    // A user may delete ONLY their own account unless admin
+    if (callerUser?.id !== uid) {
+      const adminClient = getSupabaseAdmin();
+      const { data: profile } = await adminClient?.from('profiles').select('role').eq('id', callerUser.id).maybeSingle() || {};
+      if (profile?.role !== 'admin') {
+        return res.status(403).json({ error: "Forbidden: You may only delete your own account." });
+      }
     }
 
     try {
@@ -3222,7 +3359,7 @@ async function startServer() {
   // In-memory cache for Phone OTPs
   const phoneOtpCodes = new Map<string, { otp: string, expiresAt: number }>();
 
-  app.post("/api/send-phone-otp", async (req, res) => {
+  app.post("/api/send-phone-otp", otpRateLimiter, async (req, res) => {
     const { phoneNumber } = req.body;
     if (!phoneNumber) {
       return res.status(400).json({ error: "Phone number is required." });
@@ -3274,7 +3411,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/verify-phone-otp", async (req, res) => {
+  app.post("/api/verify-phone-otp", otpRateLimiter, async (req, res) => {
     const { phoneNumber, otp } = req.body;
     if (!phoneNumber || !otp) {
       return res.status(400).json({ error: "Phone number and OTP code are required." });
@@ -3589,6 +3726,78 @@ async function startServer() {
       const requestBaseHost = `${req.protocol}://${req.get('host')}`.replace(/^http:/i, 'https:');
       const selectedTemplateKey = (templateKey || template || '').toString().toLowerCase();
 
+      // ANTI-OPEN RELAY PROTECTION (FIX 3)
+      let isCallerAdmin = false;
+      let authenticatedUser: any = null;
+
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        const token = authHeader.split(" ")[1]?.trim();
+        if (token) {
+          const adminClient = getSupabaseAdmin();
+          if (adminClient) {
+            const { data: { user } } = await adminClient.auth.getUser(token);
+            if (user) {
+              authenticatedUser = user;
+              const { data: profile } = await adminClient
+                .from('profiles')
+                .select('role')
+                .eq('id', user.id)
+                .maybeSingle();
+              if (profile?.role === 'admin') {
+                isCallerAdmin = true;
+              }
+            }
+          }
+        }
+      }
+
+      // If caller is NOT an admin, enforce strict anti-open relay rules
+      if (!isCallerAdmin) {
+        // 1. Arbitrary custom HTML / to from non-admins is forbidden
+        if (!selectedTemplateKey) {
+          return res.status(403).json({ 
+            error: "Forbidden: Sending arbitrary custom emails is restricted to administrators." 
+          });
+        }
+
+        // 2. Only allow pre-approved fixed system templates
+        const allowedTemplates = [
+          'order_confirmation', 'order_placed', 'order_confirmed',
+          'order_shipped', 'shipped', 'order_delivered', 'delivered',
+          'return_update', 'return_approved', 'return_rejected', 'return_refunded',
+          'admin_new_order', 'admin_order', 'welcome_otp', 'welcome', 'otp'
+        ];
+
+        if (!allowedTemplates.includes(selectedTemplateKey)) {
+          return res.status(403).json({ error: "Forbidden: Unapproved email template." });
+        }
+
+        // 3. For admin notification templates (e.g. admin_new_order), force to pre-configured admin email
+        if (selectedTemplateKey === 'admin_new_order' || selectedTemplateKey === 'admin_order') {
+          const storeSettings = await resilientGetSettings();
+          to = storeSettings?.supportEmail || DEFAULT_FROM_EMAIL;
+        } else if (['order_confirmation', 'order_placed', 'order_confirmed'].includes(selectedTemplateKey)) {
+          // 4. For order confirmation (including guest checkout), verify order exists in database and lock recipient to order email
+          const data = { ...req.body, ...templateData };
+          const orderIdToCheck = data.orderId || data.order_id || data.orderNumber;
+          if (orderIdToCheck) {
+            const cleanOid = String(orderIdToCheck).replace(/^#/, '').trim();
+            const { data: orderRow } = await supabase
+              .from('orders')
+              .select('customer_email, email')
+              .or(`order_number.eq.${orderIdToCheck},order_number.eq.#${cleanOid},order_number.eq.${cleanOid},id.eq.${cleanOid}`)
+              .maybeSingle();
+            if (orderRow) {
+              const validOrderEmail = (orderRow.customer_email || orderRow.email || '').trim().toLowerCase();
+              if (validOrderEmail) {
+                to = validOrderEmail;
+              }
+            }
+          }
+        }
+      }
+
       // Check if this status email should be skipped (Processing, Packed, Out for Delivery)
       if (['processing', 'packed', 'out_for_delivery', 'in_delivery'].includes(selectedTemplateKey)) {
         console.log(`📧 Skipping status change email for '${selectedTemplateKey}' per configuration guidelines.`);
@@ -3877,7 +4086,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/send-push", async (req, res) => {
+  app.post("/api/send-push", requireAdmin, async (req, res) => {
     const { title, body, url, type, appId, restKey, playerId } = req.body;
     
     try {
@@ -3963,9 +4172,10 @@ async function startServer() {
     }
   });
 
-  // Send notification to specific user (for order updates)
-  app.post("/api/send-user-push", async (req, res) => {
+  // Send notification to specific user (Protected: requireAuth)
+  app.post("/api/send-user-push", requireAuth, async (req, res) => {
     const { userId, title, body, url } = req.body;
+    const callerUser = (req as any).user;
     
     try {
       console.log(`OneSignal: Sending notification to user ${userId}...`);
@@ -3974,7 +4184,16 @@ async function startServer() {
         return res.status(400).json({ error: "OneSignal error: userId is required for targeted push." });
       }
 
-      // Handle broadcast push to all subscribed users
+      // Check caller permissions: non-admins can only send push to their own userId
+      if (callerUser && userId !== callerUser.id) {
+        const adminClient = getSupabaseAdmin();
+        const { data: profile } = await adminClient?.from('profiles').select('role').eq('id', callerUser.id).maybeSingle() || {};
+        if (profile?.role !== 'admin') {
+          return res.status(403).json({ error: "Forbidden: You may only send notifications for your own account." });
+        }
+      }
+
+      // Handle broadcast push to all subscribed users (Admins only)
       if (userId === 'broadcast') {
         console.log(`OneSignal: Broadcasting notification to all subscribers: "${title}"`);
         
@@ -4158,8 +4377,8 @@ async function startServer() {
     }
   });
 
-  // Send notification to admins (for new orders)
-  app.post("/api/send-admin-push", async (req, res) => {
+  // Send notification to admins (Protected: requireAdmin)
+  app.post("/api/send-admin-push", requireAdmin, async (req, res) => {
     const { 
       title, 
       body, 
@@ -4276,7 +4495,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/test-onesignal", async (req, res) => {
+  app.post("/api/test-onesignal", requireAdmin, async (req, res) => {
     try {
       const { appId, restKey } = req.body;
       
@@ -4363,10 +4582,36 @@ async function startServer() {
     }
   });
 
-  // Dedicated Templated Notification Dispatcher API Route
+  // Dedicated Templated Notification Dispatcher API Route (Anti-Open Relay: FIX 3)
   app.post("/api/send-templated-notification", async (req, res) => {
     const { templateKey, params = {}, userId, options = {} } = req.body;
     try {
+      // Caller authentication check
+      let isCallerAdmin = false;
+      let callerUser: any = null;
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        const token = authHeader.split(" ")[1]?.trim();
+        if (token) {
+          const adminClient = getSupabaseAdmin();
+          if (adminClient) {
+            const { data: { user } } = await adminClient.auth.getUser(token);
+            if (user) {
+              callerUser = user;
+              const { data: profile } = await adminClient.from('profiles').select('role').eq('id', user.id).maybeSingle();
+              if (profile?.role === 'admin') isCallerAdmin = true;
+            }
+          }
+        }
+      }
+
+      // If targeting a customer user, caller must either be admin or targeting themselves
+      if (userId && userId !== 'admin' && !isCallerAdmin) {
+        if (!callerUser || callerUser.id !== userId) {
+          return res.status(403).json({ error: "Forbidden: You cannot send notifications to other users." });
+        }
+      }
+
       const template = TEMPLATES[templateKey];
       if (!template) {
         return res.status(400).json({ error: `Template '${templateKey}' not found.` });
@@ -4397,8 +4642,8 @@ async function startServer() {
     }
   });
 
-  // Dedicated verification endpoint for testing real order notification workflows
-  app.post("/api/verify-real-order-workflow", async (req, res) => {
+  // Dedicated verification endpoint for testing real order notification workflows (Protected: requireAdmin)
+  app.post("/api/verify-real-order-workflow", requireAdmin, async (req, res) => {
     const logs: string[] = [];
     const addLog = (msg: string, detail?: any) => {
       const fullMsg = detail ? `${msg} ${JSON.stringify(detail, null, 2)}` : msg;
@@ -4600,8 +4845,8 @@ async function startServer() {
     }
   }
 
-  // API endpoint: Credit delivery loyalty points
-  app.post("/api/loyalty/credit-delivery-points", async (req, res) => {
+  // API endpoint: Credit delivery loyalty points (Protected: requireAuth)
+  app.post("/api/loyalty/credit-delivery-points", requireAuth, async (req, res) => {
     try {
       const { orderId } = req.body;
       if (!orderId) return res.status(400).json({ error: "orderId is required" });
@@ -4612,8 +4857,8 @@ async function startServer() {
     }
   });
 
-  // API endpoint: Grant bonus points (Admin action)
-  app.post("/api/loyalty/grant-bonus-points", async (req, res) => {
+  // API endpoint: Grant bonus points (Protected: requireAdmin)
+  app.post("/api/loyalty/grant-bonus-points", requireAdmin, async (req, res) => {
     try {
       const { userId, points, reason } = req.body;
       if (!userId || !points) return res.status(400).json({ error: "userId and points are required" });
