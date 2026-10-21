@@ -8,11 +8,11 @@ interface AuthContextType {
   loading: boolean;
   isAdmin: boolean;
   refreshProfile: () => Promise<void>;
-  grantAdminAccess: (passcode?: string) => boolean;
 }
 
 export const ADMIN_EMAILS = [
   'mdsagaransari65670@gmail.com',
+  'theruby.in@gmail.com',
   'admin@theruby.com',
   'admin@therubyfashion.com',
   'support@therubyfashion.com'
@@ -30,7 +30,6 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   isAdmin: false,
   refreshProfile: async () => {},
-  grantAdminAccess: () => false,
 });
 
 export const isGoogleAuthUser = (sessionUser?: any, metadata?: any): boolean => {
@@ -229,37 +228,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const grantAdminAccess = (passcode?: string): boolean => {
-    const validPasscodes = ['RUBY_ADMIN_2026', '786786', 'theruby2026'];
-    if (!passcode || validPasscodes.includes(passcode.trim())) {
-      try {
-        localStorage.setItem('ruby_admin_override', 'true');
-      } catch (e) {}
-
-      if (user?.id) {
-        supabase.from('profiles').update({ role: 'admin' }).eq('id', user.id).then(() => {});
-      }
-
-      setProfile(prev => prev ? { ...prev, role: 'admin' } : {
-        uid: user?.id || 'admin',
-        email: user?.email || 'mdsagaransari65670@gmail.com',
-        displayName: 'Administrator',
-        role: 'admin',
-        isVerified: true,
-        loyaltyPoints: 0,
-        createdAt: new Date().toISOString()
-      });
-      return true;
-    }
-    return false;
-  };
-
-  const hasAdminOverride = typeof window !== 'undefined' && localStorage.getItem('ruby_admin_override') === 'true';
   const isUserAdmin = Boolean(
     profile?.role === 'admin' ||
     isAuthorizedAdminEmail(user?.email) ||
-    isAuthorizedAdminEmail(profile?.email) ||
-    hasAdminOverride
+    isAuthorizedAdminEmail(profile?.email)
   );
 
   return (
@@ -268,8 +240,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       profile, 
       loading, 
       refreshProfile,
-      isAdmin: isUserAdmin,
-      grantAdminAccess
+      isAdmin: isUserAdmin
     }}>
       {children}
     </AuthContext.Provider>

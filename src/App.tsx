@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -114,7 +114,12 @@ function AppContent() {
   useVisitorTracking();
 
   // Meta Pixel Route Tracking
+  const isFirstPageViewRender = useRef(true);
   useEffect(() => {
+    if (isFirstPageViewRender.current) {
+      isFirstPageViewRender.current = false;
+      return;
+    }
     trackPixelEvent('PageView');
   }, [location.pathname]);
 

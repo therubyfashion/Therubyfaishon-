@@ -5,6 +5,8 @@ import { supabase } from '../supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
+import LocationAutofillButton from './LocationAutofillButton';
+import { lookupPincode } from '../utils/locationUtils';
 
 interface Address {
   id: string;
@@ -249,6 +251,20 @@ export default function AddressManager() {
               </button>
             </div>
 
+            {/* 1-Click Location Autofill */}
+            <LocationAutofillButton
+              variant="compact"
+              onLocationDetected={(detected) => {
+                setFormData(prev => ({
+                  ...prev,
+                  pincode: detected.pincode || prev.pincode,
+                  city: detected.city || prev.city,
+                  state: detected.state || prev.state,
+                  address: prev.address || detected.streetOrArea || prev.address
+                }));
+              }}
+            />
+
             <div className="space-y-1">
               <label className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Full Name</label>
               <input 
@@ -288,8 +304,24 @@ export default function AddressManager() {
               <div className="space-y-1">
                 <label className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Pincode</label>
                 <input 
-                  type="text" required value={formData.pincode}
-                  onChange={e => setFormData({...formData, pincode: e.target.value})}
+                  type="text" 
+                  required 
+                  maxLength={6}
+                  value={formData.pincode}
+                  onChange={async e => {
+                    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                    setFormData(prev => ({ ...prev, pincode: val }));
+                    if (val.length === 6) {
+                      const details = await lookupPincode(val);
+                      if (details) {
+                        setFormData(prev => ({
+                          ...prev,
+                          city: prev.city || details.city,
+                          state: prev.state || details.state
+                        }));
+                      }
+                    }
+                  }}
                   className="w-full bg-gray-50 border border-gray-100 px-4 py-3 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-ruby/10"
                 />
               </div>

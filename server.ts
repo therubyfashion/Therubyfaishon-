@@ -18,6 +18,7 @@ import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import { COD_FEE } from "./src/lib/constants";
 
 dotenv.config();
 
@@ -44,6 +45,22 @@ const aiRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "AI generation rate limit reached. Please wait a few minutes before trying again." }
+});
+
+const paymentRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 20, // 20 requests per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many payment requests from this IP. Please try again in a minute." }
+});
+
+const emailRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // 10 requests per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many email requests from this IP. Please try again after a minute." }
 });
 
 // Supabase administrative client helper (FIX 8: No anon fallback, no hardcoded secrets)
@@ -124,13 +141,17 @@ const requireAdmin = async (req: express.Request, res: express.Response, next: e
         return res.status(500).json({ error: "Server configuration error: Supabase admin not configured." });
       }
 
-      const { data: profile, error } = await adminClient
+      const isDesignatedEmail = Boolean(
+        user?.email && user.email.toLowerCase() === 'theruby.in@gmail.com'
+      );
+
+      const { data: profile } = await adminClient
         .from('profiles')
         .select('role')
         .eq('id', user.id)
         .maybeSingle();
 
-      if (error || !profile || profile.role !== 'admin') {
+      if (!isDesignatedEmail && profile?.role !== 'admin') {
         return res.status(403).json({ error: "Forbidden: Administrator privileges required." });
       }
 
@@ -1863,6 +1884,17 @@ export function renderBaseEmailLayout({
 </html>`;
 }
 
+// Helper to escape customer-provided text before injecting into HTML emails
+function escapeHtml(str: any): string {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 // 1. Order Confirmation (Customer)
 export function getTemplateOrderConfirmation(data: {
   customerName?: string;
@@ -1871,6 +1903,7 @@ export function getTemplateOrderConfirmation(data: {
   subtotal?: number;
   discount?: number;
   shipping?: number;
+  codFee?: number;
   total?: number;
   deliveryAddress?: { name?: string; street?: string; city?: string; state?: string; pincode?: string; phone?: string };
   trackingUrl?: string;
@@ -1879,15 +1912,19 @@ export function getTemplateOrderConfirmation(data: {
   isCOD?: boolean;
   paymentMethod?: string;
 }): { subject: string; html: string } {
-  const customerName = data.customerName || 'Valued Customer';
-  const orderId = data.orderId || 'N/A';
+  const rawCustomerName = data.customerName || 'Valued Customer';
+  const customerName = escapeHtml(rawCustomerName);
+  const rawOrderId = data.orderId || 'N/A';
+  const orderId = escapeHtml(rawOrderId);
+  const cleanOrderNum = String(rawOrderId).replace(/^#/, '');
   const items = data.items || [];
   const subtotal = Number(data.subtotal || 0);
   const discount = Number(data.discount || 0);
   const shipping = Number(data.shipping || 0);
-  const total = Number(data.total || (subtotal - discount + shipping));
+  const codFee = Number(data.codFee || (data as any).cod_fee || 0);
+  const total = Number(data.total || (subtotal - discount + shipping + codFee));
   const deliveryAddress = data.deliveryAddress;
-  const trackLink = data.trackingUrl || `${data.baseHost || 'https://therubyfashion.shop'}/track/${orderId}`;
+  const trackLink = data.trackingUrl || `${data.baseHost || 'https://therubyfashion.shop'}/track/${encodeURIComponent(cleanOrderNum)}`;
   
   const isCOD = data.isCOD || (data.paymentMethod && String(data.paymentMethod).toUpperCase() === 'COD') || !!data.codToken;
   const codToken = data.codToken || '';
@@ -1897,7 +1934,7 @@ export function getTemplateOrderConfirmation(data: {
       <p style="font-size:16px; color:#333; margin:0 0 16px 0; font-weight:600;">
         Please confirm your order to help us process it faster:
       </p>
-      <a href="https://therubyfashion.shop/verify-cod?token=${encodeURIComponent(codToken)}&order=${encodeURIComponent(orderId.replace('#', ''))}"
+      <a href="https://therubyfashion.shop/verify-cod?token=${encodeURIComponent(codToken)}&order=${encodeURIComponent(cleanOrderNum)}"
          style="background:#A11B35; color:white; padding:16px 40px; border-radius:8px;
          text-decoration:none; font-size:16px; font-weight:bold; display:inline-block;">
         ✅ Yes, Confirm My Order
@@ -1910,8 +1947,8 @@ export function getTemplateOrderConfirmation(data: {
 
   const itemsRows = items.length > 0 ? items.map(item => `
     <tr style="border-bottom: 1px solid #EEEEEE; font-size: 13px;">
-      <td style="padding: 12px 10px; font-weight: bold; color: #222222; text-align: left;">${item.name}</td>
-      <td style="padding: 12px 10px; text-align: center; color: #666666;">${item.size || 'Standard'}</td>
+      <td style="padding: 12px 10px; font-weight: bold; color: #222222; text-align: left;">${escapeHtml(item.name)}</td>
+      <td style="padding: 12px 10px; text-align: center; color: #666666;">${escapeHtml(item.size || 'Standard')}</td>
       <td style="padding: 12px 10px; text-align: center; color: #666666;">${item.qty || 1}</td>
       <td style="padding: 12px 10px; text-align: right; font-weight: bold; color: #222222;">₹${Number(item.price).toLocaleString('en-IN')}</td>
     </tr>
@@ -1925,10 +1962,10 @@ export function getTemplateOrderConfirmation(data: {
     <div style="background-color: #F8F9FA; border: 1px solid #EAEAEA; border-radius: 6px; padding: 16px; margin-top: 20px;">
       <p style="margin: 0 0 6px 0; font-size: 12px; font-weight: bold; color: #A11B35; text-transform: uppercase; letter-spacing: 1px;">Delivery Address</p>
       <p style="margin: 0; font-size: 13px; color: #333333; line-height: 1.5;">
-        <strong>${deliveryAddress.name || customerName}</strong><br>
-        ${deliveryAddress.street ? `${deliveryAddress.street}<br>` : ''}
-        ${deliveryAddress.city || ''}${deliveryAddress.state ? `, ${deliveryAddress.state}` : ''} ${deliveryAddress.pincode ? `- ${deliveryAddress.pincode}` : ''}<br>
-        ${deliveryAddress.phone ? `Phone: ${deliveryAddress.phone}` : ''}
+        <strong>${escapeHtml(deliveryAddress.name || rawCustomerName)}</strong><br>
+        ${deliveryAddress.street ? `${escapeHtml(deliveryAddress.street)}<br>` : ''}
+        ${deliveryAddress.city ? escapeHtml(deliveryAddress.city) : ''}${deliveryAddress.state ? `, ${escapeHtml(deliveryAddress.state)}` : ''} ${deliveryAddress.pincode ? `- ${escapeHtml(deliveryAddress.pincode)}` : ''}<br>
+        ${deliveryAddress.phone ? `Phone: ${escapeHtml(deliveryAddress.phone)}` : ''}
       </p>
     </div>
   ` : '';
@@ -1997,6 +2034,12 @@ export function getTemplateOrderConfirmation(data: {
               <td style="text-align: left;">Shipping:</td>
               <td style="text-align: right; font-weight: bold;">${shipping === 0 ? '<span style="color:#059669;">FREE</span>' : `₹${shipping.toLocaleString('en-IN')}`}</td>
             </tr>
+            ${codFee > 0 ? `
+            <tr>
+              <td style="text-align: left;">COD Handling Fee:</td>
+              <td style="text-align: right; font-weight: bold;">₹${codFee.toLocaleString('en-IN')}</td>
+            </tr>
+            ` : ''}
             <tr style="border-top: 2px solid #222222; font-size: 15px;">
               <td style="text-align: left; padding-top: 8px; font-weight: bold; color: #111111;">Grand Total:</td>
               <td style="text-align: right; padding-top: 8px; font-weight: 900; color: #A11B35;">₹${total.toLocaleString('en-IN')}</td>
@@ -2033,12 +2076,14 @@ export function getTemplateOrderShipped(data: {
   trackingUrl?: string;
   baseHost?: string;
 }): { subject: string; html: string } {
-  const customerName = data.customerName || 'Valued Customer';
-  const orderId = data.orderId || 'N/A';
-  const trackingNumber = data.trackingNumber;
-  const courierName = data.courierName;
-  const estimatedDelivery = data.estimatedDelivery;
-  const trackLink = data.trackingUrl || `${data.baseHost || 'https://therubyfashion.shop'}/track/${orderId}`;
+  const rawCustomerName = data.customerName || 'Valued Customer';
+  const customerName = escapeHtml(rawCustomerName);
+  const rawOrderId = data.orderId || 'N/A';
+  const orderId = escapeHtml(rawOrderId);
+  const trackingNumber = data.trackingNumber ? escapeHtml(data.trackingNumber) : '';
+  const courierName = data.courierName ? escapeHtml(data.courierName) : '';
+  const estimatedDelivery = data.estimatedDelivery ? escapeHtml(data.estimatedDelivery) : '';
+  const trackLink = data.trackingUrl || `${data.baseHost || 'https://therubyfashion.shop'}/track/${encodeURIComponent(String(rawOrderId).replace('#', ''))}`;
 
   const content = `
     <div style="text-align: center; margin-bottom: 24px;">
@@ -2099,11 +2144,13 @@ export function getTemplateOutForDelivery(data: {
   trackingUrl?: string;
   baseHost?: string;
 }): { subject: string; html: string } {
-  const customerName = data.customerName || 'Valued Customer';
-  const orderId = data.orderId || 'N/A';
-  const deliveryAgentName = data.deliveryAgentName;
-  const deliveryAgentPhone = data.deliveryAgentPhone;
-  const trackLink = data.trackingUrl || `${data.baseHost || 'https://therubyfashion.shop'}/track/${orderId}`;
+  const rawCustomerName = data.customerName || 'Valued Customer';
+  const customerName = escapeHtml(rawCustomerName);
+  const rawOrderId = data.orderId || 'N/A';
+  const orderId = escapeHtml(rawOrderId);
+  const deliveryAgentName = data.deliveryAgentName ? escapeHtml(data.deliveryAgentName) : '';
+  const deliveryAgentPhone = data.deliveryAgentPhone ? escapeHtml(data.deliveryAgentPhone) : '';
+  const trackLink = data.trackingUrl || `${data.baseHost || 'https://therubyfashion.shop'}/track/${encodeURIComponent(String(rawOrderId).replace('#', ''))}`;
 
   const content = `
     <div style="text-align: center; margin-bottom: 24px;">
@@ -2144,9 +2191,11 @@ export function getTemplateOrderDelivered(data: {
   reviewUrl?: string;
   baseHost?: string;
 }): { subject: string; html: string } {
-  const customerName = data.customerName || 'Valued Customer';
-  const orderId = data.orderId || 'N/A';
-  const deliveryDate = data.deliveryDate;
+  const rawCustomerName = data.customerName || 'Valued Customer';
+  const customerName = escapeHtml(rawCustomerName);
+  const rawOrderId = data.orderId || 'N/A';
+  const orderId = escapeHtml(rawOrderId);
+  const deliveryDate = data.deliveryDate ? escapeHtml(data.deliveryDate) : '';
   const rateLink = data.reviewUrl || `${data.baseHost || 'https://therubyfashion.shop'}/account`;
 
   const content = `
@@ -2182,13 +2231,16 @@ export function getTemplateReturnUpdate(data: {
   refundAmount?: number;
   baseHost?: string;
 }): { subject: string; html: string } {
-  const customerName = data.customerName || 'Valued Customer';
-  const orderId = data.orderId || 'N/A';
-  const returnStatus = data.returnStatus || 'Updated';
-  const rejectionReason = data.rejectionReason;
+  const rawCustomerName = data.customerName || 'Valued Customer';
+  const customerName = escapeHtml(rawCustomerName);
+  const rawOrderId = data.orderId || 'N/A';
+  const orderId = escapeHtml(rawOrderId);
+  const rawReturnStatus = data.returnStatus || 'Updated';
+  const returnStatus = escapeHtml(rawReturnStatus);
+  const rejectionReason = data.rejectionReason ? escapeHtml(data.rejectionReason) : '';
   const refundAmount = data.refundAmount;
 
-  const statusLower = String(returnStatus).toLowerCase();
+  const statusLower = String(rawReturnStatus).toLowerCase();
   const isApproved = statusLower.includes('approve');
   const isRejected = statusLower.includes('reject') || statusLower.includes('declin');
   const isRefunded = statusLower.includes('refund');
@@ -2263,10 +2315,12 @@ export function getTemplateAdminNewOrder(data: {
   shippingAddress?: any;
   baseHost?: string;
 }): { subject: string; html: string } {
-  const orderId = data.orderId || 'N/A';
-  const customerName = data.customerName || 'Customer';
-  const customerEmail = data.customerEmail;
-  const customerPhone = data.customerPhone;
+  const rawOrderId = data.orderId || 'N/A';
+  const orderId = escapeHtml(rawOrderId);
+  const rawCustomerName = data.customerName || 'Customer';
+  const customerName = escapeHtml(rawCustomerName);
+  const customerEmail = data.customerEmail ? escapeHtml(data.customerEmail) : '';
+  const customerPhone = data.customerPhone ? escapeHtml(data.customerPhone) : '';
   const total = Number(data.total || 0);
   const items = data.items || [];
   const shippingAddress = data.shippingAddress;
@@ -2274,12 +2328,16 @@ export function getTemplateAdminNewOrder(data: {
 
   const itemsRows = items.length > 0 ? items.map(item => `
     <tr style="border-bottom: 1px solid #EEEEEE; font-size: 13px;">
-      <td style="padding: 10px; font-weight: bold; color: #222222; text-align: left;">${item.name}</td>
-      <td style="padding: 10px; text-align: center; color: #666666;">${item.size || 'Standard'}</td>
+      <td style="padding: 10px; font-weight: bold; color: #222222; text-align: left;">${escapeHtml(item.name)}</td>
+      <td style="padding: 10px; text-align: center; color: #666666;">${escapeHtml(item.size || 'Standard')}</td>
       <td style="padding: 10px; text-align: center; color: #666666;">${item.qty || 1}</td>
       <td style="padding: 10px; text-align: right; font-weight: bold; color: #222222;">₹${Number(item.price).toLocaleString('en-IN')}</td>
     </tr>
   `).join('') : '';
+
+  const addressFormatted = typeof shippingAddress === 'string'
+    ? escapeHtml(shippingAddress)
+    : (shippingAddress ? `${escapeHtml(shippingAddress.street || '')}${shippingAddress.city ? `, ${escapeHtml(shippingAddress.city)}` : ''} ${escapeHtml(shippingAddress.pincode || '')}` : '');
 
   const content = `
     <div style="text-align: center; margin-bottom: 24px;">
@@ -2297,7 +2355,7 @@ export function getTemplateAdminNewOrder(data: {
         <strong>Name:</strong> ${customerName}<br>
         ${customerEmail ? `<strong>Email:</strong> ${customerEmail}<br>` : ''}
         ${customerPhone ? `<strong>Phone:</strong> ${customerPhone}<br>` : ''}
-        ${shippingAddress ? `<strong>Address:</strong> ${typeof shippingAddress === 'string' ? shippingAddress : `${shippingAddress.street || ''}, ${shippingAddress.city || ''} ${shippingAddress.pincode || ''}`}` : ''}
+        ${addressFormatted ? `<strong>Address:</strong> ${addressFormatted}` : ''}
       </p>
     </div>
 
@@ -2506,35 +2564,91 @@ async function sendEmailDirect({ to, subject, html, fromName, baseHost }: { to: 
 
 async function startServer() {
   const app = express();
+  // Required behind Cloud Run / reverse proxy
+  app.set('trust proxy', 1);
   console.log(`🚀 Starting server setup...`);
   const httpServer = createServer(app);
   console.log(`✅ HTTP Server created.`);
-  const allowedSocketOrigins = [
-    "https://therubyfashion.shop",
-    "https://www.therubyfashion.shop",
-    "http://localhost:3000",
-    "http://localhost:5173",
-    ...(process.env.APP_URL ? [process.env.APP_URL] : [])
-  ];
+  
   const io = new Server(httpServer, {
     cors: { 
-      origin: allowedSocketOrigins,
-      credentials: true
+      origin: "*",
+      methods: ["GET", "POST"]
     }
   });
-  console.log(`✅ Socket.IO initialized.`);
-  const PORT = Number(process.env.PORT) || 3000;
+  const portArgIndex = process.argv.indexOf('--port');
+  const portFromArg = portArgIndex !== -1 ? Number(process.argv[portArgIndex + 1]) : null;
+  const envPort = process.env.PORT && process.env.PORT !== '8080' ? Number(process.env.PORT) : null;
+  const PORT = portFromArg || envPort || 3000;
   
-  // Real-time Analytics Store (Memory only for active count)
+  // Real-time Analytics Store
   const activeVisitors = new Map<string, any>();
   const seenSessionsToday = new Set<string>();
+  const alertedNewOrderNumbers = new Set<string>();
   let lastSeenDate = new Date().toISOString().split('T')[0];
+
+  // Helper to get real client IP
+  const getRequestClientIp = (req: any): string => {
+    return requestIp.getClientIp(req) || 
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || 
+      req.ip || 
+      '';
+  };
+
+  // Sanitizer for live analytics visitors (remove userId/userAgent, round lat/lng to 1 decimal place)
+  const sanitizeVisitorForClient = (v: any) => {
+    if (!v) return v;
+    const { userId, userAgent, ...rest } = v;
+    return {
+      ...rest,
+      lat: typeof rest.lat === 'number' ? Math.round(rest.lat * 10) / 10 : rest.lat,
+      lng: typeof rest.lng === 'number' ? Math.round(rest.lng * 10) / 10 : rest.lng,
+    };
+  };
+
+  // 1. Geo IP Lookup API Endpoint
+  app.get('/api/geo/lookup', (req, res) => {
+    try {
+      const clientIp = getRequestClientIp(req);
+      const geo = geoip.lookup(clientIp);
+      res.json({
+        ip: clientIp,
+        city: geo?.city || '',
+        country: geo?.country || '',
+        region: geo?.region || '',
+        lat: geo?.ll?.[0] || null,
+        lng: geo?.ll?.[1] || null
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 2. Live Analytics REST Endpoint
+  app.get('/api/analytics/live', (req, res) => {
+    const visitorsList = Array.from(activeVisitors.values());
+    res.json({
+      activeCount: activeVisitors.size,
+      todaySessions: Math.max(seenSessionsToday.size, activeVisitors.size),
+      visitors: visitorsList.map(sanitizeVisitorForClient),
+      behavior: {
+        activeCarts: visitorsList.filter(v => v.lastCheckpoint === 'cart' || (v.cart_value || 0) > 0).length,
+        checkingOut: visitorsList.filter(v => v.lastCheckpoint === 'checkout' || v.path?.includes('checkout')).length
+      }
+    });
+  });
 
   io.on("connection", (socket) => {
     // Send initial state immediately
+    const initialVisitors = Array.from(activeVisitors.values());
     socket.emit("live_analytics_update", {
       activeCount: activeVisitors.size,
-      visitors: Array.from(activeVisitors.values())
+      visitors: initialVisitors.map(sanitizeVisitorForClient),
+      todaySessions: Math.max(seenSessionsToday.size, activeVisitors.size),
+      behavior: {
+        activeCarts: initialVisitors.filter(v => v.lastCheckpoint === 'cart' || (v.cart_value || 0) > 0).length,
+        checkingOut: initialVisitors.filter(v => v.lastCheckpoint === 'checkout' || v.path?.includes('checkout')).length
+      }
     });
 
     // Listen for visitor data
@@ -2550,24 +2664,39 @@ async function startServer() {
       const clientIp = requestIp.getClientIp(socket.request) || socket.handshake.address || '';
       const geo = geoip.lookup(clientIp);
 
+      const resolvedCity = data.city && data.city !== 'Unknown' && data.city !== 'Delhi' 
+        ? data.city 
+        : (geo?.city || data.city || "New Delhi");
+      const resolvedCountry = data.country && data.country !== 'Unknown' 
+        ? data.country 
+        : (geo?.country || "India");
+      const resolvedLat = Number(data.lat) || geo?.ll?.[0] || 28.6139;
+      const resolvedLng = Number(data.lng) || geo?.ll?.[1] || 77.2090;
+
       const session = {
         id: socket.id,
         sessionId: data.sessionId || socket.id,
         userId: data.userId || null,
-        city: data.city && data.city !== 'Unknown' ? data.city : (geo?.city || "Unknown"),
-        region: data.region && data.region !== 'Unknown' ? data.region : (geo?.region || "Unknown"),
-        country: data.country && data.country !== 'Unknown' ? data.country : (geo?.country || "Unknown"),
-        lat: data.lat || geo?.ll?.[0] || 0,
-        lng: data.lng || geo?.ll?.[1] || 0,
+        city: resolvedCity,
+        region: data.region || geo?.region || "",
+        country: resolvedCountry,
+        lat: resolvedLat,
+        lng: resolvedLng,
         path: data.path || "/",
+        device: data.device || 'Mobile',
+        cart_value: Number(data.cart_value) || 0,
+        lastCheckpoint: data.path?.includes('checkout') ? 'checkout' : (Number(data.cart_value) > 0 || data.path?.includes('cart')) ? 'cart' : 'browse',
         userAgent: socket.handshake.headers["user-agent"],
         connectedAt: new Date().toISOString(),
         lastActive: new Date().toISOString()
       };
 
       activeVisitors.set(socket.id, session);
+      if (session.sessionId) {
+        seenSessionsToday.add(session.sessionId);
+      }
       
-      // Update Supabase active_sessions for a persistent view in Admin Dashboard
+      // Update Supabase active_sessions for persistent presence
       if (session.sessionId) {
         try {
           await supabase.from('active_sessions').upsert({
@@ -2576,9 +2705,10 @@ async function startServer() {
             page: session.path,
             city: session.city,
             country: session.country,
-            device: session.userAgent || 'Unknown',
+            device: session.device,
+            cart_value: session.cart_value,
             last_seen: new Date().toISOString()
-          });
+          }, { onConflict: 'session_id' });
         } catch (e: any) {
           console.error("Supabase active_sessions write error:", e);
         }
@@ -2586,12 +2716,13 @@ async function startServer() {
 
       // Broadcast update to all clients
       const visitors = Array.from(activeVisitors.values());
-      const activeCarts = visitors.filter(v => v.lastCheckpoint === 'cart').length;
-      const checkingOut = visitors.filter(v => v.lastCheckpoint === 'checkout').length;
+      const activeCarts = visitors.filter(v => v.lastCheckpoint === 'cart' || (v.cart_value || 0) > 0).length;
+      const checkingOut = visitors.filter(v => v.lastCheckpoint === 'checkout' || v.path?.includes('checkout')).length;
 
       io.emit("live_analytics_update", {
         activeCount: activeVisitors.size,
-        visitors,
+        visitors: visitors.map(sanitizeVisitorForClient),
+        todaySessions: Math.max(seenSessionsToday.size, activeVisitors.size),
         behavior: {
           activeCarts,
           checkingOut
@@ -2608,13 +2739,15 @@ async function startServer() {
       if (visitorEntry) {
         const [sid, visitor] = visitorEntry;
         visitor.lastCheckpoint = data.type;
-        visitor.lastSeen = new Date().toISOString();
+        visitor.lastActive = new Date().toISOString();
+        if (data.cart_value !== undefined) visitor.cart_value = Number(data.cart_value);
         activeVisitors.set(sid, visitor);
         
         // Update Supabase active_sessions
         if (visitor.sessionId) {
           supabase.from('active_sessions').update({
             page: data.type,
+            cart_value: visitor.cart_value || 0,
             last_seen: new Date().toISOString()
           }).eq('session_id', visitor.sessionId).then(() => {}).catch(() => {});
         }
@@ -2624,18 +2757,20 @@ async function startServer() {
       io.emit("live_activity_event", {
         type: data.type,
         sessionId: data.sessionId,
-        city: visitorEntry?.[1]?.city || 'Unknown',
+        city: visitorEntry?.[1]?.city || 'Store Visitor',
+        country: visitorEntry?.[1]?.country || 'India',
         timestamp: new Date().toISOString()
       });
 
       // Broadcast update to all clients
       const visitorsList = Array.from(activeVisitors.values());
-      const activeCarts = visitorsList.filter(v => v.lastCheckpoint === 'cart').length;
-      const checkingOut = visitorsList.filter(v => v.lastCheckpoint === 'checkout').length;
+      const activeCarts = visitorsList.filter(v => v.lastCheckpoint === 'cart' || (v.cart_value || 0) > 0).length;
+      const checkingOut = visitorsList.filter(v => v.lastCheckpoint === 'checkout' || v.path?.includes('checkout')).length;
 
       io.emit("live_analytics_update", {
         activeCount: activeVisitors.size,
-        visitors: visitorsList,
+        visitors: visitorsList.map(sanitizeVisitorForClient),
+        todaySessions: Math.max(seenSessionsToday.size, activeVisitors.size),
         behavior: {
           activeCarts,
           checkingOut
@@ -2648,20 +2783,26 @@ async function startServer() {
       const session = activeVisitors.get(socket.id);
       activeVisitors.delete(socket.id);
       
-      // Remove from Firestore active_sessions if we can identify it
-      if (db && isDbWriteable !== false) {
+      // Remove from Supabase active_sessions
+      if (session?.sessionId) {
         try {
-          const docId = session?.sessionId || socket.id;
-          await db.collection('active_sessions').doc(docId).delete().catch(() => {});
-        } catch (e) {
-          // Silent or warning
-        }
+          await supabase.from('active_sessions').delete().eq('session_id', session.sessionId);
+        } catch (e) {}
       }
 
       // Broadcast update
+      const visitorsList = Array.from(activeVisitors.values());
+      const activeCarts = visitorsList.filter(v => v.lastCheckpoint === 'cart' || (v.cart_value || 0) > 0).length;
+      const checkingOut = visitorsList.filter(v => v.lastCheckpoint === 'checkout' || v.path?.includes('checkout')).length;
+
       io.emit("live_analytics_update", {
         activeCount: activeVisitors.size,
-        visitors: Array.from(activeVisitors.values())
+        visitors: visitorsList.map(sanitizeVisitorForClient),
+        todaySessions: Math.max(seenSessionsToday.size, activeVisitors.size),
+        behavior: {
+          activeCarts,
+          checkingOut
+        }
       });
     });
   });
@@ -2722,8 +2863,8 @@ async function startServer() {
 
     try {
       console.log("🧹 [SERVER-CLEANUP] Cleaning active_sessions, cart_items, carts, notification_locks...");
-      await supabase.from('active_sessions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await supabase.from('notification_locks').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      await supabase.from('active_sessions').delete().neq('id', '00000000-0000-0000-0000-000000000000').catch(() => {});
+      await supabase.from('notification_locks').delete().neq('lock_id', 'NON_EXISTENT_LOCK').catch(() => {});
       console.log("✅ [SERVER-CLEANUP] DONE");
       res.json({ success: true, message: "Storage wiped successfully." });
     } catch (err: any) {
@@ -2767,6 +2908,9 @@ async function startServer() {
     }
 
     const inputOid = String(orderId).trim();
+    if (!/^[a-zA-Z0-9#\-_]+$/.test(inputOid)) {
+      return res.status(400).json({ error: "Invalid Order ID format." });
+    }
     const cleanOid = inputOid.replace(/^#/, '').trim();
     const hashedOid = `#${cleanOid}`;
     const targetEmail = String(email).trim().toLowerCase();
@@ -2774,17 +2918,27 @@ async function startServer() {
     console.log(`🔍 Tracking Attempt: ID=${inputOid} (Clean=${cleanOid}), Email=${targetEmail}`);
 
     try {
-      const { data: orders, error } = await supabase
+      const adminClient = getSupabaseAdmin();
+      if (!adminClient) {
+        return res.status(500).json({ error: "Database configuration error on server." });
+      }
+
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanOid);
+      const orFilter = isUuid
+        ? `order_number.eq.${inputOid},order_number.eq.${cleanOid},order_number.eq.${hashedOid},id.eq.${cleanOid}`
+        : `order_number.eq.${inputOid},order_number.eq.${cleanOid},order_number.eq.${hashedOid}`;
+
+      const { data: orders, error } = await adminClient
         .from('orders')
         .select('*')
-        .or(`order_id.eq.${inputOid},order_id.eq.${cleanOid},order_id.eq.${hashedOid},id.eq.${cleanOid}`);
+        .or(orFilter);
 
       if (error) {
         return res.status(500).json({ error: "Failed to track order", details: error.message });
       }
 
       let orderData = (orders || []).find(o => {
-        const customerEmail = String(o.email || o.address?.email || o.customer_email || '').trim().toLowerCase();
+        const customerEmail = String(o.customer_email || o.email || o.shipping_email || o.address?.email || '').trim().toLowerCase();
         return customerEmail === targetEmail;
       });
 
@@ -2795,49 +2949,64 @@ async function startServer() {
         });
       }
 
-      res.json(orderData);
+      const sanitizedOrder = { ...orderData };
+      delete sanitizedOrder.cod_verification_token;
+      delete sanitizedOrder.cod_verification_expires_at;
+      res.json(sanitizedOrder);
     } catch (err: any) {
       res.status(500).json({ error: "Tracking failed on server", details: err.message });
     }
   });
 
   app.get("/api/firebase-status", requireAdmin, async (req, res) => {
-    try {
-      const forceRefresh = req.query.force === 'true';
-      if (forceRefresh) {
-        await initializeFirebase(true);
-      }
-      
-      const info = { 
-        databaseId: currentFirestoreDatabaseId, 
-        projectId: adminApp?.options.projectId,
-        usingLocalPersistence: fs.existsSync(localConfigPath)
-      };
+    res.json({ 
+      success: true, 
+      status: "Connected ✅",
+      engine: "Supabase (PostgreSQL)",
+      info: { status: "Active & Connected" }
+    });
+  });
 
-      if (!db) {
-        return res.json({ 
-          success: false, 
-          status: "Hybrid Mode (Safe) 🔐", 
-          error: "Database restricted or not found. Using local settings for Email/OTP.",
-          info
-        });
-      }
-      
-      const collections = await db.listCollections();
-      res.json({ 
-        success: true, 
-        status: "Connected ✅",
-        collectionsFound: Array.isArray(collections) ? collections.length : 0,
-        info
+  // Admin Secure Settings Endpoint (Reads real keys into Admin Dashboard)
+  app.get("/api/admin/settings", requireAdmin, async (req, res) => {
+    try {
+      const settings = await resilientGetSettings();
+      let localConfig: any = {};
+      try {
+        if (fs.existsSync(localConfigPath)) {
+          localConfig = JSON.parse(fs.readFileSync(localConfigPath, 'utf8'));
+        }
+      } catch (e) {}
+
+      res.json({
+        storeName: settings.storeName || 'The Ruby Fashion',
+        storeLogo: settings.storeLogo || '',
+        supportEmail: settings.supportEmail || 'support@therubyfashion.com',
+        fromEmail: settings.fromEmail || process.env.RESEND_FROM_EMAIL || 'support@therubyfashion.shop',
+        currency: 'INR (₹)',
+        razorpayKeyId: process.env.VITE_RAZORPAY_KEY_ID || settings.razorpayKeyId || localConfig.VITE_RAZORPAY_KEY_ID || '',
+        razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || settings.razorpayKeySecret || localConfig.RAZORPAY_KEY_SECRET || '',
+        resendApiKey: process.env.RESEND_API_KEY || settings.resendApiKey || localConfig.RESEND_API_KEY || '',
+        smtpUser: process.env.SMTP_USER || settings.smtpUser || localConfig.SMTP_USER || '',
+        smtpPass: process.env.SMTP_PASS || settings.smtpPass || localConfig.SMTP_PASS || '',
+        oneSignalAppId: process.env.ONESIGNAL_APP_ID || process.env.VITE_ONESIGNAL_APP_ID || settings.oneSignalAppId || localConfig.ONESIGNAL_APP_ID || '',
+        oneSignalRestApiKey: process.env.ONESIGNAL_REST_API_KEY || settings.oneSignalRestApiKey || localConfig.ONESIGNAL_REST_API_KEY || '',
+        googleSheetUrl: process.env.VITE_GOOGLE_SHEET_SCRIPT_URL || process.env.GOOGLE_SHEET_SCRIPT_URL || settings.googleSheetUrl || localConfig.VITE_GOOGLE_SHEET_SCRIPT_URL || '',
+        notificationSound: settings.notificationSound || 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3',
+        favicon: settings.favicon || '',
+        siteTitle: settings.siteTitle || 'The Ruby Fashion | Premium Clothing',
+        metaDescription: settings.metaDescription || 'Discover the latest trends in fashion at The Ruby Fashion.',
+        otpMonthlyLimit: settings.otpMonthlyLimit || 9999,
+        buy2Get1Free: settings.buy2Get1Free || false,
+        buy2GetPercentEnabled: settings.buy2GetPercentEnabled || false,
+        buy2GetPercentOff: settings.buy2GetPercentOff || 0,
+        ogTitle: settings.ogTitle || '',
+        ogDescription: settings.ogDescription || '',
+        ogImage: settings.ogImage || '',
       });
-    } catch (error: any) {
-      const isPermission = error.message?.includes('PERMISSION_DENIED');
-      res.json({ 
-        success: false, 
-        status: "Hybrid Mode (Safe) 🔐", 
-        error: isPermission ? "Database permissions pending. Email system is active." : "Database initialization in progress...",
-        info: { databaseId: currentFirestoreDatabaseId, projectId: adminApp?.options.projectId }
-      });
+    } catch (err: any) {
+      console.error("Error retrieving admin settings:", err);
+      res.status(500).json({ error: err.message });
     }
   });
 
@@ -2849,38 +3018,55 @@ async function startServer() {
       oneSignalAppId, 
       oneSignalRestApiKey,
       smtpUser,
-      smtpPass
+      smtpPass,
+      googleSheetUrl,
+      fromEmail,
+      storeName
     } = req.body;
     
     // Force cache refresh on next request
     cachedSettings = null;
     lastSettingsFetch = 0;
 
-    if (resendApiKey !== undefined) {
-      currentResendApiKey = resendApiKey;
-      resend = resendApiKey ? new Resend(resendApiKey) : null;
-      process.env.RESEND_API_KEY = resendApiKey || '';
-      console.log("Resend API Key updated:", resendApiKey ? "Key Provided" : "Cleared");
+    if (resendApiKey && typeof resendApiKey === 'string' && resendApiKey.trim()) {
+      currentResendApiKey = resendApiKey.trim();
+      resend = new Resend(resendApiKey.trim());
+      process.env.RESEND_API_KEY = resendApiKey.trim();
+      console.log("Resend API Key updated via Admin Panel");
     }
 
-    if (smtpUser !== undefined) process.env.SMTP_USER = smtpUser || '';
-    if (smtpPass !== undefined) process.env.SMTP_PASS = smtpPass || '';
+    if (smtpUser && typeof smtpUser === 'string' && smtpUser.trim()) process.env.SMTP_USER = smtpUser.trim();
+    if (smtpPass && typeof smtpPass === 'string' && smtpPass.trim()) process.env.SMTP_PASS = smtpPass.trim();
 
-    if (razorpayKeyId && razorpayKeySecret) {
-      razorpay = new Razorpay({
-        key_id: razorpayKeyId.trim(),
-        key_secret: razorpayKeySecret.trim(),
-      });
+    if (razorpayKeyId && typeof razorpayKeyId === 'string' && razorpayKeyId.trim()) {
       process.env.VITE_RAZORPAY_KEY_ID = razorpayKeyId.trim();
+    }
+    if (razorpayKeySecret && typeof razorpayKeySecret === 'string' && razorpayKeySecret.trim()) {
       process.env.RAZORPAY_KEY_SECRET = razorpayKeySecret.trim();
+    }
+    if (process.env.VITE_RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+      razorpay = new Razorpay({
+        key_id: process.env.VITE_RAZORPAY_KEY_ID,
+        key_secret: process.env.RAZORPAY_KEY_SECRET,
+      });
       console.log("Razorpay Keys updated via Admin Panel");
     }
 
-    if (oneSignalAppId && oneSignalRestApiKey) {
-      oneSignalClient = new OneSignal.Client(oneSignalAppId.trim(), oneSignalRestApiKey.trim());
+    if (oneSignalAppId && typeof oneSignalAppId === 'string' && oneSignalAppId.trim()) {
       process.env.ONESIGNAL_APP_ID = oneSignalAppId.trim();
+      process.env.VITE_ONESIGNAL_APP_ID = oneSignalAppId.trim();
+    }
+    if (oneSignalRestApiKey && typeof oneSignalRestApiKey === 'string' && oneSignalRestApiKey.trim()) {
       process.env.ONESIGNAL_REST_API_KEY = oneSignalRestApiKey.trim();
+    }
+    if (process.env.ONESIGNAL_APP_ID && process.env.ONESIGNAL_REST_API_KEY) {
+      oneSignalClient = new OneSignal.Client(process.env.ONESIGNAL_APP_ID, process.env.ONESIGNAL_REST_API_KEY);
       console.log("OneSignal Keys updated via Admin Panel");
+    }
+
+    if (googleSheetUrl && typeof googleSheetUrl === 'string' && googleSheetUrl.trim()) {
+      process.env.VITE_GOOGLE_SHEET_SCRIPT_URL = googleSheetUrl.trim();
+      process.env.GOOGLE_SHEET_SCRIPT_URL = googleSheetUrl.trim();
     }
 
     // Persist settings locally as a fallback for restarts
@@ -2892,12 +3078,14 @@ async function startServer() {
         VITE_RAZORPAY_KEY_ID: process.env.VITE_RAZORPAY_KEY_ID,
         RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET,
         ONESIGNAL_APP_ID: process.env.ONESIGNAL_APP_ID,
-        ONESIGNAL_REST_API_KEY: process.env.ONESIGNAL_REST_API_KEY
+        ONESIGNAL_REST_API_KEY: process.env.ONESIGNAL_REST_API_KEY,
+        VITE_GOOGLE_SHEET_SCRIPT_URL: process.env.VITE_GOOGLE_SHEET_SCRIPT_URL,
+        FROM_EMAIL: fromEmail || process.env.RESEND_FROM_EMAIL
       };
       fs.writeFileSync(localConfigPath, JSON.stringify(configBackup, null, 2));
     } catch (e) {}
 
-    res.json({ status: "ok", message: "Configs persisted locally" });
+    res.json({ status: "ok", message: "Configs persisted successfully" });
   });
 
   app.get("/api/system-health", requireAdmin, async (req, res) => {
@@ -2945,10 +3133,13 @@ async function startServer() {
       timestamp: new Date().toISOString(),
       status: "Operational",
       services: {
+        database: {
+          status: "Connected ✅",
+          engine: "Supabase (PostgreSQL)"
+        },
         firebase: {
-          status: db ? "Connected ✅" : "Hybrid Mode (Local) 🔐",
-          projectId: adminApp?.options.projectId || 'Not Configured',
-          databaseId: currentFirestoreDatabaseId
+          status: "Connected ✅",
+          engine: "Supabase (PostgreSQL)"
         },
         email: {
           status: emailStatus,
@@ -2974,7 +3165,7 @@ async function startServer() {
 
 
   async function getRazorpayCredentials() {
-    let keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID || 'rzp_live_ScBsqG0Z4iTmAG')?.trim() || null;
+    let keyId = (process.env.VITE_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_ID)?.trim() || null;
     let keySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || process.env.RAZORPAY_SECRET)?.trim() || null;
 
     // Direct check of persistent local configuration if env vars were not populated
@@ -3031,6 +3222,39 @@ async function startServer() {
     });
   });
 
+  // Safe Public Store Settings Endpoint (Prevents 404 schema cache errors on settings)
+  app.get("/api/public-settings", async (req, res) => {
+    try {
+      const settings = await resilientGetSettings();
+      const safePublic = {
+        storeName: settings.storeName || 'The Ruby Fashion',
+        storeLogo: settings.storeLogo || '',
+        fromEmail: settings.fromEmail || 'support@therubyfashion.shop',
+        oneSignalAppId: settings.oneSignalAppId || process.env.ONESIGNAL_APP_ID || process.env.VITE_ONESIGNAL_APP_ID || '',
+        razorpayKeyId: settings.razorpayKeyId || process.env.VITE_RAZORPAY_KEY_ID || '',
+        otpMonthlyLimit: 9999,
+        buy2Get1Free: Boolean(settings.buy2Get1Free),
+        buy2GetPercentEnabled: Boolean(settings.buy2GetPercentEnabled),
+        buy2GetPercentOff: Number(settings.buy2GetPercentOff || 0),
+        ogTitle: settings.ogTitle || 'The Ruby Fashion',
+        ogDescription: settings.ogDescription || "India's destination for luxury women's ethnic fashion",
+        ogImage: settings.ogImage || ''
+      };
+      res.json(safePublic);
+    } catch {
+      res.json({
+        storeName: 'The Ruby Fashion',
+        storeLogo: '',
+        fromEmail: 'support@therubyfashion.shop',
+        razorpayKeyId: process.env.VITE_RAZORPAY_KEY_ID || '',
+        oneSignalAppId: process.env.ONESIGNAL_APP_ID || process.env.VITE_ONESIGNAL_APP_ID || ''
+      });
+    }
+  });
+
+  // In-memory failed OTP attempts tracker to mitigate brute-forcing
+  const otpFailedAttempts = new Map<string, { count: number; lockedUntil: number }>();
+
   // Secure Server-side OTP Sending and Storage Flow using Supabase Service Role Key
   app.post("/api/auth/send-otp", async (req, res) => {
     const { email } = req.body;
@@ -3038,9 +3262,17 @@ async function startServer() {
       return res.status(400).json({ error: "Email is required." });
     }
     try {
+      const cleanEmail = email.toLowerCase().trim();
+      const failed = otpFailedAttempts.get(cleanEmail);
+      if (failed && failed.lockedUntil > Date.now()) {
+        const remainingMinutes = Math.ceil((failed.lockedUntil - Date.now()) / (60 * 1000));
+        return res.status(429).json({ 
+          error: `Too many failed attempts. Please try again in ${remainingMinutes} minute(s).` 
+        });
+      }
+
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const adminClient = getSupabaseAdmin();
-      const cleanEmail = email.toLowerCase().trim();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
       const { error: otpInsertError } = await adminClient.from('otp_verifications').insert({
@@ -3092,6 +3324,14 @@ async function startServer() {
       const adminClient = getSupabaseAdmin();
       const cleanEmail = email.toLowerCase().trim();
 
+      const failed = otpFailedAttempts.get(cleanEmail);
+      if (failed && failed.lockedUntil > Date.now()) {
+        const remainingMinutes = Math.ceil((failed.lockedUntil - Date.now()) / (60 * 1000));
+        return res.status(429).json({ 
+          error: `Too many failed attempts. Code locked for security. Please try again in ${remainingMinutes} minute(s).` 
+        });
+      }
+
       const { data: otpData, error: otpError } = await adminClient
         .from('otp_verifications')
         .select('otp_code, expires_at')
@@ -3112,11 +3352,15 @@ async function startServer() {
         return res.status(400).json({ error: "Code expired. Please resend a new OTP." });
       }
 
-      if (otpData.otp_code === otp.trim()) {
+      if (otpData.otp_code === String(otp).trim()) {
         console.log(`✅ OTP verified successfully on backend for ${cleanEmail}`);
         
+        // Single-use token: Invalidate OTP immediately to prevent replay attacks!
+        await adminClient.from('otp_verifications').delete().eq('email', cleanEmail).catch(() => {});
+        otpFailedAttempts.delete(cleanEmail);
+
         // Update is_verified to true in the profiles table via the admin client
-        const { data: profile, error: profileFindError } = await adminClient
+        const { data: profile } = await adminClient
           .from('profiles')
           .select('id')
           .eq('email', cleanEmail)
@@ -3133,13 +3377,19 @@ async function startServer() {
           } else {
             console.log(`✅ Profile ${profile.id} marked as verified on backend.`);
           }
-        } else {
-          console.warn(`⚠️ Profile not found for email ${cleanEmail} during verification.`);
         }
 
         return res.json({ success: true, message: "OTP verified successfully." });
       } else {
-        console.warn(`⚠️ Verification failed: Incorrect code entered for ${cleanEmail}`);
+        const currentFailed = (otpFailedAttempts.get(cleanEmail) || { count: 0, lockedUntil: 0 });
+        currentFailed.count += 1;
+        if (currentFailed.count >= 5) {
+          currentFailed.lockedUntil = Date.now() + 5 * 60 * 1000;
+          await adminClient.from('otp_verifications').delete().eq('email', cleanEmail).catch(() => {});
+        }
+        otpFailedAttempts.set(cleanEmail, currentFailed);
+
+        console.warn(`⚠️ Verification failed: Incorrect code entered for ${cleanEmail} (attempt ${currentFailed.count}/5)`);
         return res.status(400).json({ error: "Invalid verification code. Please try again." });
       }
     } catch (err: any) {
@@ -3148,7 +3398,263 @@ async function startServer() {
     }
   });
 
-  app.post("/api/create-razorpay-order", async (req, res) => {
+  // Helper to safely compute real order total from Supabase products, coupons, and loyalty points
+  async function computeOrderTotal(
+    items: any[],
+    paymentMethod: string,
+    options: { promoCode?: string | null; useLoyaltyPoints?: boolean; userId?: string | null } = {}
+  ) {
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new Error("Your cart is empty or items are invalid.");
+    }
+
+    const supabase = getSupabaseAdmin();
+    if (!supabase) {
+      throw new Error("Database service is currently unavailable.");
+    }
+
+    // 1. Validate quantity bounds (between 1 and 10) and product IDs
+    for (const item of items) {
+      if (!item || !item.id || typeof item.id !== 'string') {
+        throw new Error("Order contains an invalid product item.");
+      }
+      const qty = Number(item.quantity);
+      if (!Number.isInteger(qty) || qty < 1 || qty > 10) {
+        throw new Error(`Quantity for "${item.name || item.id}" must be between 1 and 10.`);
+      }
+    }
+
+    // 2. Fetch real products from Supabase products table
+    const productIds = Array.from(new Set(items.map(it => it.id)));
+    const { data: dbProducts, error: dbError } = await supabase
+      .from('products')
+      .select('id, name, price, stock, stock_status')
+      .in('id', productIds);
+
+    if (dbError) {
+      console.error("Database error in computeOrderTotal:", dbError);
+      throw new Error("Unable to verify product details from database.");
+    }
+
+    const productMap = new Map<string, any>((dbProducts || []).map((p: any) => [p.id, p]));
+
+    // 3. Reject unknown products and out-of-stock products, sum real subtotal
+    let subtotal = 0;
+    for (const item of items) {
+      const product = productMap.get(item.id);
+      if (!product) {
+        throw new Error(`Product not found or unavailable (ID: ${item.id}).`);
+      }
+
+      const qty = Number(item.quantity);
+      const stockStatus = String(product.stock_status || '').trim().toLowerCase();
+      const stockNum = product.stock !== null && product.stock !== undefined ? Number(product.stock) : null;
+
+      if (stockStatus === 'out of stock' || (stockNum !== null && !isNaN(stockNum) && (stockNum <= 0 || stockNum < qty))) {
+        throw new Error(`Product "${product.name || item.name || item.id}" is currently out of stock.`);
+      }
+
+      const realPrice = Number(product.price);
+      if (isNaN(realPrice) || realPrice < 0) {
+        throw new Error(`Invalid price for product "${product.name}".`);
+      }
+
+      // Sum subtotal based purely on real database price, ignoring client price
+      subtotal += realPrice * qty;
+    }
+
+    // 4. Legacy Settings-based Discounts (Optional/Fallback) - applied before promotions engine
+    let autoOfferDiscount = 0;
+    try {
+      const settings = await resilientGetSettings();
+      if (settings?.buy2Get1Free) {
+        items.forEach(item => {
+          const product = productMap.get(item.id);
+          const realPrice = Number(product?.price) || 0;
+          const qty = Number(item.quantity) || 0;
+          autoOfferDiscount += Math.floor(qty / 3) * realPrice;
+        });
+      } else if (settings?.buy2GetPercentEnabled && settings?.buy2GetPercentOff) {
+        items.forEach(item => {
+          const product = productMap.get(item.id);
+          const realPrice = Number(product?.price) || 0;
+          const qty = Number(item.quantity) || 0;
+          if (qty >= 2) {
+            const discountRate = (Number(settings.buy2GetPercentOff) || 0) / 100;
+            autoOfferDiscount += realPrice * qty * discountRate;
+          }
+        });
+      }
+    } catch (settErr: any) {
+      console.warn("Server-side settings check warning:", settErr?.message);
+    }
+
+    // 5. Advanced Promotion Engine Logic (matching client filters in CartContext.tsx around line 326)
+    try {
+      const { data: rawPromos, error: promoErr } = await supabase
+        .from('promotions')
+        .select('*')
+        .eq('status', 'active')
+        .order('priority', { ascending: true });
+
+      if (rawPromos && !promoErr && Array.isArray(rawPromos)) {
+        const promotions = rawPromos.map((p: any) => ({
+          ...p,
+          bxgyConfig: p.bxgy_config || p.bxgyConfig || { buyQty: 2, getQty: 1, applyOn: 'same', maxFree: 1, repeat: false },
+          conditions: p.conditions || { minCartValue: 0, minQuantity: 0, productIds: [], categoryIds: [], userType: 'all', startDate: '', endDate: '' },
+          reward: p.reward || { method: 'auto', value: 100 },
+          limits: p.limits || { perUser: 1, totalUsage: 100, maxDiscount: 0 },
+          stackable: p.stackable ?? false
+        }));
+
+        let hasAppliedStackable = false;
+        promotions.forEach((promo: any) => {
+          if (!promo) return;
+          if (!promo.stackable && hasAppliedStackable) return;
+
+          const cartTotal = subtotal;
+          const cartQty = items.reduce((sum, i) => sum + (isNaN(Number(i.quantity)) ? 1 : Number(i.quantity)), 0);
+
+          const conditions = promo.conditions || {};
+          const meetsValue = conditions.minCartValue ? (cartTotal >= Number(conditions.minCartValue)) : true;
+          const meetsQty = conditions.minQuantity ? (cartQty >= Number(conditions.minQuantity)) : true;
+
+          if (meetsValue && meetsQty) {
+            let promoAppliedValue = 0;
+
+            if (promo.type === 'bxgy') {
+              const bxgyConfig = promo.bxgyConfig || {};
+              items.forEach(item => {
+                const buyQty = Number(bxgyConfig.buyQty) || 2;
+                const getQty = Number(bxgyConfig.getQty) || 1;
+                const itemQty = isNaN(Number(item.quantity)) ? 0 : Number(item.quantity);
+                const sets = Math.floor(itemQty / (buyQty + getQty));
+                if (sets > 0) {
+                  const freeQty = sets * getQty;
+                  const product = productMap.get(item.id);
+                  const realPrice = Number(product?.price) || 0;
+                  promoAppliedValue += freeQty * realPrice;
+                }
+              });
+            } else if (promo.type === 'percentage') {
+              const reward = promo.reward || {};
+              const rewardValue = Number(reward.value) || 0;
+              promoAppliedValue = (cartTotal * rewardValue) / 100;
+            } else if (promo.type === 'flat') {
+              const reward = promo.reward || {};
+              promoAppliedValue = Number(reward.value) || 0;
+            }
+
+            const limits = promo.limits || {};
+            if (limits.maxDiscount && promoAppliedValue > limits.maxDiscount) {
+              promoAppliedValue = limits.maxDiscount;
+            }
+
+            if (promoAppliedValue > 0) {
+              autoOfferDiscount += promoAppliedValue;
+              if (!promo.stackable) hasAppliedStackable = true;
+            }
+          }
+        });
+      }
+    } catch (promoCatchErr: any) {
+      console.warn("Server-side promotions check warning:", promoCatchErr?.message);
+    }
+
+    // 6. Coupon validation
+    let promoDiscount = 0;
+    const cleanPromoCode = options.promoCode ? String(options.promoCode).trim() : '';
+    if (cleanPromoCode) {
+      try {
+        const { data: coupon, error: couponErr } = await supabase
+          .from('coupons')
+          .select('*')
+          .ilike('code', cleanPromoCode)
+          .eq('active', true)
+          .maybeSingle();
+
+        if (coupon && !couponErr) {
+          const now = new Date();
+          const notStarted = coupon.start_date && new Date(coupon.start_date) > now;
+          const expired = (coupon.end_date || coupon.expiryDate) && new Date(coupon.end_date || coupon.expiryDate) < now;
+          const limit = coupon.usage_limit ?? coupon.usageLimit;
+          const usedCount = coupon.used_count ?? coupon.usedCount ?? 0;
+          const limitReached = limit !== null && limit !== undefined && Number(usedCount) >= Number(limit);
+          const minCart = Number(coupon.min_cart_value ?? coupon.minCartValue ?? 0);
+          const minNotMet = minCart > 0 && subtotal < minCart;
+
+          if (!notStarted && !expired && !limitReached && !minNotMet) {
+            const cType = coupon.type || coupon.discountType || 'percentage';
+            const cVal = Number(coupon.value ?? coupon.discount ?? 0);
+            if (cType === 'percentage') {
+              let disc = subtotal * (cVal / 100);
+              const maxDisc = Number(coupon.max_discount || 0);
+              if (maxDisc > 0 && disc > maxDisc) disc = maxDisc;
+              promoDiscount = disc;
+            } else if (cType === 'free_shipping') {
+              promoDiscount = 0;
+            } else {
+              promoDiscount = cVal;
+            }
+          }
+        }
+      } catch (couponCatchErr) {
+        console.warn("Server-side coupon validation warning:", couponCatchErr);
+      }
+    }
+
+    // 7. Loyalty Points validation (100 points = ₹10 discount, min 100 points)
+    let pointsDiscount = 0;
+    if (options.useLoyaltyPoints && options.userId) {
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('loyalty_points')
+          .eq('id', options.userId)
+          .maybeSingle();
+
+        const userPoints = Number(profile?.loyalty_points || 0);
+        if (userPoints >= 100) {
+          const currentDiscount = promoDiscount + autoOfferDiscount;
+          const maxDiscountFromPoints = Math.max(0, subtotal - currentDiscount);
+          const pointsNeededForFullDiscount = Math.floor(maxDiscountFromPoints * 10);
+          const pointsToRedeem = Math.min(userPoints, pointsNeededForFullDiscount);
+          pointsDiscount = Math.floor(pointsToRedeem / 10);
+        }
+      } catch (pointsErr: any) {
+        console.warn("Server-side loyalty points check warning:", pointsErr?.message);
+      }
+    }
+
+    // 8. Shipping (currently 0)
+    const shippingCost = 0;
+
+    // 9. COD Fee (from src/lib/constants.ts only when paymentMethod is COD)
+    const isCOD = String(paymentMethod || '').trim().toLowerCase() === 'cod';
+    const codFee = isCOD ? COD_FEE : 0;
+
+    // 10. Total calculation
+    const totalDiscount = Math.min(subtotal, promoDiscount + autoOfferDiscount + pointsDiscount);
+    const baseTotal = Math.max(0, subtotal - totalDiscount + shippingCost);
+    const finalTotal = Math.max(0, baseTotal + codFee);
+    const totalPaise = Math.round(finalTotal * 100);
+
+    return {
+      subtotal,
+      discount: totalDiscount,
+      shippingCost,
+      codFee,
+      total: finalTotal,
+      totalPaise,
+      breakdown: {
+        promoDiscount,
+        autoOfferDiscount,
+        pointsDiscount
+      }
+    };
+  }
+
+  app.post("/api/create-razorpay-order", paymentRateLimiter, async (req, res) => {
     const { keyId, keySecret } = await getRazorpayCredentials();
 
     if (!keyId || !keySecret) {
@@ -3166,16 +3672,69 @@ async function startServer() {
       });
     }
 
-    const { amount, currency, receipt } = req.body;
+    const { items, paymentMethod, promoCode, useLoyaltyPoints, currency = 'INR', receipt } = req.body;
+
+    // Do not trust userId from req.body. If useLoyaltyPoints is true, verify Supabase Bearer token
+    let verifiedUserId: string | null = null;
+    let effectiveUseLoyaltyPoints = false;
+
+    if (useLoyaltyPoints) {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.substring(7).trim();
+        if (token) {
+          try {
+            const supabase = getSupabaseAdmin();
+            if (supabase) {
+              const { data: authUserData, error: authErr } = await supabase.auth.getUser(token);
+              if (!authErr && authUserData?.user?.id) {
+                verifiedUserId = authUserData.user.id;
+                effectiveUseLoyaltyPoints = true;
+              } else {
+                console.warn("Invalid Supabase token for loyalty points:", authErr?.message);
+              }
+            }
+          } catch (tokenErr: any) {
+            console.warn("Token verification error for loyalty points:", tokenErr?.message);
+          }
+        }
+      }
+      // If there is no valid token, effectiveUseLoyaltyPoints remains false and loyalty points are ignored.
+    }
+
+    let computed;
+    try {
+      computed = await computeOrderTotal(items, paymentMethod || 'online', {
+        promoCode,
+        useLoyaltyPoints: effectiveUseLoyaltyPoints,
+        userId: verifiedUserId
+      });
+    } catch (err: any) {
+      console.warn("Order total computation rejected:", err.message);
+      return res.status(400).json({ error: err.message || "Failed to calculate order total." });
+    }
+
+    const numAmount = computed.totalPaise;
+
+    // Validate amount: Must be a positive integer in smallest currency unit (paise), minimum ₹1 (100 paise)
+    if (!numAmount || isNaN(numAmount) || numAmount < 100) {
+      return res.status(400).json({ error: "Invalid payment amount. Amount must be at least ₹1." });
+    }
 
     try {
       const order = await razorpay.orders.create({
-        amount, // amount in the smallest currency unit
+        amount: numAmount,
         currency,
-        receipt,
+        receipt: receipt || `rcpt_${Date.now()}`,
+        notes: {
+          computed_total_inr: String(computed.total),
+          computed_total_paise: String(computed.totalPaise),
+          payment_method: String(paymentMethod || 'online')
+        }
       });
       res.json({
         ...order,
+        computedTotal: computed.total,
         keyId: keyId
       });
     } catch (error: any) {
@@ -3185,7 +3744,7 @@ async function startServer() {
   });
 
   // Secure Server-side Razorpay Payment Signature Verification
-  app.post("/api/verify-razorpay-payment", async (req, res) => {
+  app.post("/api/verify-razorpay-payment", paymentRateLimiter, async (req, res) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
@@ -3196,8 +3755,8 @@ async function startServer() {
     }
 
     try {
-      const { keySecret } = await getRazorpayCredentials();
-      if (!keySecret) {
+      const { keyId, keySecret } = await getRazorpayCredentials();
+      if (!keySecret || !keyId) {
         return res.status(500).json({ 
           verified: false, 
           error: "Payment configuration error: Secret key missing." 
@@ -3209,9 +3768,11 @@ async function startServer() {
         .update(`${razorpay_order_id}|${razorpay_payment_id}`)
         .digest("hex");
 
-      const isSignatureValid = crypto.timingSafeEqual(
-        Buffer.from(generatedSignature, "utf-8"),
-        Buffer.from(razorpay_signature, "utf-8")
+      const genSigBuf = Buffer.from(generatedSignature, "utf-8");
+      const rzpSigBuf = Buffer.from(razorpay_signature, "utf-8");
+      const isSignatureValid = genSigBuf.length === rzpSigBuf.length && crypto.timingSafeEqual(
+        genSigBuf,
+        rzpSigBuf
       );
 
       if (!isSignatureValid) {
@@ -3222,7 +3783,87 @@ async function startServer() {
         });
       }
 
-      console.log("✅ Razorpay payment signature verified successfully:", { razorpay_order_id, razorpay_payment_id });
+      if (!razorpay || (razorpay as any).key_id !== keyId) {
+        razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
+      }
+
+      // Fetch Razorpay order from Razorpay API
+      let rzpOrder: any;
+      try {
+        rzpOrder = await razorpay.orders.fetch(razorpay_order_id);
+      } catch (ordErr: any) {
+        console.warn("Could not fetch Razorpay order:", ordErr?.message);
+        return res.status(400).json({
+          verified: false,
+          error: "Payment verification failed: Razorpay order could not be retrieved."
+        });
+      }
+      if (!rzpOrder) {
+        return res.status(400).json({
+          verified: false,
+          error: "Razorpay order could not be retrieved."
+        });
+      }
+
+      // Fetch Razorpay payment from Razorpay API
+      let rzpPayment: any;
+      try {
+        rzpPayment = await razorpay.payments.fetch(razorpay_payment_id);
+      } catch (payErr: any) {
+        console.warn("Could not fetch Razorpay payment:", payErr?.message);
+        return res.status(400).json({
+          verified: false,
+          error: "Payment verification failed: Razorpay payment could not be retrieved."
+        });
+      }
+      if (!rzpPayment) {
+        return res.status(400).json({
+          verified: false,
+          error: "Razorpay payment could not be retrieved."
+        });
+      }
+
+      // If notes.computed_total_paise is missing, reject with HTTP 400
+      const computedTotalPaiseStr = (rzpOrder.notes as any)?.computed_total_paise;
+      if (!computedTotalPaiseStr) {
+        console.error("❌ notes.computed_total_paise missing on order:", razorpay_order_id);
+        return res.status(400).json({
+          verified: false,
+          error: "Order verification failed: Missing server-computed total in order notes."
+        });
+      }
+
+      const computedTotalPaise = Number(computedTotalPaiseStr);
+      if (isNaN(computedTotalPaise) || computedTotalPaise < 100) {
+        return res.status(400).json({
+          verified: false,
+          error: "Invalid computed total in order notes."
+        });
+      }
+
+      const orderAmount = Number(rzpOrder.amount);
+      const paymentAmount = Number(rzpPayment.amount);
+
+      // Require that order.amount, payment.amount and Number(order.notes.computed_total_paise) are all equal
+      if (orderAmount !== computedTotalPaise || paymentAmount !== computedTotalPaise || orderAmount !== paymentAmount) {
+        console.error("❌ Razorpay order/payment amount mismatch:", {
+          orderAmount,
+          paymentAmount,
+          computedTotalPaise,
+          razorpay_order_id,
+          razorpay_payment_id
+        });
+        return res.status(400).json({
+          verified: false,
+          error: "Payment verification failed: Order amount, paid amount, and computed total must match."
+        });
+      }
+
+      console.log("✅ Razorpay payment signature and amounts verified successfully:", {
+        razorpay_order_id,
+        razorpay_payment_id,
+        amount: computedTotalPaise
+      });
       res.json({ verified: true, paymentId: razorpay_payment_id });
     } catch (err: any) {
       console.error("Error during payment signature verification:", err);
@@ -3630,6 +4271,9 @@ async function startServer() {
 
       if (error || !order) {
         if (orderNumParam) {
+          if (!/^[a-zA-Z0-9#\-_]+$/.test(orderNumParam)) {
+            return res.status(400).json({ error: "Invalid order parameter format." });
+          }
           const cleanNum = orderNumParam.replace(/^#/, '');
           const { data: existingOrder } = await supabase
             .from('orders')
@@ -3719,7 +4363,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/send-email", async (req, res) => {
+  app.post("/api/send-email", emailRateLimiter, async (req, res) => {
     let { to, subject, html, from, fromName: providedFromName, replyTo, templateKey, template, templateData } = req.body;
     
     try {
@@ -3739,12 +4383,15 @@ async function startServer() {
             const { data: { user } } = await adminClient.auth.getUser(token);
             if (user) {
               authenticatedUser = user;
+              const isDesignatedEmail = Boolean(
+                user.email && user.email.toLowerCase() === 'theruby.in@gmail.com'
+              );
               const { data: profile } = await adminClient
                 .from('profiles')
                 .select('role')
                 .eq('id', user.id)
                 .maybeSingle();
-              if (profile?.role === 'admin') {
+              if (profile?.role === 'admin' || isDesignatedEmail) {
                 isCallerAdmin = true;
               }
             }
@@ -3752,50 +4399,135 @@ async function startServer() {
         }
       }
 
-      // If caller is NOT an admin, enforce strict anti-open relay rules
-      if (!isCallerAdmin) {
-        // 1. Arbitrary custom HTML / to from non-admins is forbidden
-        if (!selectedTemplateKey) {
-          return res.status(403).json({ 
-            error: "Forbidden: Sending arbitrary custom emails is restricted to administrators." 
-          });
-        }
+      let nonAdminOrderRow: any = null;
+      let nonAdminMappedItems: any[] = [];
+      let nonAdminOrderId = '';
 
-        // 2. Only allow pre-approved fixed system templates
-        const allowedTemplates = [
-          'order_confirmation', 'order_placed', 'order_confirmed',
-          'order_shipped', 'shipped', 'order_delivered', 'delivered',
-          'return_update', 'return_approved', 'return_rejected', 'return_refunded',
-          'admin_new_order', 'admin_order', 'welcome_otp', 'welcome', 'otp'
-        ];
-
-        if (!allowedTemplates.includes(selectedTemplateKey)) {
-          return res.status(403).json({ error: "Forbidden: Unapproved email template." });
-        }
-
-        // 3. For admin notification templates (e.g. admin_new_order), force to pre-configured admin email
-        if (selectedTemplateKey === 'admin_new_order' || selectedTemplateKey === 'admin_order') {
-          const storeSettings = await resilientGetSettings();
-          to = storeSettings?.supportEmail || DEFAULT_FROM_EMAIL;
-        } else if (['order_confirmation', 'order_placed', 'order_confirmed'].includes(selectedTemplateKey)) {
-          // 4. For order confirmation (including guest checkout), verify order exists in database and lock recipient to order email
-          const data = { ...req.body, ...templateData };
-          const orderIdToCheck = data.orderId || data.order_id || data.orderNumber;
-          if (orderIdToCheck) {
-            const cleanOid = String(orderIdToCheck).replace(/^#/, '').trim();
-            const { data: orderRow } = await supabase
-              .from('orders')
-              .select('customer_email, email')
-              .or(`order_number.eq.${orderIdToCheck},order_number.eq.#${cleanOid},order_number.eq.${cleanOid},id.eq.${cleanOid}`)
-              .maybeSingle();
-            if (orderRow) {
-              const validOrderEmail = (orderRow.customer_email || orderRow.email || '').trim().toLowerCase();
-              if (validOrderEmail) {
-                to = validOrderEmail;
+      // Helper to dispatch store admin alert on non-admin order confirmation
+      const sendStoreAlertFromDbOrder = async (settings: any) => {
+        if (!isCallerAdmin && nonAdminOrderRow) {
+          const rawOrderNum = String(nonAdminOrderRow.order_number || nonAdminOrderId || '').trim();
+          if (rawOrderNum && !alertedNewOrderNumbers.has(rawOrderNum)) {
+            alertedNewOrderNumbers.add(rawOrderNum);
+            try {
+              const storeSupportEmail = settings.supportEmail || settings.fromEmail || 'theruby.in@gmail.com';
+              if (storeSupportEmail) {
+                const adminData = {
+                  orderId: nonAdminOrderRow.order_number || nonAdminOrderId,
+                  customerName: nonAdminOrderRow.shipping_full_name || 'Customer',
+                  customerEmail: nonAdminOrderRow.customer_email || '',
+                  customerPhone: nonAdminOrderRow.shipping_phone || '',
+                  total: Number(nonAdminOrderRow.total || 0),
+                  items: nonAdminMappedItems,
+                  shippingAddress: {
+                    street: nonAdminOrderRow.shipping_address || '',
+                    city: nonAdminOrderRow.shipping_city || '',
+                    pincode: nonAdminOrderRow.shipping_zip || '',
+                    phone: nonAdminOrderRow.shipping_phone || ''
+                  },
+                  baseHost: requestBaseHost
+                };
+                const adminAlert = getTemplateAdminNewOrder(adminData);
+                await sendEmailDirect({
+                  to: storeSupportEmail,
+                  subject: adminAlert.subject,
+                  html: adminAlert.html,
+                  fromName: settings.storeName || 'The Ruby Fashion',
+                  baseHost: requestBaseHost
+                }).catch((alertErr: any) => console.error("Store new-order alert email error:", alertErr.message));
               }
+            } catch (err: any) {
+              console.error("Failed to prepare store new-order alert:", err.message);
             }
           }
         }
+      };
+
+      // If caller is NOT an admin, enforce strict anti-open relay rules
+      if (!isCallerAdmin) {
+        // Non-admin callers allow only order_confirmation, order_placed and order_confirmed
+        const allowedTemplates = ['order_confirmation', 'order_placed', 'order_confirmed'];
+
+        if (!selectedTemplateKey || !allowedTemplates.includes(selectedTemplateKey)) {
+          return res.status(403).json({ error: "Forbidden: Unapproved email template." });
+        }
+
+        // For callers who are NOT admins, the `to` address must ALWAYS be the email stored on the matching order in the database (look up by orderId)
+        const data = { ...req.body, ...templateData };
+        const orderIdToCheck = data.orderId || data.order_id || data.orderNumber || (typeof req.body.subject === 'string' ? req.body.subject.match(/#?(TRF[A-Za-z0-9_-]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[0] : null);
+
+        if (!orderIdToCheck) {
+          return res.status(403).json({ 
+            error: "Forbidden: Order ID is required for non-admin email dispatch." 
+          });
+        }
+
+        const cleanOidStr = String(orderIdToCheck).trim();
+        if (!/^[a-zA-Z0-9#\-_]+$/.test(cleanOidStr)) {
+          return res.status(400).json({ error: "Invalid order ID format." });
+        }
+
+        const cleanOid = cleanOidStr.replace(/^#/, '');
+        const adminClient = getSupabaseAdmin() || supabase;
+        const { data: orderRow, error: orderErr } = await adminClient
+          .from('orders')
+          .select('items, total, subtotal, discount, shipping_cost, cod_fee, payment_method, shipping_full_name, shipping_phone, shipping_address, shipping_city, shipping_zip, customer_email, cod_verified, cod_verification_token, order_number')
+          .or(`order_number.eq.${cleanOidStr},order_number.eq.#${cleanOid},order_number.eq.${cleanOid},id.eq.${cleanOid}`)
+          .maybeSingle();
+
+        if (orderErr || !orderRow) {
+          return res.status(403).json({ error: "Forbidden: No matching order found in database." });
+        }
+
+        nonAdminOrderRow = orderRow;
+        nonAdminOrderId = cleanOidStr;
+
+        // Build the template data ONLY from this database row, ignoring every other field in req.body and templateData
+        nonAdminMappedItems = Array.isArray(orderRow.items) ? orderRow.items.map((it: any) => ({
+          name: it.name || it.title || 'Item',
+          size: it.selectedSize ?? it.size ?? '',
+          qty: Number(it.quantity ?? it.qty ?? 1),
+          price: Number(it.price ?? 0)
+        })) : [];
+
+        const validOrderEmail = (orderRow.customer_email || '').trim().toLowerCase();
+        if (!validOrderEmail) {
+          // If the order exists but has no email, skip the customer email, still send the store new-order alert (once per order, using the existing in-memory Set), and return { success: true, customerEmailSkipped: true }
+          const settings = await resilientGetSettings();
+          await sendStoreAlertFromDbOrder(settings);
+          return res.json({ success: true, customerEmailSkipped: true });
+        }
+
+        // Always lock recipient to the email stored on the matching order
+        to = validOrderEmail;
+
+        const isCOD = String(orderRow.payment_method || '').toUpperCase() === 'COD';
+        const codToken = (isCOD && !orderRow.cod_verified) ? (orderRow.cod_verification_token || undefined) : undefined;
+
+        const orderConfirmationData = {
+          customerName: orderRow.shipping_full_name || 'Customer',
+          orderId: orderRow.order_number || cleanOidStr,
+          items: nonAdminMappedItems,
+          subtotal: Number(orderRow.subtotal || 0),
+          discount: Number(orderRow.discount || 0),
+          shipping: Number(orderRow.shipping_cost || 0),
+          codFee: Number(orderRow.cod_fee || 0),
+          total: Number(orderRow.total || 0),
+          deliveryAddress: {
+            name: orderRow.shipping_full_name || '',
+            street: orderRow.shipping_address || '',
+            city: orderRow.shipping_city || '',
+            pincode: orderRow.shipping_zip || '',
+            phone: orderRow.shipping_phone || ''
+          },
+          paymentMethod: orderRow.payment_method || '',
+          codToken: codToken,
+          baseHost: requestBaseHost
+        };
+
+        const generated = getTemplateOrderConfirmation(orderConfirmationData);
+        subject = generated.subject;
+        html = generated.html;
       }
 
       // Check if this status email should be skipped (Processing, Packed, Out for Delivery)
@@ -3804,7 +4536,7 @@ async function startServer() {
         return res.json({ success: true, skipped: true, message: `Email notification for status '${selectedTemplateKey}' is intentionally disabled.` });
       }
 
-      if (selectedTemplateKey) {
+      if (isCallerAdmin && selectedTemplateKey) {
         const data = { ...req.body, ...templateData, baseHost: requestBaseHost };
         let generated: { subject: string; html: string } | null = null;
         switch (selectedTemplateKey) {
@@ -3870,6 +4602,11 @@ async function startServer() {
       
       const formattedFrom = `"${fromName}" <${finalFromEmail}>`;
 
+      // Helper to dispatch store admin alert on successful non-admin order confirmation dispatch
+      const dispatchStoreOrderAlertIfEligible = async () => {
+        await sendStoreAlertFromDbOrder(effectiveSettings);
+      };
+
       // Sanitize and Beautify the HTML content globally to keep brand styling outstanding and prevent spam folder routing
       const finalHtml = enhanceAndSanitizeEmailHtml(
         html,
@@ -3931,6 +4668,7 @@ async function startServer() {
 
           console.log("✅ GMAIL SENT:", result.messageId);
 
+          await dispatchStoreOrderAlertIfEligible();
           return res.json({ id: result.messageId, provider: 'smtp' });
         } catch (smtpErr: any) {
           console.error("❌ GMAIL ERROR:", smtpErr.message);
@@ -4079,6 +4817,7 @@ async function startServer() {
       }
       
       console.log("--- Email Sent Successfully ---", data?.id);
+      await dispatchStoreOrderAlertIfEligible();
       res.json(data);
     } catch (error: any) {
       console.error("Server-side email error:", error);
@@ -4538,6 +5277,80 @@ async function startServer() {
     }
   });
 
+  // Reverse Geocoding Proxy (Fast, Reliable Location Autofill for Address Forms)
+  app.get("/api/reverse-geocode", async (req, res) => {
+    const lat = req.query.lat;
+    const lon = req.query.lon;
+    if (!lat || !lon) {
+      return res.status(400).json({ error: "Latitude and longitude are required." });
+    }
+
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&addressdetails=1`,
+        {
+          headers: {
+            "User-Agent": "TheRubyFashion-App/1.0 (support@therubyfashion.shop)"
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Nominatim returned status ${response.status}`);
+      }
+
+      const data = await response.json();
+      const addr = data.address || {};
+
+      const rawPostcode = addr.postcode ? addr.postcode.replace(/\D/g, '').slice(0, 6) : '';
+      const city = addr.city || addr.town || addr.city_district || addr.suburb || addr.state_district || addr.county || '';
+      const state = addr.state || '';
+      const suburb = addr.suburb || addr.neighbourhood || addr.residential || '';
+      const road = addr.road || addr.pedestrian || '';
+
+      res.json({
+        success: true,
+        pincode: rawPostcode,
+        city,
+        state,
+        suburb,
+        road,
+        displayName: data.display_name || ''
+      });
+    } catch (err: any) {
+      console.warn("Reverse geocode failed on server:", err.message);
+      res.status(500).json({ error: "Failed to reverse geocode coordinates", details: err.message });
+    }
+  });
+
+  // Postal Pincode Lookup Proxy
+  app.get("/api/lookup-pincode", async (req, res) => {
+    const code = req.query.pincode;
+    if (!code || String(code).length !== 6) {
+      return res.status(400).json({ error: "A valid 6-digit PIN code is required." });
+    }
+
+    try {
+      const response = await fetch(`https://api.postalpincode.in/pincode/${code}`);
+      if (!response.ok) throw new Error("Postal API failed");
+      const data = await response.json();
+
+      if (Array.isArray(data) && data[0]?.Status === "Success") {
+        const postOffice = data[0].PostOffice?.[0];
+        return res.json({
+          success: true,
+          city: postOffice?.District || postOffice?.Division || '',
+          state: postOffice?.State || '',
+          area: postOffice?.Name || ''
+        });
+      }
+
+      res.json({ success: false, error: "Pincode not found" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Track notification delivered status
   app.post("/api/notifications/track-delivered", async (req, res) => {
     const { notificationId } = req.body;
@@ -4609,6 +5422,14 @@ async function startServer() {
       if (userId && userId !== 'admin' && !isCallerAdmin) {
         if (!callerUser || callerUser.id !== userId) {
           return res.status(403).json({ error: "Forbidden: You cannot send notifications to other users." });
+        }
+      }
+
+      // If targeting admin, caller must be authenticated admin OR it must be an allowed system event template
+      const allowedPublicAdminTemplates = ['admin_new_order', 'admin_return_request'];
+      if ((!userId || userId === 'admin') && !isCallerAdmin) {
+        if (!allowedPublicAdminTemplates.includes(templateKey)) {
+          return res.status(403).json({ error: "Forbidden: Sending arbitrary administrative notifications is restricted." });
         }
       }
 
@@ -4752,6 +5573,11 @@ async function startServer() {
   // Loyalty points delivery processing function
   async function processOrderDeliveryLoyaltyPoints(orderIdOrDbId: string) {
     try {
+      const cleanOid = String(orderIdOrDbId || '').trim();
+      if (!cleanOid || !/^[a-zA-Z0-9#\-_]+$/.test(cleanOid)) {
+        return { success: false, reason: "Invalid order ID format" };
+      }
+
       const supabase = getSupabaseAdmin();
       if (!supabase) return { success: false, reason: "Supabase admin client not available" };
 
@@ -4759,12 +5585,19 @@ async function startServer() {
       let { data: order, error } = await supabase
         .from('orders')
         .select('*')
-        .or(`id.eq.${orderIdOrDbId},order_number.eq.${orderIdOrDbId}`)
+        .or(`id.eq.${cleanOid},order_number.eq.${cleanOid}`)
         .maybeSingle();
 
       if (error || !order) {
-        console.warn(`[loyalty] Order not found for delivery points processing: ${orderIdOrDbId}`);
+        console.warn(`[loyalty] Order not found for delivery points processing: ${cleanOid}`);
         return { success: false, reason: "Order not found" };
+      }
+
+      // Require that order status is "delivered" (case-insensitively) before crediting points
+      const status = String(order.status || order.order_status || '').trim().toLowerCase();
+      if (status !== 'delivered') {
+        console.log(`[loyalty] Order ${order.order_number || order.id} status is '${status}', not delivered. Skipping points.`);
+        return { success: false, reason: "Order not delivered" };
       }
 
       const userId = order.user_id || order.userId;
@@ -4845,12 +5678,16 @@ async function startServer() {
     }
   }
 
-  // API endpoint: Credit delivery loyalty points (Protected: requireAuth)
-  app.post("/api/loyalty/credit-delivery-points", requireAuth, async (req, res) => {
+  // API endpoint: Credit delivery loyalty points (Protected: requireAdmin)
+  app.post("/api/loyalty/credit-delivery-points", requireAdmin, async (req, res) => {
     try {
       const { orderId } = req.body;
       if (!orderId) return res.status(400).json({ error: "orderId is required" });
-      const result = await processOrderDeliveryLoyaltyPoints(orderId);
+      const cleanOid = String(orderId).trim();
+      if (!/^[a-zA-Z0-9#\-_]+$/.test(cleanOid)) {
+        return res.status(400).json({ error: "Invalid order ID format" });
+      }
+      const result = await processOrderDeliveryLoyaltyPoints(cleanOid);
       return res.json(result);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
@@ -5017,8 +5854,8 @@ async function startServer() {
       }
     };
 
-    setInterval(autoCancelUnverifiedCOD, 60 * 60 * 1000);
-    setTimeout(autoCancelUnverifiedCOD, 15000);
+    // COD orders are confirmed manually by admin
+    // Scheduling removed to prevent auto-cancelling guest COD orders without email.
     
     // Startup validation removed as requested by user. Only real order flow notifications are supported.
     

@@ -13,6 +13,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
+import LocationAutofillButton from '../components/LocationAutofillButton';
+import { lookupPincode } from '../utils/locationUtils';
 
 export const INDIAN_STATES = [
   'Andhra Pradesh',
@@ -138,6 +140,8 @@ export default function Addresses() {
 
       if (error) {
         console.error("Error fetching addresses:", error);
+        setAddresses([]);
+        setShowForm(true);
         return;
       }
 
@@ -151,6 +155,7 @@ export default function Addresses() {
       }
     } catch (error) {
       console.error("Error fetching addresses:", error);
+      setShowForm(true);
     } finally {
       setLoading(false);
     }
@@ -337,6 +342,19 @@ export default function Addresses() {
 
               {/* ADDRESS FORM */}
               <form onSubmit={handleSubmit}>
+                {/* 1-Click GPS Location Autofill */}
+                <LocationAutofillButton
+                  onLocationDetected={(detected) => {
+                    setFormData(prev => ({
+                      ...prev,
+                      pincode: detected.pincode || prev.pincode,
+                      city: detected.city || prev.city,
+                      state: detected.state || prev.state,
+                      address: prev.address || detected.streetOrArea || prev.address
+                    }));
+                  }}
+                />
+
                 {/* Full Name */}
                 <div className="mb-[17px]">
                   <label htmlFor="name" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
@@ -448,9 +466,19 @@ export default function Addresses() {
                     autoComplete="postal-code"
                     required
                     value={formData.pincode}
-                    onChange={e => {
+                    onChange={async e => {
                       const val = e.target.value.replace(/\D/g, '').slice(0, 6);
-                      setFormData({ ...formData, pincode: val });
+                      setFormData(prev => ({ ...prev, pincode: val }));
+                      if (val.length === 6) {
+                        const details = await lookupPincode(val);
+                        if (details) {
+                          setFormData(prev => ({
+                            ...prev,
+                            city: prev.city || details.city,
+                            state: prev.state || details.state,
+                          }));
+                        }
+                      }
                     }}
                     className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
                   />
@@ -511,7 +539,30 @@ export default function Addresses() {
 
               {/* Address Cards */}
               <div className="space-y-3.5">
-                {addresses.map((addr) => (
+                {addresses.length === 0 ? (
+                  <div className="text-center py-10 px-4 border-2 border-dashed border-gray-200 rounded-[12px] bg-[#fafafa]">
+                    <div className="w-12 h-12 mx-auto mb-3 bg-ruby/5 text-ruby rounded-full flex items-center justify-center">
+                      <MapPin size={22} />
+                    </div>
+                    <h3 className="text-[15px] font-bold text-[#171717] mb-1">No Saved Addresses</h3>
+                    <p className="text-[12px] text-[#777] mb-5 max-w-xs mx-auto">
+                      You haven't saved any delivery address yet. Add an address for fast and easy checkout.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingAddress(null);
+                        setFormData({ name: '', number: '', address: '', city: '', state: '', pincode: '' });
+                        setShowForm(true);
+                      }}
+                      className="px-5 py-2.5 rounded-[9px] bg-ruby text-white text-[13px] font-semibold hover:bg-ruby-dark active:scale-[0.98] transition-all inline-flex items-center gap-2 shadow-sm cursor-pointer"
+                    >
+                      <Plus size={16} />
+                      <span>Add Delivery Address</span>
+                    </button>
+                  </div>
+                ) : (
+                  addresses.map((addr) => (
                   <div
                     key={addr.id}
                     className="p-4 rounded-[10px] border border-[#e5e5e5] bg-[#fafafa] flex items-start justify-between gap-3 hover:border-ruby/30 transition-all"
@@ -556,7 +607,7 @@ export default function Addresses() {
                       </button>
                     </div>
                   </div>
-                ))}
+                )))}
               </div>
             </motion.div>
           )}

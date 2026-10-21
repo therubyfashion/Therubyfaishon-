@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { io } from 'socket.io-client';
 import { useCart } from '../contexts/CartContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, ChevronLeft, Heart, Tag, Lock, CheckCircle2, Sparkles } from 'lucide-react';
@@ -10,6 +11,7 @@ import { LoadingSpinner } from '../components/Skeleton';
 import { useWishlist } from '../contexts/WishlistContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../supabase';
+import { COD_FEE } from '../lib/constants';
 
 export default function Cart() {
   const { user } = useAuth();
@@ -48,6 +50,26 @@ export default function Cart() {
     };
     fetchCoupons();
   }, []);
+
+  // Live Visitor Cart checkpoint tracking
+  useEffect(() => {
+    try {
+      const socket = io(window.location.origin, {
+        transports: ['websocket', 'polling']
+      });
+      const sessId = localStorage.getItem('visitor_session_id') || sessionStorage.getItem('visitor_session_id') || 'unknown';
+      socket.emit('checkpoint_reached', {
+        type: 'cart',
+        sessionId: sessId,
+        userId: user?.id || (user as any)?.uid || 'guest',
+        cart_value: total,
+        timestamp: new Date().toISOString()
+      });
+      return () => {
+        socket.disconnect();
+      };
+    } catch {}
+  }, [total, user]);
 
   const handleMoveToWishlist = (item: any) => {
     if (!user) {
@@ -367,6 +389,10 @@ export default function Cart() {
               </div>
               <p className="text-xl sm:text-2xl font-bold text-[#1A2C54]">₹{Number(finalTotal || 0).toLocaleString()}</p>
             </div>
+
+            <p className="text-[11px] text-gray-400 font-medium pt-2">
+              Cash on Delivery adds a ₹{COD_FEE} handling fee. Pay online by UPI to avoid it.
+            </p>
           </div>
 
           <div className="space-y-4">

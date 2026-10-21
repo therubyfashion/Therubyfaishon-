@@ -25,7 +25,8 @@ import { formatPrice } from '../utils/currency';
 import { cn } from '../lib/utils';
 import {
   CITY_COORDINATES,
-  COMPUTED_LAND_DOTS,
+  WORLD_COASTLINES,
+  REAL_LAND_DOTS,
   resolveCityLocation,
   getCountryFlag
 } from '../utils/geoData';
@@ -117,6 +118,7 @@ export default function LiveView({
 }: LiveViewProps) {
   // Real database states
   const [activeSessions, setActiveSessions] = useState<ActiveSessionRecord[]>([]);
+  const [liveTodaySessions, setLiveTodaySessions] = useState<number>(0);
   const [allOrders, setAllOrders] = useState<LiveOrderRecord[]>([]);
   const [totalCustomerCount, setTotalCustomerCount] = useState<number>(0);
 
@@ -252,24 +254,36 @@ export default function LiveView({
             created_at: s.created_at || new Date().toISOString()
           };
         });
-      } else {
-        // Fallback: Current active store session (admin live)
-        sessionsList = [
-          {
-            session_id: 'admin_store_live',
-            city: 'New Delhi',
-            country: 'India',
-            lat: 28.6139,
-            lng: 77.2090,
-            page: '/admin',
-            device: 'Desktop',
-            cart_value: 0,
-            last_seen: new Date().toISOString(),
-            created_at: new Date().toISOString()
-          }
-        ];
       }
       setActiveSessions(sessionsList);
+
+      // Fetch live analytics summary from server
+      try {
+        const liveRes = await fetch('/api/analytics/live');
+        if (liveRes.ok) {
+          const liveData = await liveRes.json();
+          if (typeof liveData.todaySessions === 'number') {
+            setLiveTodaySessions(liveData.todaySessions);
+          }
+          if (Array.isArray(liveData.visitors) && liveData.visitors.length > 0) {
+            const mapped = liveData.visitors.map((v: any) => {
+              const loc = resolveCityLocation(v.city, v.country, v.lat, v.lng);
+              return {
+                session_id: v.sessionId || v.id,
+                city: loc.city,
+                country: loc.country,
+                lat: loc.lat,
+                lng: loc.lng,
+                page: v.path || '/',
+                device: v.device || 'Mobile',
+                cart_value: Number(v.cart_value) || 0,
+                last_seen: new Date().toISOString()
+              };
+            });
+            setActiveSessions(mapped);
+          }
+        }
+      } catch {}
 
       // 2. Fetch all orders (we will filter them in-memory according to the active date filter)
       const { data: orderRows } = await supabase
@@ -318,12 +332,13 @@ export default function LiveView({
     let socket: Socket | null = null;
     try {
       socket = io(window.location.origin, {
-        reconnectionAttempts: 5,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
         transports: ['websocket', 'polling']
       });
 
       socket.on('live_analytics_update', (data: any) => {
-        if (data && Array.isArray(data.visitors) && data.visitors.length > 0) {
+        if (data && Array.isArray(data.visitors)) {
           const mapped = data.visitors.map((v: any) => {
             const loc = resolveCityLocation(v.city, v.country, v.lat, v.lng);
             return {
@@ -339,6 +354,9 @@ export default function LiveView({
             };
           });
           setActiveSessions(mapped);
+          if (typeof data.todaySessions === 'number') {
+            setLiveTodaySessions(data.todaySessions);
+          }
         }
       });
 
@@ -376,16 +394,16 @@ export default function LiveView({
     });
   }, [allOrders, effectiveDateRange]);
 
-  // Accurate Metrics strictly calculated from the date filter
+  // Accurate Metrics strictly calculated from real data and active date filter
   const metrics = useMemo(() => {
     const uniqueSessions = new Set(activeSessions.map(s => s.session_id));
-    const activeVisitors = Math.max(uniqueSessions.size, activeSessions.length, 1);
+    const activeVisitors = uniqueSessions.size;
 
     const sales = filteredOrders.reduce((sum, o) => sum + (o.total || 0), 0);
     const ordersCount = filteredOrders.length;
     const sessions = quickFilter === 'today'
-      ? Math.max(activeVisitors * 3, propSessions > 0 ? propSessions : 6)
-      : Math.max(ordersCount * 4, 12);
+      ? Math.max(liveTodaySessions, activeVisitors, ordersCount)
+      : Math.max(propSessions, ordersCount, 1);
 
     const inCart = activeSessions.filter(s => (s.cart_value || 0) > 0 || s.page?.includes('cart')).length;
     const inCheckout = activeSessions.filter(s => s.page?.includes('checkout')).length;
@@ -433,7 +451,7 @@ export default function LiveView({
       topLocations: topLocs,
       conversionRate: sessions > 0 ? ((ordersCount / sessions) * 100).toFixed(1) : '0.0'
     };
-  }, [activeSessions, filteredOrders, quickFilter, propSessions]);
+  }, [activeSessions, filteredOrders, quickFilter, propSessions, liveTodaySessions]);
 
   // Top Products calculated from filtered orders
   const topProducts = useMemo(() => {
@@ -699,15 +717,37 @@ export default function LiveView({
       gc.stroke();
     }
 
-    // 4. Luminous Continental Land Dots (High-Precision World Matrix)
-    for (const [lon, lat] of COMPUTED_LAND_DOTS) {
+    // 4a. Real World Continental Coastlines & Outlines (Natural Earth Geodata)
+    gc.lineWidth = 1.1;
+    gc.strokeStyle = 'rgba(56, 189, 248, 0.42)';
+    for (const ring of WORLD_COASTLINES) {
+      gc.beginPath();
+      let isDrawing = false;
+      for (let i = 0; i < ring.length; i++) {
+        const [lon, lat] = ring[i];
+        const q = projectSphere(lon, lat, r, cx, cy);
+        if (q.z > 0) {
+          if (!isDrawing) {
+            gc.moveTo(q.x, q.y);
+            isDrawing = true;
+          } else {
+            gc.lineTo(q.x, q.y);
+          }
+        } else {
+          isDrawing = false;
+        }
+      }
+      gc.stroke();
+    }
+
+    // 4b. Luminous Real Continental Land Matrix (Shopify Emerald-Cyan Dots)
+    for (const [lon, lat] of REAL_LAND_DOTS) {
       const q = projectSphere(lon, lat, r, cx, cy);
       if (q.z > 0) {
         const depth = q.z / r;
-        const alpha = 0.38 + 0.58 * depth;
+        const alpha = 0.42 + 0.58 * depth;
         const dotRadius = Math.max(0.75, 1.15 + 0.45 * depth);
 
-        // Luminous emerald-cyan matrix dots
         gc.fillStyle = `rgba(52, 211, 153, ${alpha})`;
         gc.beginPath();
         gc.arc(q.x, q.y, dotRadius, 0, Math.PI * 2);

@@ -12,10 +12,11 @@ export const useVisitorTracking = () => {
   const { total: cartTotal } = useCart();
 
   useEffect(() => {
-    // Connect to Socket.io (Keep for socket-based events if needed)
+    // Connect to Socket.io with websocket & polling fallback
     const socket = io(window.location.origin, {
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
       reconnectionDelay: 1000,
+      transports: ['websocket', 'polling']
     });
     socketRef.current = socket;
 
@@ -50,24 +51,51 @@ export const useVisitorTracking = () => {
 
     const track = async () => {
       try {
-        // Try to get location via public API if not already in session
+        // Fetch real geographic location (server lookup first, fallback to ipwho.is)
         let locationData = JSON.parse(sessionStorage.getItem('visitor_location') || 'null');
         
-        if (!locationData) {
+        if (!locationData || locationData.city === 'Delhi' || !locationData.lat) {
           try {
-            const res = await fetch('https://ipapi.co/json/');
-            const data = await res.json();
-            locationData = {
-              city: data.city || 'Delhi',
-              country: data.country_name || 'India',
-              lat: data.latitude || 28.6139,
-              lng: data.longitude || 77.2090,
-              region: data.region || ''
-            };
-            sessionStorage.setItem('visitor_location', JSON.stringify(locationData));
-          } catch (e) {
-            locationData = { city: 'Delhi', country: 'India', lat: 28.6139, lng: 77.2090 };
+            // 1. Try server-side geo IP lookup
+            const res = await fetch('/api/geo/lookup');
+            if (res.ok) {
+              const data = await res.json();
+              if (data && data.city && data.lat && data.lng) {
+                locationData = {
+                  city: data.city,
+                  country: data.country || 'India',
+                  lat: Number(data.lat),
+                  lng: Number(data.lng),
+                  region: data.region || ''
+                };
+              }
+            }
+          } catch {}
+
+          // 2. Fallback to free, reliable CORS-enabled ipwho.is if server lookup didn't return city/coords
+          if (!locationData || !locationData.city || locationData.city === 'Delhi') {
+            try {
+              const res2 = await fetch('https://ipwho.is/');
+              if (res2.ok) {
+                const data2 = await res2.json();
+                if (data2 && data2.success !== false && data2.city) {
+                  locationData = {
+                    city: data2.city,
+                    country: data2.country || 'India',
+                    lat: Number(data2.latitude) || 28.6139,
+                    lng: Number(data2.longitude) || 77.2090,
+                    region: data2.region || ''
+                  };
+                }
+              }
+            } catch {}
           }
+
+          // 3. Fallback default
+          if (!locationData) {
+            locationData = { city: 'New Delhi', country: 'India', lat: 28.6139, lng: 77.2090 };
+          }
+          sessionStorage.setItem('visitor_location', JSON.stringify(locationData));
         }
 
         const getBrowser = (): string => {

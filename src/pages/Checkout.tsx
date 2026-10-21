@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -11,9 +11,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { io } from 'socket.io-client';
 import { LoadingSpinner } from '../components/Skeleton';
 import SwipeButton from '../components/SwipeButton';
+import LocationAutofillButton from '../components/LocationAutofillButton';
+import { lookupPincode } from '../utils/locationUtils';
 import { trackPixelEvent } from '../lib/pixel';
 import { formatPrice } from '../utils/currency';
 import { supabase } from '../supabase';
+import { COD_FEE } from '../lib/constants';
 
 const STEPS = [
   { id: 1, label: 'Address' },
@@ -56,24 +59,32 @@ export default function Checkout() {
     }
   }, [displayItems]);
   
-  // Track live checkout
+  // Track live checkout and Meta Pixel InitiateCheckout (guarded to fire once per visit)
+  const hasInitiatedCheckout = useRef(false);
   useEffect(() => {
-    const socket = io();
+    const socket = io(window.location.origin, {
+      transports: ['websocket', 'polling']
+    });
+    const sessId = localStorage.getItem('visitor_session_id') || sessionStorage.getItem('visitor_session_id') || 'unknown';
     socket.emit('checkpoint_reached', {
       type: 'checkout',
-      sessionId: sessionStorage.getItem('visitor_session_id') || 'unknown',
-      userId: user?.uid || 'guest',
+      sessionId: sessId,
+      userId: user?.uid || (user as any)?.id || 'guest',
+      cart_value: total,
       timestamp: new Date().toISOString()
     });
 
-    // Meta Pixel Tracking
-    trackPixelEvent('InitiateCheckout', {
-      content_ids: (displayItems.length > 0 ? displayItems : items).map(i => i.id),
-      content_type: 'product',
-      num_items: itemCount,
-      value: total,
-      currency: 'INR'
-    });
+    // Meta Pixel Tracking (fires once per checkout visit)
+    if (!hasInitiatedCheckout.current) {
+      hasInitiatedCheckout.current = true;
+      trackPixelEvent('InitiateCheckout', {
+        content_ids: (displayItems.length > 0 ? displayItems : items).map(i => i.id),
+        content_type: 'product',
+        num_items: itemCount,
+        value: total,
+        currency: 'INR'
+      });
+    }
 
     return () => {
       socket.disconnect();
@@ -260,9 +271,17 @@ export default function Checkout() {
         fetchedAddresses = fetchedAddresses.filter(a => a && a.id && !String(a.id).startsWith('addr_default_') && a.id !== '1' && a.id !== '2' && a.name !== 'Priya Sharma' && a.name !== 'Rajesh Sharma');
 
         setAddresses(fetchedAddresses);
-        if (fetchedAddresses.length > 0 && !selectedAddress) {
-          const defaultAddr = fetchedAddresses.find(a => a.isDefault) || fetchedAddresses[0];
-          setSelectedAddress(defaultAddr.id);
+        if (fetchedAddresses.length === 0) {
+          setShowAddressForm(true);
+          setSelectedAddress(null);
+          localStorage.removeItem('selected_address_id');
+        } else {
+          const stillValid = fetchedAddresses.some(a => a.id === selectedAddress);
+          if (!stillValid) {
+            const defaultAddr = fetchedAddresses.find(a => a.isDefault) || fetchedAddresses[0];
+            setSelectedAddress(defaultAddr.id);
+            localStorage.setItem('selected_address_id', defaultAddr.id);
+          }
         }
       } catch (err) {
         console.error("Error fetching addresses in checkout:", err);
@@ -272,6 +291,20 @@ export default function Checkout() {
     };
     fetchAddresses();
   }, [user]);
+
+  // Protection: Never allow staying on Step 2 (Payment) without a valid selected address
+  useEffect(() => {
+    if (currentStep === 2 && !loadingAddresses) {
+      const validAddress = addresses.find(a => a.id === selectedAddress);
+      if (!validAddress) {
+        toast.info("Please select or enter a delivery address first");
+        setCurrentStep(1);
+        if (addresses.length === 0) {
+          setShowAddressForm(true);
+        }
+      }
+    }
+  }, [currentStep, addresses, selectedAddress, loadingAddresses]);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -364,8 +397,8 @@ export default function Checkout() {
   const discount = Number(cartDiscount || (appliedPromo ? appliedPromo.discount : 0));
   const shippingCost = 0; // Free Delivery
   
-  // COD fee is strictly ₹80 when selectedPayment is 'cod', and ₹0 otherwise
-  const codFee = Number(selectedPayment === 'cod' ? 80 : 0);
+  // COD fee is strictly COD_FEE when selectedPayment is 'cod', and 0 otherwise
+  const codFee = Number(selectedPayment === 'cod' ? COD_FEE : 0);
 
   // Loyalty Points calculation: 100 points = ₹10 discount (min 100 points required)
   const userPoints = Number(profile?.loyaltyPoints || 0);
@@ -388,29 +421,29 @@ export default function Checkout() {
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
     
-    // Name validation
-    if (!/^[a-zA-Z\s]{3,50}$/.test(newAddress.name)) {
-      newErrors.name = 'Please enter a valid name (3-50 characters, letters only)';
+    // Name validation: letters, spaces, dots, min 2 chars
+    if (!newAddress.name || newAddress.name.trim().length < 2) {
+      newErrors.name = 'Please enter your full name (minimum 2 characters)';
     }
 
     // Phone validation (Indian 10-digit)
-    if (!/^[6-9]\d{9}$/.test(newAddress.number)) {
+    if (!/^[6-9]\d{9}$/.test(newAddress.number.replace(/\D/g, ''))) {
       newErrors.number = 'Please enter a valid 10-digit mobile number';
     }
 
     // Address validation
-    if (newAddress.address.length < 10) {
-      newErrors.address = 'Address is too short. Please provide more details.';
+    if (!newAddress.address || newAddress.address.trim().length < 5) {
+      newErrors.address = 'Please enter your house/flat number and street area';
     }
 
     // Pincode validation (Indian 6-digit)
-    if (!/^\d{6}$/.test(newAddress.pincode)) {
-      newErrors.pincode = 'Please enter a valid 6-digit pincode';
+    if (!/^\d{6}$/.test(newAddress.pincode.replace(/\D/g, ''))) {
+      newErrors.pincode = 'Please enter a valid 6-digit PIN code';
     }
 
     // City & State validation
-    if (newAddress.city.length < 2) newErrors.city = 'Invalid city name';
-    if (newAddress.state.length < 2) newErrors.state = 'Invalid state name';
+    if (!newAddress.city || newAddress.city.trim().length < 2) newErrors.city = 'Please enter city name';
+    if (!newAddress.state || newAddress.state.trim().length < 2) newErrors.state = 'Please choose state';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -615,43 +648,38 @@ export default function Checkout() {
   const handleContinueToPayment = async (e: React.MouseEvent) => {
     e.preventDefault();
     
+    // 1. If the address form is currently open, validate and save it first
     if (showAddressForm) {
-      const isFormDirty = !!(
-        newAddress.name?.trim() ||
-        newAddress.email?.trim() ||
-        newAddress.number?.trim() ||
-        newAddress.address?.trim() ||
-        newAddress.landmark?.trim() ||
-        newAddress.state?.trim() ||
-        newAddress.city?.trim() ||
-        newAddress.pincode?.trim()
-      );
-
-      if (isFormDirty) {
-        // Form is partially or fully filled out, validate and save it, then advance to step 2 (Payment)
-        await handleAddAddress(e as any, true);
-      } else {
-        // Form is completely empty, user likely opened it by accident or changed their mind
-        setShowAddressForm(false);
-        if (selectedAddress) {
-          setCurrentStep(2);
-        } else {
-          toast.error('Please select or add a delivery address');
-        }
-      }
-    } else {
-      if (!selectedAddress) {
-        toast.error('Please select a delivery address');
+      const isValid = validateForm();
+      if (!isValid) {
+        toast.error('Please fill all required delivery address fields');
         return;
       }
-      setCurrentStep(2);
+      await handleAddAddress(e as any, true);
+      return;
     }
+
+    // 2. If the address form is closed, strictly verify that an address is selected AND exists
+    const validSelected = addresses.find(a => a.id === selectedAddress);
+    if (!validSelected) {
+      if (addresses.length === 0) {
+        toast.error('Please enter your delivery address to continue');
+        setShowAddressForm(true);
+      } else {
+        toast.error('Please select a delivery address to continue');
+      }
+      return;
+    }
+
+    setCurrentStep(2);
   };
 
   const handlePlaceOrder = async (isVerifiedOverride = false) => {
-    if (!selectedAddress) {
-      toast.error('Please select a delivery address');
+    const validSelected = addresses.find(a => a.id === selectedAddress);
+    if (!validSelected) {
+      toast.error('Please select or add a delivery address');
       setCurrentStep(1);
+      if (addresses.length === 0) setShowAddressForm(true);
       return;
     }
 
@@ -666,13 +694,13 @@ export default function Checkout() {
         const { data: rpcData, error: rpcErr } = await supabase.rpc('generate_order_number');
         if (rpcErr) {
           console.warn("Supabase generate_order_number RPC failed:", rpcErr);
-          formattedOrderId = `#TRF${Math.floor(1000 + Math.random() * 9000)}`;
+          formattedOrderId = `#TRF${Date.now().toString().slice(-8)}`;
         } else {
           formattedOrderId = rpcData;
         }
       } catch (rpcEx) {
         console.warn("Supabase generate_order_number RPC exception:", rpcEx);
-        formattedOrderId = `#TRF${Math.floor(1000 + Math.random() * 9000)}`;
+        formattedOrderId = `#TRF${Date.now().toString().slice(-8)}`;
       }
       
       const orderData = {
@@ -771,7 +799,8 @@ export default function Checkout() {
                       .maybeSingle();
 
                     if (pData && typeof pData.stock === 'number') {
-                      const updatedStock = Math.max(0, pData.stock - (item.quantity || 1));
+                      const decrementQty = Math.max(1, Number(item.quantity) || 1);
+                      const updatedStock = Math.max(0, pData.stock - decrementQty);
                       await supabase
                         .from('products')
                         .update({ 
@@ -787,9 +816,10 @@ export default function Checkout() {
               }
 
               // Deduct redeemed loyalty points immediately on successful order placement
-              if (pointsToRedeem > 0 && user?.uid) {
+              const safePointsToRedeem = Math.min(Math.max(0, pointsToRedeem), userPoints);
+              if (safePointsToRedeem > 0 && user?.uid) {
                 try {
-                  const newBalance = Math.max(0, userPoints - pointsToRedeem);
+                  const newBalance = Math.max(0, userPoints - safePointsToRedeem);
                   await supabase
                     .from('profiles')
                     .update({ loyalty_points: newBalance })
@@ -844,102 +874,7 @@ export default function Checkout() {
 
           const storeName = storeSettings?.storeName || 'The Ruby Fashion';
 
-          // Build high-compatibility 100%-bulletproof HTML Table email summary (Outlook / Gmail safe)
-          const emailHtml = `
-            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1C1917; line-height: 1.5;">
-              <!-- Header -->
-              <div style="display: flex; justify-content: space-between; margin-bottom: 40px; border-bottom: 1px solid #E5E7EB; padding-bottom: 15px;">
-                <span style="font-size: 16px; font-weight: 600; color: #1A2C54;">Order ${finalOrderData.orderId}</span>
-                <span style="font-size: 16px; font-weight: 600; color: #E11D48; text-transform: lowercase;">confirmed</span>
-              </div>
-
-              <!-- Main Message -->
-              <div style="margin-bottom: 35px;">
-                <h1 style="font-size: 22px; font-weight: 700; color: #1A2C54; margin: 0 0 12px 0;">Thank you for your purchase!</h1>
-                <p style="font-size: 15px; color: #4B5563; margin: 0;">We're getting your order ready to be shipped. We will notify you when it has been sent.</p>
-              </div>
-
-              <!-- Action Buttons -->
-              <div style="margin-bottom: 45px; text-align: center;">
-                <a href="${window.location.origin}/track/${(finalOrderData.orderId || '').replace('#', '')}?email=${encodeURIComponent(finalOrderData.address?.email || finalOrderData.email || '')}" 
-                   style="display: inline-block; background-color: #E11D48; color: #FFFFFF; padding: 14px 28px; border-radius: 6px; text-decoration: none; font-size: 15px; font-weight: 600; text-align: center; margin-bottom: 12px; transition: background-color 0.2s;">
-                  Track Your Order
-                </a>
-                <p style="font-size: 13px; color: #6B7280; margin: 4px 0 0 0;">or <a href="${window.location.origin}" style="color: #1A2C54; text-decoration: underline; font-weight: 500;">Visit our store</a></p>
-              </div>
-
-              <!-- Order Summary Table (Safe across all clients including Gmail & Outlook) -->
-              <div style="border-top: 1px solid #E5E7EB; padding-top: 30px;">
-                <h2 style="font-size: 16px; font-weight: 700; color: #1A2C54; margin: 0 0 20px 0; text-transform: uppercase; letter-spacing: 0.5px;">Order summary</h2>
-                
-                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 25px;">
-                  ${finalOrderData.items.map((item: any) => `
-                    <tr style="border-bottom: 1px solid #F3F4F6;">
-                      <td style="padding: 10px 0; width: 65px; vertical-align: top;">
-                        <div style="width: 55px; height: 55px; background-color: #F3F4F6; overflow: hidden; border-radius: 6px; border: 1px solid #E5E7EB;">
-                          ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 100%; height: 100%; object-fit: cover;">` : ''}
-                        </div>
-                      </td>
-                      <td style="padding: 10px 10px; vertical-align: top; text-align: left;">
-                        <p style="font-size: 14px; font-weight: 600; color: #1C1917; margin: 0;">${item.name} &times; ${item.quantity}</p>
-                        <p style="font-size: 12px; color: #6B7280; margin: 4px 0 0 0;">Size: ${item.selectedSize || 'Standard'}${item.selectedColor ? ` | Color: ${item.selectedColor}` : ''}</p>
-                      </td>
-                      <td style="padding: 10px 0; vertical-align: top; text-align: right; width: 85px;">
-                        <p style="font-size: 14px; font-weight: 600; color: #1C1917; margin: 0;">₹${Number(item.price * item.quantity).toLocaleString()}</p>
-                      </td>
-                    </tr>
-                  `).join('')}
-                </table>
-
-                <!-- Totals -->
-                <div style="border-top: 1px solid #E5E7EB; padding-top: 20px;">
-                  <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                    <tr>
-                      <td style="font-size: 14px; color: #4B5563; padding: 5px 0;">Subtotal</td>
-                      <td style="font-size: 14px; font-weight: 600; color: #1C1917; text-align: right; padding: 5px 0;">₹${Number(finalOrderData.subtotal || 0).toLocaleString()}</td>
-                    </tr>
-                    ${finalOrderData.discount > 0 ? `
-                      <tr>
-                        <td style="font-size: 14px; color: #4B5563; padding: 5px 0;">Discount</td>
-                        <td style="font-size: 14px; font-weight: 600; color: #E11D48; text-align: right; padding: 5px 0;">-₹${Number(finalOrderData.discount || 0).toLocaleString()}</td>
-                      </tr>
-                    ` : ''}
-                    <tr>
-                      <td style="font-size: 14px; color: #4B5563; padding: 5px 0;">Shipping</td>
-                      <td style="font-size: 14px; font-weight: 600; color: #1C1917; text-align: right; padding: 5px 0;">${finalOrderData.shippingCost === 0 ? 'FREE' : `₹${Number(finalOrderData.shippingCost || 0).toLocaleString()}`}</td>
-                    </tr>
-                    ${finalOrderData.codFee > 0 ? `
-                      <tr>
-                        <td style="font-size: 14px; color: #4B5563; padding: 5px 0;">COD Handling Fee</td>
-                        <td style="font-size: 14px; font-weight: 600; color: #1C1917; text-align: right; padding: 5px 0;">₹${Number(finalOrderData.codFee || 0).toLocaleString()}</td>
-                      </tr>
-                    ` : ''}
-                    <tr>
-                      <td style="font-size: 16px; font-weight: 700; color: #1A2C54; padding: 15px 0 0 0; border-top: 1px solid #E5E7EB; margin-top: 15px;">Total</td>
-                      <td style="font-size: 20px; font-weight: 700; color: #E11D48; text-align: right; padding: 15px 0 0 0; border-top: 1px solid #E5E7EB; margin-top: 15px;">₹${Number(finalOrderData.total || 0).toLocaleString()}</td>
-                    </tr>
-                  </table>
-                </div>
-
-                ${isCODOrder && codToken ? `
-                <div style="text-align:center; margin:32px 0; background-color:#FFF5F7; border:1px solid #FCD34D; border-radius:8px; padding:20px;">
-                  <p style="font-size:16px; color:#333; margin-bottom:16px; font-weight:600;">
-                    Please confirm your order to help us process it faster:
-                  </p>
-                  <a href="https://therubyfashion.shop/verify-cod?token=${encodeURIComponent(codToken)}&order=${encodeURIComponent((finalOrderData.orderId || '').replace('#', ''))}"
-                     style="background:#A11B35; color:white; padding:16px 40px; border-radius:8px;
-                     text-decoration:none; font-size:16px; font-weight:bold; display:inline-block;">
-                    ✅ Yes, Confirm My Order
-                  </a>
-                  <p style="color:#888; font-size:12px; margin-top:12px;">
-                    Link expires in 24 hours. Ignore if you didn't place this order.
-                  </p>
-                </div>
-                ` : ''}
-              </div>
-            </div>`;
-
-          // 2. Define the 4 parallel critical notification/email tasks
+          // 2. Define parallel critical notification/email tasks
           const sendCustomerPush = async () => {
             const targetUserId = user?.id || user?.uid;
             if (targetUserId) {
@@ -1017,11 +952,8 @@ export default function Checkout() {
                 headers: { 'Content-Type': 'application/json' },
                 keepalive: true,
                 body: JSON.stringify({
-                  to: finalOrderData.email || finalOrderData.address?.email || user?.email || '',
-                  from: storeSettings?.fromEmail || storeSettings?.smtpUser || undefined,
-                  replyTo: storeSettings?.supportEmail || undefined,
-                  subject: `Order Confirmed! ${finalOrderData.orderId?.startsWith('#') ? finalOrderData.orderId : `#${finalOrderData.orderId}`} ✨`,
-                  html: emailHtml
+                  orderId: finalOrderData.orderId,
+                  templateKey: 'order_confirmation'
                 })
               });
               clearTimeout(timeoutId);
@@ -1039,56 +971,12 @@ export default function Checkout() {
             }
           };
 
-          const sendAdminEmail = async () => {
-            try {
-              // Target developer testing email as well to guarantee they see admin order notifications
-              const adminEmailDestination = storeSettings?.supportEmail || "support@therubyfashion.shop";
-              const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 seconds snappy timeout
-              const res = await fetch('/api/send-email', {
-                signal: controller.signal,
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                keepalive: true,
-                body: JSON.stringify({
-                  to: adminEmailDestination,
-                  from: storeSettings?.fromEmail || storeSettings?.smtpUser || undefined,
-                  subject: `New Order Received! ${finalOrderData.orderId} 🛍️`,
-                  html: `
-                    <div style="font-family: sans-serif; padding: 20px;">
-                      <h2>New Order Received: ${finalOrderData.orderId}</h2>
-                      <p><strong>Customer:</strong> ${finalOrderData.customerName}</p>
-                      <p><strong>Email:</strong> ${finalOrderData.address?.email || finalOrderData.email || ''}</p>
-                      <p><strong>Amount:</strong> ₹${Number(finalOrderData.total || 0).toLocaleString()}</p>
-                      <p><strong>Payment:</strong> ${finalOrderData.paymentMethod}</p>
-                      <br/>
-                      <a href="${window.location.origin}/admin" style="background: #E11D48; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Manage Order</a>
-                    </div>
-                  `
-                })
-              });
-              clearTimeout(timeoutId);
-              if (!res.ok) {
-                const errorBody = await res.text();
-                throw new Error(`HTTP Error Status: ${res.status} | Response: ${errorBody}`);
-              }
-              const d = await res.json();
-              console.log("Admin order email dispatched successfully:", d);
-            } catch (err: any) {
-              console.error("❌ [DIAGNOSTIC] Admin order email failed! Detailed Error:", {
-                message: err.message || err,
-                stack: err.stack
-              });
-            }
-          };
-
-          // AWAIT all 4 parallel notification/email tasks to settle safely (success or failure) before navigating to ensure requests are not aborted by the browser
+          // AWAIT parallel notification/email tasks to settle safely before navigating
           try {
             await Promise.allSettled([
               sendCustomerPush(),
               sendAdminPush(),
-              sendCustomerEmail(),
-              sendAdminEmail()
+              sendCustomerEmail()
             ]);
           } catch (settledError) {
             console.error("Promise.allSettled for critical communications encountered an error:", settledError);
@@ -1189,12 +1077,28 @@ export default function Checkout() {
         }
 
         try {
+          const orderItems = (displayItems.length > 0 ? displayItems : items).map(it => ({
+            id: it.id,
+            name: it.name,
+            quantity: it.quantity || 1
+          }));
+
+          const { data: sessionData } = await supabase.auth.getSession();
+          const authToken = sessionData?.session?.access_token;
+          const orderHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (authToken) {
+            orderHeaders['Authorization'] = `Bearer ${authToken}`;
+          }
+
           // Create order on server first
           const orderResponse = await fetch('/api/create-razorpay-order', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: orderHeaders,
             body: JSON.stringify({
-              amount: Math.round(finalTotal * 100),
+              items: orderItems,
+              paymentMethod: selectedPayment,
+              promoCode: appliedPromo?.code || null,
+              useLoyaltyPoints: Boolean(useLoyaltyPoints),
               currency: 'INR',
               receipt: formattedOrderId
             })
@@ -1232,7 +1136,12 @@ export default function Checkout() {
                   body: JSON.stringify({
                     razorpay_order_id: response.razorpay_order_id,
                     razorpay_payment_id: response.razorpay_payment_id,
-                    razorpay_signature: response.razorpay_signature
+                    razorpay_signature: response.razorpay_signature,
+                    items: orderItems,
+                    paymentMethod: selectedPayment,
+                    promoCode: appliedPromo?.code || null,
+                    useLoyaltyPoints: Boolean(useLoyaltyPoints),
+                    userId: user?.uid || null
                   })
                 });
 
@@ -1266,6 +1175,22 @@ export default function Checkout() {
             }
           };
 
+          // Wait for window.Razorpay if script is loading asynchronously
+          if (!(window as any).Razorpay) {
+            await new Promise<void>((resolve, reject) => {
+              const start = Date.now();
+              const interval = setInterval(() => {
+                if ((window as any).Razorpay) {
+                  clearInterval(interval);
+                  resolve();
+                } else if (Date.now() - start > 10000) {
+                  clearInterval(interval);
+                  reject(new Error("Razorpay SDK could not be loaded. Please check your network connection."));
+                }
+              }, 100);
+            });
+          }
+
           const rzp = new (window as any).Razorpay(options);
           rzp.on('payment.failed', function (response: any) {
             toast.error(response.error?.description || 'Payment failed. Please try again.');
@@ -1292,6 +1217,29 @@ export default function Checkout() {
       setIsProcessingPayment(false);
     }
   };
+
+  if (displayItems.length === 0) {
+    return (
+      <div id="checkout-empty" className="bg-gray-50 min-h-screen py-16 px-4 flex items-center justify-center">
+        <div className="max-w-md w-full bg-white rounded-[2rem] p-8 text-center border border-gray-100 shadow-xl space-y-5">
+          <div className="w-16 h-16 mx-auto bg-ruby/5 text-ruby rounded-full flex items-center justify-center">
+            <ShoppingBag size={28} />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold text-[#1A2C54]">Your Cart is Empty</h2>
+            <p className="text-xs text-gray-500 font-medium">Please add items to your cart before proceeding to checkout.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/shop')}
+            className="w-full bg-ruby text-white py-4 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-ruby-dark transition-all shadow-md shadow-ruby/20 cursor-pointer"
+          >
+            Explore Collections →
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div id="checkout" className="bg-gray-50 min-h-screen pb-24">
@@ -1432,6 +1380,25 @@ export default function Checkout() {
 
                         {/* ADDRESS FORM */}
                         <form onSubmit={handleAddAddress}>
+                          {/* Use My Current Location Auto-Fill */}
+                          <LocationAutofillButton
+                            onLocationDetected={(detected) => {
+                              setNewAddress(prev => ({
+                                ...prev,
+                                pincode: detected.pincode || prev.pincode,
+                                city: detected.city || prev.city,
+                                state: detected.state || prev.state,
+                                address: prev.address || detected.streetOrArea || prev.address
+                              }));
+                              setErrors(prev => ({
+                                ...prev,
+                                pincode: '',
+                                city: '',
+                                state: ''
+                              }));
+                            }}
+                          />
+
                           {/* Full Name */}
                           <div className="mb-[17px]">
                             <label htmlFor="checkout_name" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
@@ -1475,6 +1442,24 @@ export default function Checkout() {
                               className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
                             />
                             {errors.number && <p className="text-[10px] font-bold text-ruby mt-1">{errors.number}</p>}
+                          </div>
+
+                          {/* Email (Optional) */}
+                          <div className="mb-[17px]">
+                            <label htmlFor="checkout_email" className="block mb-[7px] text-[13px] font-[600] text-[#404040]">
+                              Email (optional)
+                            </label>
+                            <input
+                              type="email"
+                              id="checkout_email"
+                              placeholder="For order tracking & invoice updates"
+                              autoComplete="email"
+                              value={newAddress.email || ''}
+                              onChange={e => {
+                                setNewAddress({ ...newAddress, email: e.target.value });
+                              }}
+                              className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
+                            />
                           </div>
 
                           {/* Address */}
@@ -1569,10 +1554,21 @@ export default function Checkout() {
                               autoComplete="postal-code"
                               required
                               value={newAddress.pincode}
-                              onChange={e => {
+                              onChange={async e => {
                                 const val = e.target.value.replace(/\D/g, '').slice(0, 6);
-                                setNewAddress({ ...newAddress, pincode: val });
-                                if (errors.pincode) setErrors({ ...errors, pincode: '' });
+                                setNewAddress(prev => ({ ...prev, pincode: val }));
+                                if (errors.pincode) setErrors(prev => ({ ...prev, pincode: '' }));
+                                if (val.length === 6) {
+                                  const details = await lookupPincode(val);
+                                  if (details) {
+                                    setNewAddress(prev => ({
+                                      ...prev,
+                                      city: prev.city || details.city,
+                                      state: prev.state || details.state,
+                                    }));
+                                    setErrors(prev => ({ ...prev, city: '', state: '' }));
+                                  }
+                                }
                               }}
                               className="w-full h-[46px] px-[13px] border border-[#dddddd] rounded-[9px] bg-white text-[#171717] text-[14px] outline-none transition-all placeholder:text-[#a3a3a3] focus:border-[#9b111e] focus:ring-2 focus:ring-[#9b111e]/10"
                             />
@@ -1718,6 +1714,32 @@ export default function Checkout() {
                       <h2 className="text-xl font-bold text-[#1A2C54]">Payment Method</h2>
                       <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Select how you'd like to pay</p>
                     </div>
+
+                    {selectedAddrObj && (
+                      <div className="p-4 bg-gray-50 border border-gray-100 rounded-2xl flex items-center justify-between gap-3 shadow-xs">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-xl bg-ruby/10 text-ruby flex items-center justify-center shrink-0">
+                            <MapPin size={17} />
+                          </div>
+                          <div className="min-w-0 text-left">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-[#1A2C54] truncate">{selectedAddrObj.name}</span>
+                              <span className="text-[10px] text-gray-400 font-medium">({selectedAddrObj.number})</span>
+                            </div>
+                            <p className="text-[11px] text-gray-500 font-medium truncate">
+                              {selectedAddrObj.address}, {selectedAddrObj.city} - {selectedAddrObj.pincode}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setCurrentStep(1)}
+                          className="text-[11px] font-bold text-ruby hover:text-black uppercase tracking-wider shrink-0 cursor-pointer"
+                        >
+                          Change
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {paymentNotice && (
@@ -1778,7 +1800,7 @@ export default function Checkout() {
                             animate={{ opacity: 1, y: 0 }}
                             className="text-xs text-ruby font-semibold block mt-0.5"
                           >
-                            +₹80 Handling Fee applies
+                            +₹{COD_FEE} Handling Fee applies
                           </motion.span>
                         )}
                       </div>
@@ -1804,7 +1826,7 @@ export default function Checkout() {
                       <div className="space-y-1">
                         <p className="text-xs font-bold text-ruby">COD Handling Fee Notice</p>
                         <p className="text-[12px] text-[#1A2C54] font-medium leading-relaxed">
-                          ₹80 cash-on-delivery handling charge has been added to your total. To save ₹80, switch to <strong>UPI / Wallets</strong> for instant, zero-fee payment.
+                          ₹{COD_FEE} cash-on-delivery handling charge has been added to your total. To save ₹{COD_FEE}, switch to <strong>UPI / Wallets</strong> for instant, zero-fee payment.
                         </p>
                       </div>
                     </motion.div>

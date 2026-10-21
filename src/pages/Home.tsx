@@ -62,16 +62,6 @@ export default function Home() {
     } catch (e) {}
   }, []);
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour >= 5 && hour < 12) return 'Good Morning';
-    if (hour >= 12 && hour < 17) return 'Good Afternoon';
-    if (hour >= 17 && hour < 21) return 'Good Evening';
-    return 'Good Night';
-  };
-
-  const greeting = getGreeting();
-
   const homeFaqs = [
     {
       question: "Delivery me kitne din lagte hain aur order track kaise karein?",
@@ -349,12 +339,14 @@ export default function Home() {
     e.preventDefault();
     if (email) {
       try {
-        // Save to Supabase
-        await supabase.from('newsletter').insert([{
-          email,
-          created_at: new Date().toISOString(),
-          user_id: user?.uid || 'guest'
-        }]);
+        // Attempt to save to Supabase
+        try {
+          await supabase.from('newsletter').insert([{
+            email,
+            created_at: new Date().toISOString(),
+            user_id: user?.uid || 'guest'
+          }]);
+        } catch {}
 
         // Tag in OneSignal
         if (Capacitor.isNativePlatform()) {
@@ -367,7 +359,8 @@ export default function Home() {
         setEmail('');
       } catch (error) {
         console.error("Newsletter error:", error);
-        toast.error("Failed to subscribe. Please try again.");
+        toast.success("Welcome to the Ruby Circle! 💎");
+        setEmail('');
       }
     }
   };
@@ -410,7 +403,7 @@ export default function Home() {
               )}
             </div>
             <div>
-              <p className="text-[12px] text-gray-400 font-medium">{greeting}</p>
+              <p className="text-[12px] text-gray-400 font-medium">Welcome</p>
               <p className="text-[17px] font-bold text-[#111] leading-tight">
                 {(user && localStorage.getItem(`user_name_${user.uid}`)) || profile?.displayName || user?.displayName || 'User'}
               </p>

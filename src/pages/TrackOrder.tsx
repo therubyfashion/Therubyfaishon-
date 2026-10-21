@@ -46,48 +46,64 @@ export default function TrackOrder() {
       const cleanOid = oid.trim();
       const cleanEmail = emailStr.trim().toLowerCase();
       
-      console.log("🔍 Fetching order details from Supabase...");
+      console.log("🔍 Fetching order details from backend and Supabase...");
       
-      let query = supabase.from('orders').select('*');
-      
-      if (cleanOid.length > 20) {
-        query = query.eq('id', cleanOid);
-      } else {
-        const variants = [
-          cleanOid,
-          `#${cleanOid}`,
-          cleanOid.toUpperCase(),
-          `#${cleanOid.toUpperCase()}`
-        ];
-        query = query.in('order_number', variants);
+      let o: any = null;
+      try {
+        const res = await fetch('/api/track-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: cleanOid, email: cleanEmail })
+        });
+        if (res.ok) {
+          o = await res.json();
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || "Order not found. Please verify Order ID and Email.");
+        }
+      } catch (apiErr: any) {
+        // Fallback to direct supabase query
+        let query = supabase.from('orders').select('*');
+        if (cleanOid.length > 20) {
+          query = query.eq('id', cleanOid);
+        } else {
+          const variants = [
+            cleanOid,
+            `#${cleanOid}`,
+            cleanOid.toUpperCase(),
+            `#${cleanOid.toUpperCase()}`
+          ];
+          query = query.in('order_number', variants);
+        }
+        const { data: orders, error: dbErr } = await query.eq('customer_email', cleanEmail);
+        if (dbErr || !orders || orders.length === 0) {
+          throw new Error(apiErr.message || "Order not found. Please verify that the Order ID and Email are correct.");
+        }
+        o = orders[0];
       }
-      
-      const { data: orders, error: dbErr } = await query.eq('customer_email', cleanEmail);
-      
-      if (dbErr) throw dbErr;
-      if (!orders || orders.length === 0) {
+
+      if (!o) {
         throw new Error("Order not found. Please verify that the Order ID and Email are correct.");
       }
 
-      const o = orders[0];
       const foundOrder = {
         id: o.id,
-        orderId: o.order_number,
-        email: o.customer_email || '',
+        orderId: o.order_number || o.orderId || cleanOid,
+        email: o.customer_email || o.email || '',
         items: o.items || [],
         total: o.total,
         status: o.status,
         createdAt: o.created_at,
         updatedAt: o.updated_at,
         address: {
-          name: o.shipping_full_name || 'Customer',
-          number: o.shipping_phone || '',
-          city: o.shipping_city || '',
-          pincode: o.shipping_zip || '',
-          address_line: o.shipping_address || ''
+          name: o.shipping_full_name || o.address?.name || 'Customer',
+          number: o.shipping_phone || o.address?.number || '',
+          city: o.shipping_city || o.address?.city || '',
+          pincode: o.shipping_zip || o.address?.pincode || '',
+          address_line: o.shipping_address || o.address?.address_line || ''
         },
-        trackingNumber: o.tracking_number || 'AUTO_E_HUB',
-        trackingHistory: o.tracking_history || []
+        trackingNumber: o.tracking_number || o.trackingNumber || 'AUTO_E_HUB',
+        trackingHistory: o.tracking_history || o.trackingHistory || []
       };
 
       setOrder(foundOrder);

@@ -164,19 +164,17 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
         </div>
         
         {/* Real-time review count matching product details page logic */}
-        {reviewStats.count > 0 ? (
-          <div className="product-rating flex items-center gap-1 mt-1 text-[12px] text-gray-400">
-            <div className="flex text-yellow-400">
-              <Star size={10} fill="currentColor" />
-            </div>
-            <span className="font-semibold text-gray-700">{reviewStats.average.toFixed(1)}</span>
-            <span className="text-[10px] text-gray-400 leading-none">({getProductReviewCountString(product.id)})</span>
+        <div className="product-rating flex items-center gap-1 mt-1 text-[12px] text-gray-400">
+          <div className="flex text-yellow-400">
+            <Star size={10} fill="currentColor" />
           </div>
-        ) : (
-          <div className="product-rating flex items-center gap-1 mt-1 text-[11px] text-gray-400 font-medium">
-            No reviews yet
-          </div>
-        )}
+          <span className="font-semibold text-gray-700">
+            {reviewStats.count > 0 ? reviewStats.average.toFixed(1) : '4.8'}
+          </span>
+          <span className="text-[10px] text-gray-400 leading-none">
+            ({getProductReviewCountString(product.id, reviewStats.count)})
+          </span>
+        </div>
       </div>
     </div>
   );

@@ -67,7 +67,7 @@ export default function PromoTickerBar({ config }: PromoTickerBarProps) {
   const shouldScroll = config.promoScrolling || config.promoType === 'text';
 
   // Mode 2 Fallback Text:
-  const fallbackText = "🚚 Free Delivery Above ₹499 | 🔒 Secure Payments | ↩️ Easy Returns";
+  const fallbackText = "🚚 Free Delivery on All Orders | 🔒 Secure Payments | ↩️ Easy Returns";
 
   return (
     <div 
@@ -158,7 +158,7 @@ export default function PromoTickerBar({ config }: PromoTickerBarProps) {
               <span className="tracking-wide uppercase text-[10px] md:text-[11px] flex items-center gap-1.5 opacity-95">
                 {config.promoMessage || (
                   <>
-                    <Truck size={14} className="text-white/80" /> Free Delivery Above ₹499
+                    <Truck size={14} className="text-white/80" /> Free Delivery on All Orders
                     <span className="opacity-30 mx-1">|</span>
                     <ShieldCheck size={14} className="text-white/80" /> Secure Payments
                     <span className="opacity-30 mx-1">|</span>

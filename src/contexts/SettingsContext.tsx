@@ -38,28 +38,31 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const { data } = await supabase.from('settings').select('*').limit(1);
-        if (data && data.length > 0) {
-          const raw = data[0];
-          // Strip sensitive credentials so they are never held in client React state
-          const { 
-            resendApiKey, 
-            smtpPass, 
-            razorpayKeySecret, 
-            oneSignalRestApiKey,
-            google_sheet_api_key,
-            ...safePublicSettings 
-          } = raw;
+        const res = await fetch('/api/public-settings');
+        if (res.ok) {
+          const publicData = await res.json();
+          if (publicData && typeof publicData === 'object') {
+            setSettings({
+              ...DEFAULT_CLIENT_SETTINGS,
+              ...publicData
+            });
+            return;
+          }
+        }
+      } catch {}
 
+      // Fallback: Check local storage or defaults
+      try {
+        const local = localStorage.getItem('ruby_public_settings');
+        if (local) {
           setSettings({
             ...DEFAULT_CLIENT_SETTINGS,
-            ...safePublicSettings
+            ...JSON.parse(local)
           });
         } else {
           setSettings(DEFAULT_CLIENT_SETTINGS);
         }
-      } catch (error: any) {
-        console.error("Error fetching settings from Supabase:", error);
+      } catch {
         setSettings(DEFAULT_CLIENT_SETTINGS);
       } finally {
         setLoading(false);

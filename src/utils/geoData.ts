@@ -108,6 +108,20 @@ export function getCountryFlag(countryNameOrCode?: string): string {
 
 export function resolveCityLocation(city?: string, country?: string, lat?: number, lng?: number): CityLocation {
   const normCity = (city || '').toLowerCase().trim();
+  const flag = getCountryFlag(country);
+
+  // If real latitude and longitude are already provided, honor them directly
+  if (lat && lng && lat !== 0 && lng !== 0) {
+    return {
+      city: city || (normCity ? normCity.charAt(0).toUpperCase() + normCity.slice(1) : 'Online Visitor'),
+      country: country || 'India',
+      countryCode: (country || 'IN').substring(0, 2).toUpperCase(),
+      flag,
+      lat,
+      lng
+    };
+  }
+
   if (normCity && CITY_COORDINATES[normCity]) {
     const found = CITY_COORDINATES[normCity];
     return {
@@ -306,3 +320,5 @@ export function geoTo2D(lon: number, lat: number, width = 1000, height = 500): {
   const y = ((90 - lat) / 180) * height;
   return { x: Math.max(0, Math.min(width, x)), y: Math.max(0, Math.min(height, y)) };
 }
+
+export { WORLD_COASTLINES, REAL_LAND_DOTS } from './worldGeoData';

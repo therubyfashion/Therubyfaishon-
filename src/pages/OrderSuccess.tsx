@@ -82,10 +82,13 @@ export default function OrderSuccess() {
       console.warn("Failed to play synthesized success audio chime:", e);
     }
 
-    const socket = io();
+    const socket = io(window.location.origin, {
+      transports: ['websocket', 'polling']
+    });
+    const sessId = localStorage.getItem('visitor_session_id') || sessionStorage.getItem('visitor_session_id') || 'unknown';
     socket.emit('checkpoint_reached', {
       type: 'purchased',
-      sessionId: sessionStorage.getItem('visitor_session_id') || 'unknown',
+      sessionId: sessId,
       timestamp: new Date().toISOString()
     });
     return () => {
@@ -215,7 +218,9 @@ export default function OrderSuccess() {
           >
             <h1 className="text-4xl sm:text-5xl font-serif italic text-[#1A2C54]">Order Placed!</h1>
             <p className="text-gray-400 text-sm sm:text-base leading-relaxed max-w-sm mx-auto font-medium">
-              Your order has been confirmed. You'll receive a confirmation email and SMS shortly. Sit back and relax — your fashion is on its way!
+              {orderData.email 
+                ? "Your order has been confirmed. You'll receive a confirmation email shortly. Sit back and relax — your fashion is on its way!" 
+                : "Your order has been confirmed. We will confirm your order on your phone number shortly. Sit back and relax — your fashion is on its way!"}
             </p>
           </motion.div>
         </div>
