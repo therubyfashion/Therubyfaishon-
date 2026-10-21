@@ -4283,7 +4283,7 @@ async function startServer() {
 
           if (existingOrder && existingOrder.cod_verified) {
             const customerName = existingOrder.shipping_full_name || existingOrder.customerName || 'Customer';
-            return res.json({ success: false, reason: 'already_verified', orderNumber: existingOrder.order_number, customerName });
+            return res.json({ success: false, reason: 'already_verified', orderNumber: existingOrder.order_number, customerName, customerEmail: existingOrder.customer_email || '' });
           }
         }
         return res.json({ success: false, reason: 'not_found' });
@@ -4293,7 +4293,7 @@ async function startServer() {
       const customerName = order.shipping_full_name || order.customer_email?.split('@')[0] || 'Customer';
 
       if (order.cod_verified) {
-        return res.json({ success: false, reason: 'already_verified', orderNumber, customerName });
+        return res.json({ success: false, reason: 'already_verified', orderNumber, customerName, customerEmail: order.customer_email || '' });
       }
 
       const expiresAt = order.cod_verification_expires_at ? new Date(order.cod_verification_expires_at).getTime() : 0;
@@ -4356,7 +4356,7 @@ async function startServer() {
         console.warn("Failed to insert admin notification row:", notifErr.message);
       }
 
-      return res.json({ success: true, orderNumber, customerName });
+      return res.json({ success: true, orderNumber, customerName, customerEmail: order.customer_email || '' });
     } catch (err: any) {
       console.error("GET /api/verify-cod error:", err.message);
       return res.status(500).json({ error: err.message });
@@ -4522,6 +4522,7 @@ async function startServer() {
           },
           paymentMethod: orderRow.payment_method || '',
           codToken: codToken,
+          trackingUrl: `https://therubyfashion.shop/track/${encodeURIComponent(String(orderRow.order_number || cleanOidStr).replace(/^#/, ''))}?email=${encodeURIComponent(validOrderEmail)}`,
           baseHost: requestBaseHost
         };
 

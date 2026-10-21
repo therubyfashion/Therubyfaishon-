@@ -4,6 +4,7 @@ import App from './App.tsx';
 import './index.css';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 import { Capacitor } from '@capacitor/core';
+import { setupApiAuthInterceptor } from './lib/api';
 
 // Suppress recharts legacy defaultProps warnings in React 18+
 // This is a known issue in the library that doesn't affect functionality
@@ -60,6 +61,8 @@ if (typeof window !== 'undefined') {
     };
   }
 }
+
+setupApiAuthInterceptor();
 
 createRoot(document.getElementById('root')!).render(
   <App />

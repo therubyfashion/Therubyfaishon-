@@ -58,7 +58,12 @@ export function setupApiAuthInterceptor() {
       urlStr = (input as Request).url;
     }
 
-    if (urlStr && urlStr.includes('/api/')) {
+    const isOwnApi = 
+      urlStr.startsWith('/api/') || 
+      urlStr.startsWith(window.location.origin + '/api/') || 
+      urlStr.startsWith('https://therubyfashion.shop/api/');
+
+    if (isOwnApi) {
       const authHeaders = await getAuthHeader();
       const headers = new Headers(init?.headers || {});
 

@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { CheckCircle, AlertTriangle, XCircle, ShoppingBag, ArrowRight, Clock, Mail } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { useAuth } from '../contexts/AuthContext';
 
 type VerificationState = 'loading' | 'success' | 'already_verified' | 'expired' | 'not_found' | 'error';
 
 export const VerifyCOD: React.FC = () => {
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') || '';
   const orderParam = searchParams.get('order') || '';
@@ -14,7 +16,21 @@ export const VerifyCOD: React.FC = () => {
   const [state, setState] = useState<VerificationState>('loading');
   const [orderNumber, setOrderNumber] = useState<string>(orderParam);
   const [customerName, setCustomerName] = useState<string>('');
+  const [customerEmail, setCustomerEmail] = useState<string>(searchParams.get('email') || '');
   const [countdown, setCountdown] = useState<number>(5);
+
+  const handleOrderNavigation = () => {
+    if (user) {
+      navigate('/my-orders');
+      return;
+    }
+    const cleanNum = orderNumber ? String(orderNumber).replace(/^#/, '').trim() : '';
+    if (cleanNum && customerEmail) {
+      navigate(`/track/${cleanNum}?email=${encodeURIComponent(customerEmail)}`);
+    } else {
+      navigate('/');
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -33,6 +49,7 @@ export const VerifyCOD: React.FC = () => {
 
         if (data.orderNumber) setOrderNumber(data.orderNumber);
         if (data.customerName) setCustomerName(data.customerName);
+        if (data.customerEmail) setCustomerEmail(data.customerEmail);
 
         if (data.success) {
           setState('success');
@@ -79,7 +96,7 @@ export const VerifyCOD: React.FC = () => {
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          navigate('/my-orders');
+          handleOrderNavigation();
           return 0;
         }
         return prev - 1;
@@ -87,7 +104,7 @@ export const VerifyCOD: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [state, navigate]);
+  }, [state, user, orderNumber, customerEmail]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 sm:p-6 font-sans">
@@ -135,7 +152,7 @@ export const VerifyCOD: React.FC = () => {
 
             <div className="space-y-3 pt-2">
               <button
-                onClick={() => navigate('/my-orders')}
+                onClick={handleOrderNavigation}
                 className="w-full py-3.5 px-6 bg-[#A11B35] hover:bg-[#801429] text-white font-bold rounded-xl shadow-lg shadow-[#A11B35]/20 transition-all flex items-center justify-center space-x-2 group cursor-pointer"
               >
                 <span>Track My Order</span>
@@ -170,7 +187,7 @@ export const VerifyCOD: React.FC = () => {
 
             <div className="pt-2">
               <button
-                onClick={() => navigate('/my-orders')}
+                onClick={handleOrderNavigation}
                 className="w-full py-3.5 px-6 bg-[#A11B35] hover:bg-[#801429] text-white font-bold rounded-xl shadow-lg shadow-[#A11B35]/20 transition-all flex items-center justify-center space-x-2 group cursor-pointer"
               >
                 <span>Track My Order</span>

@@ -1148,7 +1148,7 @@ export default function ProductDetail() {
               </div>
               <div>
                 <p className="text-[14px] font-black text-[#1A2C54] uppercase tracking-tight">Express Delivery</p>
-                <p className="text-[12px] text-gray-400 font-medium">Free on orders above ₹999</p>
+                <p className="text-[12px] text-gray-400 font-medium">Free on all orders</p>
               </div>
             </div>
 
