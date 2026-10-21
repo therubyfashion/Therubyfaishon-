@@ -5352,6 +5352,42 @@ async function startServer() {
     }
   });
 
+  // User notifications query endpoint (resilient backend proxy)
+  app.get("/api/notifications", async (req, res) => {
+    try {
+      const supabase = getSupabaseAdmin();
+      if (!supabase) {
+        return res.json({ success: true, notifications: [] });
+      }
+
+      const userId = req.query.userId ? String(req.query.userId).trim() : null;
+      const isUuid = userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+
+      let query = supabase
+        .from('notifications')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (isUuid) {
+        query = query.or(`user_id.eq.${userId},user_id.is.null`);
+      } else {
+        query = query.is('user_id', null);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.warn("GET /api/notifications query notice:", error.message);
+        return res.json({ success: true, notifications: [] });
+      }
+
+      return res.json({ success: true, notifications: data || [] });
+    } catch (err: any) {
+      console.warn("GET /api/notifications error:", err.message);
+      return res.json({ success: true, notifications: [] });
+    }
+  });
+
   // Track notification delivered status
   app.post("/api/notifications/track-delivered", async (req, res) => {
     const { notificationId } = req.body;

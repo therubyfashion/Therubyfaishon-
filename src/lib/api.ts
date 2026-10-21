@@ -48,7 +48,7 @@ export function setupApiAuthInterceptor() {
 
   const originalWindowFetch = window.fetch.bind(window);
 
-  window.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
+  const customFetch = async function (input: RequestInfo | URL, init?: RequestInit) {
     let urlStr = '';
     if (typeof input === 'string') {
       urlStr = input;
@@ -79,4 +79,30 @@ export function setupApiAuthInterceptor() {
 
     return originalWindowFetch(input, init);
   };
+
+  try {
+    Object.defineProperty(window, 'fetch', {
+      value: customFetch,
+      writable: true,
+      configurable: true,
+      enumerable: true
+    });
+  } catch {
+    try {
+      (window as any).fetch = customFetch;
+    } catch {
+      try {
+        const proto = Object.getPrototypeOf(window);
+        if (proto) {
+          Object.defineProperty(proto, 'fetch', {
+            value: customFetch,
+            writable: true,
+            configurable: true
+          });
+        }
+      } catch (err) {
+        console.warn("Notice: Could not patch window.fetch property:", err);
+      }
+    }
+  }
 }

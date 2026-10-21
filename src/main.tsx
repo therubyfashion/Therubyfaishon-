@@ -35,30 +35,32 @@ if (Capacitor.isNativePlatform()) {
 
 // Global fetch interceptor to support relative /api paths on native Capacitor platforms
 if (typeof window !== 'undefined') {
-  const originalFetch = window.fetch;
   const isNative = Capacitor.isNativePlatform() || 
     window.location.origin.startsWith('capacitor://') || 
     window.location.origin.startsWith('ionic://');
 
-  try {
-    Object.defineProperty(window, 'fetch', {
-      value: function (input: RequestInfo | URL, init?: RequestInit) {
-        if (typeof input === 'string' && input.startsWith('/api/') && isNative) {
-          input = `https://therubyfashion.shop${input}`;
-        }
-        return originalFetch.call(this, input, init);
-      },
-      writable: true,
-      configurable: true,
-      enumerable: true
-    });
-  } catch {
-    (window as any).fetch = function (input: RequestInfo | URL, init?: RequestInit) {
-      if (typeof input === 'string' && input.startsWith('/api/') && isNative) {
+  if (isNative) {
+    const originalFetch = window.fetch.bind(window);
+    const nativeFetchWrapper = function (input: RequestInfo | URL, init?: RequestInit) {
+      if (typeof input === 'string' && input.startsWith('/api/')) {
         input = `https://therubyfashion.shop${input}`;
       }
-      return originalFetch.call(this, input, init);
+      return originalFetch(input, init);
     };
+    try {
+      Object.defineProperty(window, 'fetch', {
+        value: nativeFetchWrapper,
+        writable: true,
+        configurable: true,
+        enumerable: true
+      });
+    } catch {
+      try {
+        (window as any).fetch = nativeFetchWrapper;
+      } catch (e) {
+        console.warn("Could not set native fetch wrapper:", e);
+      }
+    }
   }
 }
 

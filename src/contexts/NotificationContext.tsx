@@ -51,73 +51,101 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     const targetUserId = user.id || user.uid;
     const isUserAdmin = (user as any)?.role === 'admin';
+    const isUuid = typeof targetUserId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUserId);
+
+    let rawData: any[] | null = null;
 
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('notifications')
         .select('*')
-        .or(`user_id.eq.${targetUserId},user_id.is.null`)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error("Error fetching notifications from Supabase:", error.message);
-      } else if (data) {
-        // Apply strict 4-rule audit filtering:
-        const filtered = data.filter(row => {
-          const title = row.title || '';
-          const body = row.body || row.message || '';
-          const type = row.type || 'order';
+      if (isUuid) {
+        query = query.or(`user_id.eq.${targetUserId},user_id.is.null`);
+      } else {
+        query = query.is('user_id', null);
+      }
 
-          // Rule 1: Exclude OTP codes or verification codes
-          if (isOtpNotification(title, body)) return false;
+      const { data, error } = await query;
 
-          // Rule 4: Exclude raw system error / retry logs
-          if (isInternalErrorLog(title, body)) return false;
+      if (!error && data) {
+        rawData = data;
+      } else if (error) {
+        console.warn("Notice: Direct Supabase notifications query unavailable:", error.message);
+      }
+    } catch (sbErr: any) {
+      console.warn("Notice: Direct Supabase notifications fetch issue:", sbErr?.message || sbErr);
+    }
 
-          // Rule 2: Exclude admin-only alerts for non-admin users
-          if (!isUserAdmin && isAdminAlert(type, title, body)) {
-            return false;
+    // Resilient fallback: Query backend proxy if direct Supabase client request failed (e.g. adblocker, network glitch)
+    if (!rawData) {
+      try {
+        const res = await fetch(`/api/notifications?userId=${encodeURIComponent(isUuid ? targetUserId : '')}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (Array.isArray(json.notifications)) {
+            rawData = json.notifications;
           }
+        }
+      } catch (proxyErr: any) {
+        // Keep existing notifications gracefully without logging error
+      }
+    }
 
-          return true;
-        });
+    if (rawData) {
+      // Apply strict 4-rule audit filtering:
+      const filtered = rawData.filter(row => {
+        const title = row.title || '';
+        const body = row.body || row.message || '';
+        const type = row.type || 'order';
 
-        // Rule 3: Client-side deduplication by fingerprint & timestamp proximity
-        const seen = new Set<string>();
-        const mapped: Notification[] = [];
+        // Rule 1: Exclude OTP codes or verification codes
+        if (isOtpNotification(title, body)) return false;
 
-        for (const row of filtered) {
-          const title = row.title || '';
-          const link = row.link || '/notifications';
-          const rowUserId = row.user_id || row.userId || 'global';
-          // Fingerprint key
-          const dedupKey = `${rowUserId}:${title.trim()}:${link}`;
+        // Rule 4: Exclude raw system error / retry logs
+        if (isInternalErrorLog(title, body)) return false;
 
-          if (seen.has(dedupKey)) {
-            continue; // Skip duplicate row
-          }
-          seen.add(dedupKey);
-
-          mapped.push({
-            id: String(row.id),
-            userId: row.user_id || row.userId || undefined,
-            title: title,
-            body: row.body || row.message || '',
-            type: row.type || 'order',
-            iconType: row.icon_type || row.iconType || row.type || 'order',
-            isRead: Boolean(row.is_read ?? row.isRead ?? false),
-            createdAt: row.created_at || row.createdAt || new Date().toISOString(),
-            link: link
-          });
+        // Rule 2: Exclude admin-only alerts for non-admin users
+        if (!isUserAdmin && isAdminAlert(type, title, body)) {
+          return false;
         }
 
-        setNotifications(mapped);
+        return true;
+      });
+
+      // Rule 3: Client-side deduplication by fingerprint & timestamp proximity
+      const seen = new Set<string>();
+      const mapped: Notification[] = [];
+
+      for (const row of filtered) {
+        const title = row.title || '';
+        const link = row.link || '/notifications';
+        const rowUserId = row.user_id || row.userId || 'global';
+        // Fingerprint key
+        const dedupKey = `${rowUserId}:${title.trim()}:${link}`;
+
+        if (seen.has(dedupKey)) {
+          continue; // Skip duplicate row
+        }
+        seen.add(dedupKey);
+
+        mapped.push({
+          id: String(row.id),
+          userId: row.user_id || row.userId || undefined,
+          title: title,
+          body: row.body || row.message || '',
+          type: row.type || 'order',
+          iconType: row.icon_type || row.iconType || row.type || 'order',
+          isRead: Boolean(row.is_read ?? row.isRead ?? false),
+          createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+          link: link
+        });
       }
-    } catch (err: any) {
-      console.error("Failed to load notifications from Supabase:", err);
-    } finally {
-      setLoading(false);
+
+      setNotifications(mapped);
     }
+    setLoading(false);
   }, [user]);
 
   useEffect(() => {
@@ -137,10 +165,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       )
       .subscribe();
 
-    // Fallback polling every 8 seconds
+    // Fallback polling every 15 seconds
     const interval = setInterval(() => {
       fetchNotifications();
-    }, 8000);
+    }, 15000);
 
     return () => {
       supabase.removeChannel(channel);
@@ -158,22 +186,29 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         .update({ is_read: true })
         .eq('id', notificationId);
     } catch (error) {
-      console.error("Error marking notification as read:", error);
+      console.warn("Could not mark notification as read in Supabase:", error);
     }
   }, []);
 
   const markAllAsRead = useCallback(async () => {
     if (!user) return;
     const targetUserId = user.id || user.uid;
+    const isUuid = typeof targetUserId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUserId);
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
     try {
-      await supabase
+      let query = supabase
         .from('notifications')
         .update({ is_read: true })
-        .eq('is_read', false)
-        .or(`user_id.eq.${targetUserId},user_id.is.null`);
+        .eq('is_read', false);
+      
+      if (isUuid) {
+        query = query.or(`user_id.eq.${targetUserId},user_id.is.null`);
+      } else {
+        query = query.is('user_id', null);
+      }
+      await query;
     } catch (error) {
-      console.error("Error marking all as read:", error);
+      console.warn("Could not mark all notifications as read:", error);
     }
   }, [user]);
 
